@@ -12,6 +12,10 @@ const oauth2Client = new google.auth.OAuth2(
 
 // 1. Lấy URL để user login Google (cho mục đích ủy quyền Calendar)
 async function getGoogleAuthUrl(req, res) {
+  const feOrigin = req.headers.origin || process.env.FE_URL || 'http://localhost:5173';
+  const stateObj = { action: 'authorize', origin: feOrigin };
+  const stateBase64 = Buffer.from(JSON.stringify(stateObj)).toString('base64');
+
   const url = oauth2Client.generateAuthUrl({
     access_type: "offline",
     prompt: "consent",
@@ -21,13 +25,17 @@ async function getGoogleAuthUrl(req, res) {
         "https://www.googleapis.com/auth/userinfo.profile",
         "https://www.googleapis.com/auth/drive"
       ],
-    state: "authorize"
+    state: stateBase64
   });
   res.json({ url });
 };
 
 // Lấy URL cho mục đích Đăng nhập vào hệ thống
 async function getGoogleAuthLoginUrl(req, res) {
+  const feOrigin = req.headers.origin || process.env.FE_URL || 'http://localhost:5173';
+  const stateObj = { action: 'login', origin: feOrigin };
+  const stateBase64 = Buffer.from(JSON.stringify(stateObj)).toString('base64');
+
   const url = oauth2Client.generateAuthUrl({
     access_type: "offline",
     prompt: "consent",
@@ -35,7 +43,7 @@ async function getGoogleAuthLoginUrl(req, res) {
         "https://www.googleapis.com/auth/userinfo.email", 
         "https://www.googleapis.com/auth/userinfo.profile"
       ],
-    state: "login"
+    state: stateBase64
   });
   res.json({ url });
 };
@@ -45,6 +53,21 @@ const googleCallback = async (req, res) => {
   try {
     const { code, state } = req.query;
     
+    let action = state;
+    let feOrigin = process.env.FE_URL ? new URL(process.env.FE_URL).origin : 'http://localhost:5173';
+    
+    try {
+        const decodedState = JSON.parse(Buffer.from(state, 'base64').toString('utf-8'));
+        if (decodedState && decodedState.action) {
+            action = decodedState.action;
+            if (decodedState.origin) {
+                feOrigin = decodedState.origin;
+            }
+        }
+    } catch (e) {
+        // Fallback cho state cũ (plain text)
+    }
+
     const oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET,
@@ -57,12 +80,11 @@ const googleCallback = async (req, res) => {
     const oauth2 = google.oauth2({ auth: oauth2Client, version: "v2" });
     const { data: profile } = await oauth2.userinfo.get();
 
-    if (state === "login") {
+    if (action === "login") {
       // Logic đăng nhập
       const user = await User.findOne({ email: profile.email });
       if (!user) {
         // Tài khoản không tồn tại trong hệ thống
-        const feOrigin = process.env.FE_URL ? new URL(process.env.FE_URL).origin : 'http://localhost:5173';
         return res.redirect(`${feOrigin}/login?error=account_not_found`);
       }
       
@@ -84,7 +106,6 @@ const googleCallback = async (req, res) => {
         );
       }
 
-      const feOrigin = process.env.FE_URL ? new URL(process.env.FE_URL).origin : 'http://localhost:5173';
       return res.redirect(`${feOrigin}/login?token=${accessToken}&name=${encodeURIComponent(user.name)}`);
     } else {
       // Logic ủy quyền (Authorize) từ trang Profile
@@ -101,7 +122,6 @@ const googleCallback = async (req, res) => {
         { upsert: true, new: true } // Vẫn giữ nguyên logic cũ nếu muốn
       );
 
-      const feOrigin = process.env.FE_URL ? new URL(process.env.FE_URL).origin : 'http://localhost:5173';
       return res.redirect(`${feOrigin}/members`);
     }
   } catch (error) {
