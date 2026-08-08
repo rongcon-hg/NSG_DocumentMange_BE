@@ -18,12 +18,47 @@ exports.getDriveToken = async (req, res) => {
         });
 
         const token = await auth.getAccessToken();
-        const folderId = config.folderId || process.env.DRIVE_FOLDER_ID;
+        const rootFolderId = config.folderId || process.env.DRIVE_FOLDER_ID;
+
+        // Create Google Drive client
+        const drive = google.drive({ version: 'v3', auth });
+
+        // Get or Create Month Folder
+        const date = new Date();
+        const folderName = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+        
+        let monthFolderId = rootFolderId;
+        if (rootFolderId) {
+            const query = `name='${folderName}' and '${rootFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+            const response = await drive.files.list({
+                q: query,
+                fields: 'files(id, name)',
+                spaces: 'drive',
+                supportsAllDrives: true,
+                includeItemsFromAllDrives: true
+            });
+
+            if (response.data.files && response.data.files.length > 0) {
+                monthFolderId = response.data.files[0].id;
+            } else {
+                const folderMetadata = {
+                    name: folderName,
+                    mimeType: 'application/vnd.google-apps.folder',
+                    parents: [rootFolderId],
+                };
+                const createResponse = await drive.files.create({
+                    requestBody: folderMetadata,
+                    fields: 'id',
+                    supportsAllDrives: true
+                });
+                monthFolderId = createResponse.data.id;
+            }
+        }
 
         res.status(200).json({
             success: true,
             accessToken: token.token,
-            folderId: folderId
+            folderId: monthFolderId
         });
     } catch (error) {
         console.error("Lỗi khi lấy Drive Token:", error);
