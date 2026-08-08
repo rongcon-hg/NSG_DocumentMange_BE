@@ -65,6 +65,16 @@ const chatbotConfigRoutes = require('./src/routes/chatbotConfig.routes');
 const chatbotRoutes = require('./src/routes/chatbot.routes');
 const driveConfigRoutes = require('./src/routes/driveConfig');
 
+// Ensure DB connection is established before handling requests in Vercel Serverless
+app.use(async (req, res, next) => {
+    try {
+        await connection();
+        next();
+    } catch (error) {
+        res.status(500).json({ message: "Database connection failed", error: error.message });
+    }
+});
+
 app.use('/authen', authRoutes);
 app.use('/departments',departmentRoutes);
 app.use('/positions', positionRoutes);
