@@ -41,7 +41,8 @@ const corsOptions = {
       "http://localhost:5173", 
       "https://nsg-document-mange-fe.vercel.app",
       "https://nsg-document-mange-fe-azure.vercel.app",
-      "https://vanban.nsg.edu.vn"
+      "https://vanban.nsg.edu.vn",
+      "https://qlvb.nsgpc.edu.vn"
     ],
     methods: ["GET", "POST", "PUT", "DELETE","PATCH"],
     credentials: true, // Allow sending cookies
