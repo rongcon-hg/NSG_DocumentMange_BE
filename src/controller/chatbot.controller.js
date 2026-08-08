@@ -4,6 +4,37 @@ const Task = require("../models/task.model");
 const Document = require("../models/document.model");
 const User = require("../models/user.model");
 
+// Hàm tạo Regex để tìm kiếm tiếng Việt không dấu/có dấu
+const createVietnameseRegex = (term) => {
+  const chars = {
+    'a': '[aAàÀảẢãÃáÁạẠăĂằẰẳẲẵẴắẮặẶâÂầẦẩẨẫẪấẤậẬ]',
+    'e': '[eEèÈẻẺẽẼéÉẹẸêÊềỀểỂễỄếẾệỆ]',
+    'i': '[iIìÌỉỈĩĨíÍịỊ]',
+    'o': '[oOòÒỏỎõÕóÓọỌôÔồỒổỔỗỖốỐộỘơƠờỜởỞỡỠớỚợỢ]',
+    'u': '[uUùÙủỦũŨúÚụỤưƯừỪửỬữỮứỨựỰ]',
+    'y': '[yYỳỲỷỶỹỸýÝỵỴ]',
+    'd': '[dDđĐ]'
+  };
+  
+  // Loại bỏ dấu để đưa về ký tự latin cơ bản
+  let normalized = term.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase();
+  
+  let regexStr = '';
+  for (let char of normalized) {
+    if (chars[char]) {
+      regexStr += chars[char];
+    } else {
+      // Escape special regex chars just in case
+      if (/[.*+?^${}()|[\]\\]/.test(char)) {
+        regexStr += '\\' + char;
+      } else {
+        regexStr += char;
+      }
+    }
+  }
+  return regexStr;
+};
+
 const handleChat = async (req, res) => {
   try {
     const { message, isInit, history } = req.body;
@@ -75,30 +106,40 @@ const handleChat = async (req, res) => {
       functionDeclarations: [
         {
           name: "searchUserDocuments",
-          description: "Tìm kiếm văn bản đến, đi hoặc nội bộ của người dùng dựa trên từ khoá (như số hiệu, trích yếu, tên văn bản). Gọi hàm này khi người dùng hỏi về một văn bản cụ thể.",
+          description: "Tìm kiếm văn bản đến, đi hoặc nội bộ của người dùng. Gọi hàm này khi người dùng hỏi danh sách văn bản, hoặc văn bản chưa xem, văn bản khẩn, hoặc tìm văn bản theo từ khoá.",
           parameters: {
             type: SchemaType ? SchemaType.OBJECT : "object",
             properties: {
               keyword: {
                 type: SchemaType ? SchemaType.STRING : "string",
-                description: "Từ khoá chính cần tìm kiếm (CHỈ trích xuất các từ quan trọng nhất, sửa lỗi chính tả nếu có, BỎ các từ thừa như 'văn bản liên quan đến', 'là gì', 'tìm cho tôi'). Ví dụ: 'lái xe ô tô hạng B', '2588', 'báo cáo', 'quyết định'."
+                description: "Từ khoá tìm kiếm (trích yếu, số hiệu). KHÔNG điền các từ chỉ trạng thái (như 'chưa xem', 'khẩn') vào đây. Bỏ qua trường này nếu người dùng chỉ muốn liệt kê văn bản nói chung."
+              },
+              isRead: {
+                type: SchemaType ? SchemaType.BOOLEAN : "boolean",
+                description: "Truyền false nếu người dùng muốn tìm văn bản CHƯA ĐỌC/CHƯA XEM. Truyền true nếu tìm văn bản đã đọc. Bỏ qua nếu không quan tâm."
+              },
+              urgency: {
+                type: SchemaType ? SchemaType.STRING : "string",
+                description: "Mức độ khẩn. Nếu người dùng hỏi văn bản khẩn cấp, truyền 'high' hoặc 'immediately'. Bình thường truyền 'normal'. Bỏ qua nếu không quan tâm."
               }
-            },
-            required: ["keyword"]
+            }
           }
         },
         {
           name: "searchUserTasks",
-          description: "Tìm kiếm danh sách công việc của người dùng dựa trên từ khoá (như tên công việc, trạng thái khẩn, đang làm...).",
+          description: "Tìm kiếm danh sách công việc của người dùng.",
           parameters: {
             type: SchemaType ? SchemaType.OBJECT : "object",
             properties: {
               keyword: {
                 type: SchemaType ? SchemaType.STRING : "string",
-                description: "Từ khoá cần tìm kiếm (ví dụ: 'khẩn', 'họp', 'chưa làm')."
+                description: "Từ khoá tìm kiếm (tên, mô tả công việc). KHÔNG ĐIỀN các từ chỉ trạng thái (như 'cần xử lý', 'chưa làm', 'hoàn thành') vào đây. Để trống nếu không tìm từ khoá cụ thể."
+              },
+              status: {
+                type: SchemaType ? SchemaType.STRING : "string",
+                description: "Trạng thái công việc. Truyền 'PENDING' (nếu hỏi các việc đang cần xử lý, chưa làm, đang làm), 'DONE' (nếu hỏi đã hoàn thành). Bỏ qua nếu không quan tâm."
               }
-            },
-            required: ["keyword"]
+            }
           }
         }
       ]
@@ -140,58 +181,102 @@ Ví dụ: [Văn bản.pdf](https://drive.google.com/file/d/1abc.../view)`;
       
       try {
         if (call.name === "searchUserDocuments" && userId) {
-          const kw = call.args.keyword || "";
+          const args = call.args || {};
+          const kw = args.keyword || "";
           
-          const matchNum = kw.match(/\d+/);
-          const numToSearch = matchNum ? parseInt(matchNum[0], 10) : null;
-          
-          const orConditions = [
-            { docCode: { $regex: kw, $options: "i" } },
-            { shortDescription: { $regex: kw, $options: "i" } }
-          ];
-          
-          if (numToSearch) {
-            orConditions.push({ docNum: numToSearch });
+          let query = {
+             $or: [ { "assignedToUsers.userId": userId }, { sentBy: userId } ] 
+          };
+
+          if (kw) {
+            const matchNum = kw.match(/\d+/);
+            const numToSearch = matchNum ? parseInt(matchNum[0], 10) : null;
+            
+            // Tách từ khóa thành các từ đơn để tìm kiếm linh hoạt hơn (giống Google Search)
+            const terms = kw.split(/\s+/).filter(t => t.trim() !== "");
+            
+            const buildRegexArray = (field) => {
+              return { $and: terms.map(t => ({ [field]: { $regex: createVietnameseRegex(t), $options: "i" } })) };
+            };
+
+            const orConditions = [
+              buildRegexArray('docCode'),
+              buildRegexArray('shortDescription'),
+              buildRegexArray('principalIdea')
+            ];
+            
+            if (numToSearch) {
+              orConditions.push({ docNum: numToSearch });
+            }
+            query.$and = query.$and || [];
+            query.$and.push({ $or: orConditions });
           }
 
-          const docs = await Document.find({
-            $and: [
-              { $or: [ { "assignedToUsers.userId": userId }, { sentBy: userId } ] },
-              { $or: orConditions }
-            ]
-          }).sort({ createdAt: -1 }).limit(10);
+          if (args.isRead !== undefined) {
+             query.$and = query.$and || [];
+             query.$and.push({
+                 "assignedToUsers": { $elemMatch: { userId: userId, isRead: args.isRead } }
+             });
+          }
+
+          if (args.urgency) {
+              query.urgency = args.urgency;
+          }
+
+          const docs = await Document.find(query).sort({ createdAt: -1 }).limit(10);
           
           if (docs.length > 0) {
             functionResponseData = docs.map(d => ({
               soHieu: (d.docNum && d.docCode) ? `${d.docNum}/${d.docCode}` : (d.docCode || d.docNum || 'N/A'),
               trichYeu: d.shortDescription,
-              trangThai: d.assignedToUsers.find(u => u.userId.toString() === userId.toString())?.status || 'received',
+              trangThaiDoc: d.assignedToUsers.find(u => u.userId.toString() === userId.toString())?.isRead ? 'Đã xem' : 'Chưa xem',
               mucDoKhan: d.urgency,
               tepDinhKem: d.files?.map(f => ({ ten: f.fileName, link: `https://drive.google.com/file/d/${f.fileId}/view` })) || []
             }));
+          } else {
+             functionResponseData = { result: "Không tìm thấy văn bản nào." };
           }
         } else if (call.name === "searchUserTasks" && userId) {
-          const kw = call.args.keyword || "";
-          const tasks = await Task.find({
-            $and: [
-              { $or: [ { assignees: userId }, { collaborators: userId }, { createdBy: userId } ] },
-              { $or: [
-                { title: { $regex: kw, $options: "i" } },
-                { description: { $regex: kw, $options: "i" } },
-                { status: { $regex: kw, $options: "i" } },
-                { priority: { $regex: kw, $options: "i" } }
-              ] }
-            ]
-          }).sort({ createdAt: -1 }).limit(10);
+          const args = call.args || {};
+          const kw = args.keyword || "";
+          
+          let query = {
+            $or: [ { assignees: userId }, { collaborators: userId }, { createdBy: userId } ]
+          };
+
+          if (kw) {
+             const terms = kw.split(/\s+/).filter(t => t.trim() !== "");
+             const buildRegexArray = (field) => {
+               return { $and: terms.map(t => ({ [field]: { $regex: createVietnameseRegex(t), $options: "i" } })) };
+             };
+
+             query.$and = query.$and || [];
+             query.$and.push({
+                $or: [
+                  buildRegexArray('title'),
+                  buildRegexArray('description')
+                ]
+             });
+          }
+
+          if (args.status === 'PENDING') {
+             query.status = { $in: ['TODO', 'IN_PROGRESS'] };
+          } else if (args.status) {
+             query.status = args.status;
+          }
+
+          const tasks = await Task.find(query).sort({ createdAt: -1 }).limit(10);
           
           if (tasks.length > 0) {
             functionResponseData = tasks.map(t => ({
               tieuDe: t.title,
               trangThai: t.status,
               mucDo: t.priority,
-              hanChot: t.dueDate,
+              hanChot: t.endDate || t.dueDate,
               tepDinhKem: t.files?.map(f => ({ ten: f.fileName, link: `https://drive.google.com/file/d/${f.fileId}/view` })) || []
             }));
+          } else {
+             functionResponseData = { result: "Không tìm thấy công việc nào." };
           }
         }
         

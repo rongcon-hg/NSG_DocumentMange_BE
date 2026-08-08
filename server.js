@@ -1,6 +1,8 @@
 const express = require('express');
 require('dotenv').config();
 const path = require('path');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const app = express();
 const port = process.env.PORT || 8888;
 const hostname = process.env.HOST_NAME;
@@ -10,10 +12,22 @@ const mongoose = require('mongoose');
 const cookieParser = require("cookie-parser");  
 const cors = require("cors");
 
-app.use(express.json({ limit: '1000mb' }));
-app.use(express.urlencoded({ extended: true, limit: '1000mb' }));
+// Security Headers
+app.use(helmet());
 
-const { startTaskReminderCron } = require('./src/service/TaskCron.service');
+// Rate Limiting to prevent Brute-Force/DDoS
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 phút
+  max: 1500, // Giới hạn 1500 requests mỗi 15 phút trên Vercel Free
+  message: { success: false, message: "Quá nhiều yêu cầu từ IP này, vui lòng thử lại sau." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use(limiter);
+
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
 
 
 // Static file configuration
@@ -48,6 +62,7 @@ const googleRoutes = require('./src/routes/googleRouutes')
 const taskRoutes = require('./src/routes/taskRoutes')
 const chatbotConfigRoutes = require('./src/routes/chatbotConfig.routes');
 const chatbotRoutes = require('./src/routes/chatbot.routes');
+const driveConfigRoutes = require('./src/routes/driveConfig');
 
 app.use('/authen', authRoutes);
 app.use('/departments',departmentRoutes);
@@ -63,6 +78,11 @@ app.use('/google', googleRoutes);
 app.use('/tasks', taskRoutes);
 app.use('/chatbot-config', chatbotConfigRoutes);
 app.use('/chatbot', chatbotRoutes);
+app.use('/api/drive-config', driveConfigRoutes);
+
+// Cron endpoint for Vercel
+const cronRoutes = require('./src/routes/cronRoutes');
+app.use('/api/cron', cronRoutes);
 
 app.get("/test", (req, res) => {
   res.json({message: "Hello World! Backend is online successfully (28/04)."});
@@ -71,7 +91,7 @@ app.get("/test", (req, res) => {
 (async () => {
     try {
       await connection();
-      startTaskReminderCron();
+
       if (process.env.NODE_ENV !== 'production') {
         app.listen(port, () => {
           console.log(`Ứng dụng mẫu đang nghe trên cổng http://localhost:${port}`);

@@ -14,9 +14,12 @@ async function getUserStatistics(req, res) {
       userId
     } = req.query;
 
-    const users = await User.find(
-      userId ? { _id: new mongoose.Types.ObjectId(String(userId)) } : {}
-    ).lean();
+    const query = { role: { $in: ['manager', 'staff'] } };
+    if (userId) {
+      query._id = new mongoose.Types.ObjectId(String(userId));
+    }
+
+    const users = await User.find(query).lean();
 
     if (users.length === 0) {
       return res.status(404).json({ message: "No users found matching the query." });

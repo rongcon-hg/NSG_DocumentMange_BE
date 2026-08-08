@@ -122,12 +122,13 @@ async function exportDocumentsToExcel(req, res) {
       }
     }
 
+    const docIds = [...new Set(docUserPairs.map(p => p.docId))];
+    const userIdsForReply = [...new Set(docUserPairs.map(p => p.userId))];
+
     const replies = await Reply.find(
       {
-        $or: docUserPairs.map((pair) => ({
-          repliedDoc: pair.docId,
-          replyBy: pair.userId,
-        })),
+        repliedDoc: { $in: docIds },
+        replyBy: { $in: userIdsForReply },
       },
       "repliedDoc replyBy replyAt"
     ).lean();
@@ -277,9 +278,12 @@ async function exportAllUserStatistics(req, res) {
   try {
     const { year, docVariantId, fromDate, toDate, userId } = req.query;
 
-    const users = await User.find(
-      userId ? { _id: new mongoose.Types.ObjectId(userId) } : {}
-    ).lean();
+    const query = { role: { $in: ['manager', 'staff'] } };
+    if (userId) {
+      query._id = new mongoose.Types.ObjectId(String(userId));
+    }
+
+    const users = await User.find(query).lean();
 
     if (!users.length) {
       return res.status(404).json({ message: "Không tìm thấy người dùng." });

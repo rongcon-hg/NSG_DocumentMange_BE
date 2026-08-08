@@ -1,10 +1,7 @@
-const cron = require("node-cron");
 const Task = require("../models/task.model");
 const { sendTaskReminderEmail } = require("./NodeMailer.service/email");
 
-const startTaskReminderCron = () => {
-    // Chạy vào 08:00 sáng mỗi ngày
-    cron.schedule("0 8 * * *", async () => {
+const executeTaskReminders = async () => {
         try {
             console.log("Running daily task reminder cron job...");
             
@@ -59,10 +56,6 @@ const startTaskReminderCron = () => {
         } catch (error) {
             console.error("Error running task reminder cron:", error);
         }
-    }, {
-        scheduled: true,
-        timezone: "Asia/Ho_Chi_Minh"
-    });
-};
+    };
 
-module.exports = { startTaskReminderCron };
+module.exports = { executeTaskReminders };
