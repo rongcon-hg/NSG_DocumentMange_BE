@@ -6,27 +6,29 @@ const mongoose = require("mongoose");
 const dotenv = require("dotenv");
 dotenv.config();
 
-// Google Drive Authentication
+const DriveConfig = require('../models/driveConfig.model');
+
+// Lấy Folder ID từ DB, nếu không có lấy từ .env
+async function getDriveFolderId() {
+    const config = await DriveConfig.findOne();
+    if (config && config.folderId) return config.folderId;
+    return process.env.DRIVE_FOLDER_ID;
+}
+
+// Google Drive Authentication using Service Account
 async function authorize() {
-    const adminEmail = process.env.GOOGLE_ADMIN_EMAIL || 'qlvb@nsgpc.edu.vn';
-    const user = await User.findOne({ email: adminEmail, 'google.refreshToken': { $ne: null } });
-    
-    if (!user) {
-      throw new Error(`Admin account (${adminEmail}) has not authorized Google Drive.`);
+    const config = await DriveConfig.findOne();
+    if (!config || !config.clientEmail || !config.privateKey) {
+      throw new Error(`Chưa cấu hình Service Account cho Google Drive. Vui lòng vào Cấu hình Google Drive để thiết lập.`);
     }
 
-    const oauth2Client = new google.auth.OAuth2(
-        process.env.GOOGLE_CLIENT_ID,
-        process.env.GOOGLE_CLIENT_SECRET,
-        process.env.GOOGLE_REDIRECT_URI
-    );
-
-    oauth2Client.setCredentials({
-        access_token: user.google.accessToken,
-        refresh_token: user.google.refreshToken,
+    const auth = new google.auth.JWT({
+        email: config.clientEmail,
+        key: config.privateKey.replace(/\\n/g, '\n'),
+        scopes: ['https://www.googleapis.com/auth/drive'],
     });
     
-    return oauth2Client;
+    return auth;
 }
 
 // Helper function to sanitize file names
@@ -57,17 +59,19 @@ function sanitizeFileName(str) {
   return str;
 }
 
-// Helper function to get or create a folder like "YYYY-MM"
 async function getOrCreateMonthFolder(drive) {
   const date = new Date();
   const folderName = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-  const parentId = process.env.DRIVE_FOLDER_ID;
+  const parentId = await getDriveFolderId();
+  if (!parentId) throw new Error("Thư mục lưu trữ (Folder ID) chưa được cấu hình.");
 
   const query = `name='${folderName}' and '${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
   const response = await drive.files.list({
     q: query,
     fields: 'files(id, name)',
     spaces: 'drive',
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true
   });
 
   if (response.data.files && response.data.files.length > 0) {
@@ -81,8 +85,9 @@ async function getOrCreateMonthFolder(drive) {
   };
 
   const createResponse = await drive.files.create({
-    resource: folderMetadata,
+    requestBody: folderMetadata,
     fields: 'id',
+    supportsAllDrives: true
   });
 
   return createResponse.data.id;
@@ -122,9 +127,10 @@ const createTask = async (req, res) => {
                 };
 
                 const response = await drive.files.create({
-                    resource: fileMetadata,
+                    requestBody: fileMetadata,
                     media: media,
                     fields: "id, name, mimeType, size",
+                    supportsAllDrives: true
                 });
 
                 uploadedFiles.push({
@@ -257,9 +263,10 @@ const updateTask = async (req, res) => {
                 };
 
                 const response = await drive.files.create({
-                    resource: fileMetadata,
+                    requestBody: fileMetadata,
                     media: media,
                     fields: "id, name, mimeType, size",
+                    supportsAllDrives: true
                 });
 
                 updatedFiles.push({
