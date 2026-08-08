@@ -64,6 +64,7 @@ const taskRoutes = require('./src/routes/taskRoutes')
 const chatbotConfigRoutes = require('./src/routes/chatbotConfig.routes');
 const chatbotRoutes = require('./src/routes/chatbot.routes');
 const driveConfigRoutes = require('./src/routes/driveConfig');
+const driveRoutes = require('./src/routes/driveRoutes');
 
 // Ensure DB connection is established before handling requests in Vercel Serverless
 app.use(async (req, res, next) => {
@@ -90,6 +91,7 @@ app.use('/tasks', taskRoutes);
 app.use('/chatbot-config', chatbotConfigRoutes);
 app.use('/chatbot', chatbotRoutes);
 app.use('/api/drive-config', driveConfigRoutes);
+app.use('/api/drive', driveRoutes);
 
 // Cron endpoint for Vercel
 const cronRoutes = require('./src/routes/cronRoutes');

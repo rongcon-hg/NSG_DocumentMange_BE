@@ -186,6 +186,25 @@ async function uploadToDrive(req, res) {
         console.error("Invalid format for existingFiles in uploadToDrive", error);
       }
     }
+
+    if (req.body.uploadedFiles) {
+      try {
+        const parsedUploadedFiles = JSON.parse(req.body.uploadedFiles);
+        if (Array.isArray(parsedUploadedFiles)) {
+          uploadedFiles.push(...parsedUploadedFiles.map(file => ({
+            fileId: file.fileId,
+            fileName: file.fileName,
+            mimeType: file.mimeType || '',
+            size: file.size || '',
+            uploadedByName: "Hệ thống",
+            uploadDate: new Date()
+          })));
+        }
+      } catch (error) {
+        console.error("Invalid format for uploadedFiles in uploadToDrive", error);
+      }
+    }
+
     if (req.files && req.files.length > 0) {
       const monthFolderId = await getOrCreateMonthFolder(drive);
 

@@ -110,6 +110,13 @@ const createTask = async (req, res) => {
         const collaborators = parseJSON(req.body.collaborators);
 
         let uploadedFiles = [];
+        if (req.body.uploadedFiles) {
+            const parsedUploadedFiles = parseJSON(req.body.uploadedFiles);
+            if (Array.isArray(parsedUploadedFiles)) {
+                uploadedFiles = [...parsedUploadedFiles];
+            }
+        }
+
         if (req.files && req.files.length > 0) {
             const auth = await authorize();
             const drive = google.drive({ version: "v3", auth });
@@ -242,8 +249,14 @@ const updateTask = async (req, res) => {
         let updatedFiles = existingTask.files || [];
         if (req.body.existingFiles) {
             const parsedExistingFiles = parseJSON(req.body.existingFiles);
-            // Not deleting from drive for simplicity right now, just updating DB reference
             updatedFiles = parsedExistingFiles;
+        }
+
+        if (req.body.uploadedFiles) {
+            const parsedUploadedFiles = parseJSON(req.body.uploadedFiles);
+            if (Array.isArray(parsedUploadedFiles)) {
+                updatedFiles = [...updatedFiles, ...parsedUploadedFiles];
+            }
         }
 
         if (req.files && req.files.length > 0) {
