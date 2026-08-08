@@ -246,11 +246,18 @@ const updateReplyDocStatus = async (req, res) => {
 
   const getAllRepliedDocs = async (req, res) => {
     try {
-        
+        const { page = 1, limit = 10 } = req.query;
+        const skip = (page - 1) * parseInt(limit);
+        const parsedLimit = parseInt(limit);
+
         const docs = await RepliedDoc.find()
             .sort({ replyAt: -1 })
+            .skip(skip)
+            .limit(parsedLimit);
+
+        const total = await RepliedDoc.countDocuments();
             
-        res.status(200).json(docs);
+        res.status(200).json({ data: docs, total });
     } catch (error) {
         console.error("Error in getAllRepliedDocs: ", error);
         res.status(500).json({ message: "Error in getAllRepliedDocs", error });
