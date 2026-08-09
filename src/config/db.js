@@ -27,7 +27,7 @@ const connectDB = async () => {
   } catch (error) {
     cached.promise = null;
     console.log("DB Connection error:", error);
-    process.exit(1);
+    throw error;
   }
   
   return cached.conn;

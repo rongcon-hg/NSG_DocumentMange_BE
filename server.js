@@ -40,9 +40,6 @@ const corsOptions = {
     origin: [
       "http://localhost:5173", 
       "https://nsg-document-mange-fe.vercel.app",
-      "https://nsg-document-mange-fe-azure.vercel.app",
-      "https://nsg-document-mange-fe-three.vercel.app",
-      "https://vanban.nsg.edu.vn",
       "https://qlvb.nsgpc.edu.vn",
       "https://qlvb.namsaigon.edu.vn"
     ],
