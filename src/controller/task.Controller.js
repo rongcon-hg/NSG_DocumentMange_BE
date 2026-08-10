@@ -181,8 +181,10 @@ const createTask = async (req, res) => {
             );
             
             const { sendTaskNotificationEmail } = require('../service/NodeMailer.service/email');
+            const { syncTaskToGoogleCalendar } = require('../service/Notification.service');
             if (uniqueUsers.length > 0) {
                 sendTaskNotificationEmail(uniqueUsers, populatedTask, 'create');
+                syncTaskToGoogleCalendar(populatedTask, uniqueUsers);
             }
         } catch (emailErr) {
             console.error("Lỗi gửi email tạo task:", emailErr);
