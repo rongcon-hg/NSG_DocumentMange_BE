@@ -19,145 +19,118 @@ async function getUserStatistics(req, res) {
       query._id = new mongoose.Types.ObjectId(String(userId));
     }
 
-    const users = await User.find(query).lean();
+    const users = await User.find(query).select('name _id').lean();
 
     if (users.length === 0) {
       return res.status(404).json({ message: "No users found matching the query." });
     }
 
+    // --- Xây dựng Object Map để tra cứu tốc độ O(1) ---
+    const userStatsMap = {};
+    users.forEach(u => {
+      userStatsMap[u._id.toString()] = {
+        userId: u._id,
+        userName: u.name,
+        totalReceived: 0,
+        totalSent: 0,
+        totalUnread: 0,
+        onTimeCount: 0,
+        soonCount: 0,
+        lateCount: 0,
+        pendingCount: 0,
+        unhandledCount: 0,
+        totalReplied: 0
+      };
+    });
+
     // --- build match cho Document ---
     let docMatch = {};
     if (docVariantId) docMatch.docVariant = new mongoose.Types.ObjectId(docVariantId);
-
-    const createAtExpr = { $dateToString: { format: "%m-%d", date: "$createAt" } };
-    let docExpr = [];
-
-    if (year) {
-      docExpr.push({ $eq: [{ $year: "$createAt" }, parseInt(year)] });
+    
+    // Nếu có userId, chỉ lọc những văn bản mà user đó có liên quan (tăng tốc độ DB query)
+    if (userId) {
+      docMatch['assignedToUsers.userId'] = new mongoose.Types.ObjectId(String(userId));
     }
 
+    // Lọc theo ngày
+    let dateFilter = {};
     if (fromDate || toDate) {
-      const fromMD = fromDate ? new Date(fromDate).toISOString().slice(5, 10) : null;
-      const toMD = toDate ? new Date(toDate).toISOString().slice(5, 10) : null;
-
-      if (fromMD && toMD) {
-        docExpr.push({ $and: [
-          { $gte: [createAtExpr, fromMD] },
-          { $lte: [createAtExpr, toMD] }
-        ] });
-      } else if (fromMD) {
-        docExpr.push({ $gte: [createAtExpr, fromMD] });
-      } else if (toMD) {
-        docExpr.push({ $lte: [createAtExpr, toMD] });
+      if (fromDate) dateFilter.$gte = new Date(fromDate);
+      if (toDate) {
+        // Tới cuối ngày của toDate
+        const endDate = new Date(toDate);
+        endDate.setUTCHours(23, 59, 59, 999);
+        dateFilter.$lte = endDate;
       }
+    } else if (year) {
+      dateFilter.$gte = new Date(`${year}-01-01T00:00:00.000Z`);
+      dateFilter.$lte = new Date(`${year}-12-31T23:59:59.999Z`);
     }
 
-    if (docExpr.length > 0) {
-      docMatch.$expr = docExpr.length === 1 ? docExpr[0] : { $and: docExpr };
+    if (Object.keys(dateFilter).length > 0) {
+      docMatch.createAt = dateFilter;
     }
 
-    const documents = await Document.find(docMatch).lean();
+    // Tối ưu RAM: Chỉ lấy các trường cần thiết
+    const documents = await Document.find(docMatch)
+      .select('assignedToUsers docType deadlineDay')
+      .lean();
 
-    // --- build match cho Reply ---
-    let replyMatch = { replyBy: { $ne: null } };
-    const replyAtExpr = { $dateToString: { format: "%m-%d", date: "$replyAt" } };
-    let replyExpr = [];
+    // --- Tính toán thống kê trên RAM (O(N)) thay vì vòng lặp lồng nhau O(N*M) ---
+    const now = new Date();
+    now.setUTCHours(0, 0, 0, 0);
 
-    if (year) {
-      replyExpr.push({ $eq: [{ $year: "$replyAt" }, parseInt(year)] });
-    }
-
-    if (fromDate || toDate) {
-      const fromMD = fromDate ? new Date(fromDate).toISOString().slice(5, 10) : null;
-      const toMD = toDate ? new Date(toDate).toISOString().slice(5, 10) : null;
-
-      if (fromMD && toMD) {
-        replyExpr.push({ $and: [
-          { $gte: [replyAtExpr, fromMD] },
-          { $lte: [replyAtExpr, toMD] }
-        ] });
-      } else if (fromMD) {
-        replyExpr.push({ $gte: [replyAtExpr, fromMD] });
-      } else if (toMD) {
-        replyExpr.push({ $lte: [replyAtExpr, toMD] });
-      }
-    }
-
-    if (replyExpr.length > 0) {
-      replyMatch.$expr = replyExpr.length === 1 ? replyExpr[0] : { $and: replyExpr };
-    }
-
-    const replies = await Reply.find(replyMatch, 'replyBy replyAt').lean();
-
-    const replyCountMap = {};
-    replies.forEach(r => {
-      const userIdStr = r.replyBy.toString();
-      replyCountMap[userIdStr] = (replyCountMap[userIdStr] || 0) + 1;
-    });
-
-    // --- build kết quả ---
-    const result = [];
-
-    for (const user of users) {
-      const userIdStr = user._id.toString();
-
-      let totalReceived = 0;
-      let totalSent = 0;
-      let totalUnread = 0;
-      let onTimeCount = 0;
-      let soonCount = 0;
-      let lateCount = 0;
-      let pendingCount = 0;
-      let unhandledCount = 0;
-
-      for (const doc of documents) {
-        for (const assigned of doc.assignedToUsers || []) {
-          if (assigned.userId.toString() !== userIdStr) continue;
-
-          if (doc.docType === 'received') totalReceived++;
-          if (doc.docType === 'sent') totalSent++;
-          if (assigned.isRead === false) totalUnread++;
-
-          if (assigned.onTime === 'onTime') onTimeCount++;
-          if (assigned.onTime === 'soon') soonCount++;
-          if (assigned.onTime === 'late') lateCount++;
-          if (assigned.onTime === "pending") {
-            let isOverdue = false;
-
-            if (doc.deadlineDay) {
-              const deadline = new Date(doc.deadlineDay);
-              const now = new Date();
-
-              deadline.setUTCHours(0, 0, 0, 0);
-              now.setUTCHours(0, 0, 0, 0);
-
-              if (deadline < now) {
-                unhandledCount++;
-                isOverdue = true;
-              }
-            }
-
-            if (!isOverdue) {
-              pendingCount++;
-            }
-          }
+    for (const doc of documents) {
+      let isOverdue = false;
+      if (doc.deadlineDay) {
+        const deadline = new Date(doc.deadlineDay);
+        deadline.setUTCHours(0, 0, 0, 0);
+        if (deadline < now) {
+          isOverdue = true;
         }
       }
 
-      result.push({
-        userId: user._id,
-        userName: user.name,
-        totalReceived,
-        totalSent,
-        totalUnread,
-        onTimeCount,
-        soonCount,
-        lateCount,
-        pendingCount,
-        unhandledCount,
-        totalReplied: replyCountMap[userIdStr] || 0
-      });
+      for (const assigned of doc.assignedToUsers || []) {
+        const userIdStr = assigned.userId.toString();
+        const stat = userStatsMap[userIdStr];
+        if (!stat) continue; // Bỏ qua nếu user không nằm trong query hiện tại
+
+        if (doc.docType === 'received') stat.totalReceived++;
+        if (doc.docType === 'sent') stat.totalSent++;
+        if (assigned.isRead === false) stat.totalUnread++;
+
+        if (assigned.onTime === 'onTime') stat.onTimeCount++;
+        else if (assigned.onTime === 'soon') stat.soonCount++;
+        else if (assigned.onTime === 'late') stat.lateCount++;
+        else if (assigned.onTime === 'pending') {
+          if (isOverdue) stat.unhandledCount++;
+          else stat.pendingCount++;
+        }
+      }
     }
+
+    // --- build match cho Reply ---
+    let replyMatch = { replyBy: { $ne: null } };
+    if (userId) {
+      replyMatch.replyBy = new mongoose.Types.ObjectId(String(userId));
+    }
+    
+    if (Object.keys(dateFilter).length > 0) {
+      replyMatch.replyAt = dateFilter;
+    }
+
+    const replies = await Reply.find(replyMatch).select('replyBy').lean();
+
+    for (const r of replies) {
+      const userIdStr = r.replyBy.toString();
+      const stat = userStatsMap[userIdStr];
+      if (stat) {
+        stat.totalReplied++;
+      }
+    }
+
+    // --- build kết quả ---
+    const result = users.map(u => userStatsMap[u._id.toString()]);
 
     return res.json(result);
 
@@ -166,7 +139,5 @@ async function getUserStatistics(req, res) {
     return res.status(500).json({ message: "Không thể thống kê tài liệu. Vui lòng thử lại sau." });
   }
 }
-
-
 
 module.exports = { getUserStatistics };
