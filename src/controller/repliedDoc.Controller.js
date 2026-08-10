@@ -207,7 +207,18 @@ const replyDoc = async (req, res) => {
             };
         });
 
-        const uploadedFiles = await Promise.all(uploadPromises);
+        const uploadedFilesFromMulter = await Promise.all(uploadPromises);
+
+        let directUploadedFiles = [];
+        if (req.body.uploadedFiles) {
+            try {
+                directUploadedFiles = parseJSON(req.body.uploadedFiles);
+            } catch (err) {
+                console.warn("Could not parse uploadedFiles from body:", err);
+            }
+        }
+        
+        const uploadedFiles = [...uploadedFilesFromMulter, ...directUploadedFiles];
 
         const newReplyDoc = new RepliedDoc({
             replyBy,
@@ -465,8 +476,18 @@ const updateRepliedDoc = async (req, res) => {
         }
       }
   
-      // 4. Gộp lại
-      existingDoc.files = [...keptOldFiles, ...uploadedFiles];
+      // 4. Các file được upload trực tiếp từ Frontend (Google Drive API)
+      let directUploadedFiles = [];
+      if (req.body.uploadedFiles) {
+        try {
+          directUploadedFiles = JSON.parse(req.body.uploadedFiles);
+        } catch (err) {
+          console.warn("Could not parse uploadedFiles from body:", err);
+        }
+      }
+
+      // 5. Gộp lại
+      existingDoc.files = [...keptOldFiles, ...uploadedFiles, ...directUploadedFiles];
   
       existingDoc.status = "pending";
       await existingDoc.save();
