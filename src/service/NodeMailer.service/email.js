@@ -180,9 +180,22 @@ const sendTaskNotificationEmail = async (uniqueUsers, taskData, actionType) => {
             </div>`;
         }
 
-        let statusLabel = "Chưa làm";
-        if (taskData.status === 'IN_PROGRESS') statusLabel = "Đang làm";
-        if (taskData.status === 'DONE') statusLabel = "Hoàn thành";
+        let statusLabel = '<span style="color: #f44336; font-weight: bold;">Chưa làm</span>';
+        let headerColorStart = "#f44336";
+        let headerColorEnd = "#ef5350";
+        let headerBorderColor = "#f44336";
+
+        if (taskData.status === 'IN_PROGRESS') {
+            statusLabel = '<span style="color: #2196F3; font-weight: bold;">Đang làm</span>';
+            headerColorStart = "#2196F3";
+            headerColorEnd = "#42a5f5";
+            headerBorderColor = "#2196F3";
+        } else if (taskData.status === 'DONE') {
+            statusLabel = '<span style="color: #4CAF50; font-weight: bold;">Hoàn thành</span>';
+            headerColorStart = "#4CAF50";
+            headerColorEnd = "#66bb6a";
+            headerBorderColor = "#4CAF50";
+        }
 
         const assigneesList = (taskData.assignees || []).map(u => u.name).join(', ') || "N/A";
         const collaboratorsList = (taskData.collaborators || []).map(u => u.name).join(', ') || "N/A";
@@ -203,7 +216,10 @@ const sendTaskNotificationEmail = async (uniqueUsers, taskData, actionType) => {
                 .replace(/{statusLabel}/g, statusLabel)
                 .replace(/{assigneesList}/g, assigneesList)
                 .replace(/{collaboratorsList}/g, collaboratorsList)
-                .replace(/{linksHtml}/g, linksHtml);
+                .replace(/{linksHtml}/g, linksHtml)
+                .replace(/{headerColorStart}/g, headerColorStart)
+                .replace(/{headerColorEnd}/g, headerColorEnd)
+                .replace(/{headerBorderColor}/g, headerBorderColor);
     
             const mailOptions = {
                 from: '"Hệ thống quản lý văn bản NSG" <qlvb@nsgpc.edu.vn>',

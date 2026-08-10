@@ -71,7 +71,7 @@ const TASK_NOTIFICATION_EMAIL_TEMPLATE = `
   <title>Thông báo công việc: {actionName}</title>
 </head>
 <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-  <div style="background: linear-gradient(to right, #0071E3, #4C9EEA); padding: 20px; text-align: center;">
+  <div style="background: linear-gradient(to right, {headerColorStart}, {headerColorEnd}); padding: 20px; text-align: center;">
     <h1 style="color: #fff; margin: 0;">Thông báo: {actionName}</h1>
   </div>
   <div style="background-color: #F9F9F9; padding: 20px; border-radius: 0 0 5px 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
@@ -80,7 +80,7 @@ const TASK_NOTIFICATION_EMAIL_TEMPLATE = `
     
     {priorityHighlightBlock}
     
-    <div style="background: #fff; padding: 15px; border-left: 4px solid #0071E3; margin: 20px 0;">
+    <div style="background: #fff; padding: 15px; border-left: 4px solid {headerBorderColor}; margin: 20px 0;">
       <p><strong>Tiêu đề công việc:</strong> {taskTitle}</p>
       <p><strong>Nội dung:</strong> {taskDescription}</p>
       <p><strong>Thời gian:</strong> {taskTime}</p>
