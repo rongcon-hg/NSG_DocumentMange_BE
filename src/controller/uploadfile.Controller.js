@@ -68,32 +68,39 @@ async function getOrCreateMonthFolder(drive) {
   const parentId = await getDriveFolderId();
   if (!parentId) throw new Error("Thư mục lưu trữ (Folder ID) chưa được cấu hình.");
 
-  const query = `name='${folderName}' and '${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
-  const response = await drive.files.list({
-    q: query,
-    fields: 'files(id, name)',
-    spaces: 'drive',
-    supportsAllDrives: true,
-    includeItemsFromAllDrives: true
-  });
+  try {
+    const query = `name='${folderName}' and '${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+    const response = await drive.files.list({
+      q: query,
+      fields: 'files(id, name)',
+      spaces: 'drive',
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true
+    });
 
-  if (response.data.files && response.data.files.length > 0) {
-    return response.data.files[0].id;
+    if (response.data.files && response.data.files.length > 0) {
+      return response.data.files[0].id;
+    }
+
+    const folderMetadata = {
+      name: folderName,
+      mimeType: 'application/vnd.google-apps.folder',
+      parents: [parentId],
+    };
+
+    const createResponse = await drive.files.create({
+      resource: folderMetadata,
+      fields: 'id',
+      supportsAllDrives: true
+    });
+
+    return createResponse.data.id;
+  } catch (error) {
+    if (error.message && error.message.includes("File not found")) {
+      throw new Error(`Không tìm thấy thư mục gốc hoặc Service Account không có quyền truy cập vào ID: ${parentId}. Vui lòng kiểm tra Cấu hình Google Drive.`);
+    }
+    throw error;
   }
-
-  const folderMetadata = {
-    name: folderName,
-    mimeType: 'application/vnd.google-apps.folder',
-    parents: [parentId],
-  };
-
-  const createResponse = await drive.files.create({
-    resource: folderMetadata,
-    fields: 'id',
-    supportsAllDrives: true
-  });
-
-  return createResponse.data.id;
 }
 
 async function uploadToDrive(req, res) {
