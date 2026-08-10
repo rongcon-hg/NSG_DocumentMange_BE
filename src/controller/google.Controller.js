@@ -40,8 +40,10 @@ async function getGoogleAuthLoginUrl(req, res) {
     access_type: "offline",
     prompt: "consent",
     scope: [
+        "https://www.googleapis.com/auth/calendar.events", 
         "https://www.googleapis.com/auth/userinfo.email", 
-        "https://www.googleapis.com/auth/userinfo.profile"
+        "https://www.googleapis.com/auth/userinfo.profile",
+        "https://www.googleapis.com/auth/drive"
       ],
     state: stateBase64
   });
@@ -91,20 +93,17 @@ const googleCallback = async (req, res) => {
       // Đăng nhập thành công, tạo JWT
       const { accessToken } = generateToken(user._id, user.role);
       
-      // Update Google tokens in case they granted them previously
+      // Update Google tokens
+      const updateData = {
+        "google.googleId": profile.id,
+        "google.accessToken": tokens.access_token,
+        "google.tokenExpiryDate": tokens.expiry_date ? new Date(tokens.expiry_date) : null
+      };
       if (tokens.refresh_token) {
-        await User.updateOne(
-          { _id: user._id },
-          {
-            $set: {
-              "google.googleId": profile.id,
-              "google.accessToken": tokens.access_token,
-              "google.refreshToken": tokens.refresh_token,
-              "google.tokenExpiryDate": tokens.expiry_date ? new Date(tokens.expiry_date) : null
-            }
-          }
-        );
+        updateData["google.refreshToken"] = tokens.refresh_token;
       }
+      
+      await User.updateOne({ _id: user._id }, { $set: updateData });
 
       return res.redirect(`${feOrigin}/login?token=${accessToken}&name=${encodeURIComponent(user.name)}`);
     } else {
