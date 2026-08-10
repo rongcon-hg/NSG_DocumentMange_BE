@@ -147,6 +147,11 @@ const documentSchema = new mongoose.Schema(
   }
 );
 
+documentSchema.index(
+  { shortDescription: "text", docCode: "text" },
+  { name: "TextIndex", default_language: "none" }
+);
+
 documentSchema.pre('save', async function (next) {
   try {
     const autoAssignedUsers = new Map();

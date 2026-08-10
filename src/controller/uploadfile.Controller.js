@@ -1129,32 +1129,39 @@ const searchDocuments = async(req, res) => {
     } = req.query;
 
     const filter = {};
+    let useTextSearch = false;
 
     // ===== Tìm kiếm chung: Số/Ký hiệu & Trích yếu =====
     if (keyword) {
-      const regex = new RegExp(createVietnameseRegex(keyword), "i");
-      const orConditions = [
-        { shortDescription: regex }
-      ];
-      
-      if (keyword.includes("/")) {
-        const [numPart, codePart] = keyword.split("/");
-        const num = Number(numPart);
-        if (!isNaN(num)) {
-          const codeRegex = new RegExp("^" + createVietnameseRegex(codePart.trim()), "i");
-          orConditions.push({ docNum: num, docCode: codeRegex });
+      if (keyword.includes("/") || (!isNaN(Number(keyword)) && Number(keyword) > 0)) {
+        // Tìm kiếm chính xác Số / Ký hiệu văn bản
+        const regex = new RegExp(createVietnameseRegex(keyword), "i");
+        const orConditions = [
+          { shortDescription: regex }
+        ];
+        
+        if (keyword.includes("/")) {
+          const [numPart, codePart] = keyword.split("/");
+          const num = Number(numPart);
+          if (!isNaN(num)) {
+            const codeRegex = new RegExp("^" + createVietnameseRegex(codePart.trim()), "i");
+            orConditions.push({ docNum: num, docCode: codeRegex });
+          } else {
+            orConditions.push({ docCode: regex });
+          }
         } else {
+          orConditions.push({ docNum: Number(keyword) });
           orConditions.push({ docCode: regex });
         }
-      } else if (!isNaN(Number(keyword)) && Number(keyword) > 0) {
-        orConditions.push({ docNum: Number(keyword) });
-        orConditions.push({ docCode: regex });
+        
+        if (!filter.$and) filter.$and = [];
+        filter.$and.push({ $or: orConditions });
       } else {
-        orConditions.push({ docCode: regex });
+        // Tìm kiếm Full-Text Search thông minh cho đoạn văn bản
+        // Thay vì match chuỗi liên tục, $text tự chia nhỏ từ và tính điểm
+        filter.$text = { $search: keyword };
+        useTextSearch = true;
       }
-      
-      if (!filter.$and) filter.$and = [];
-      filter.$and.push({ $or: orConditions });
     }
 
     // ===== Đơn vị/Người nhận (executors) =====
@@ -1228,10 +1235,20 @@ const searchDocuments = async(req, res) => {
 
     // ===== Pagination & Sort =====
     const skip = (page - 1) * limit;
-    const sort = { [sortBy]: sortDir === "desc" ? -1 : 1 };
+    
+    let sort = {};
+    let projection = {};
+    
+    // Nếu dùng Text Search, bật chấm điểm và ưu tiên xếp hạng văn bản khớp nhiều từ nhất
+    if (useTextSearch) {
+      projection = { score: { $meta: "textScore" } };
+      sort = { score: { $meta: "textScore" }, [sortBy]: sortDir === "desc" ? -1 : 1 };
+    } else {
+      sort = { [sortBy]: sortDir === "desc" ? -1 : 1 };
+    }
 
     const [items, total] = await Promise.all([
-      Document.find(filter)
+      Document.find(filter, projection)
         .populate("docVariant", "unit")
         .sort(sort)
         .skip(Number(skip))
