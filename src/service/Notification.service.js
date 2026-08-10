@@ -47,11 +47,7 @@ const triggerDocumentNotifications = async (document) => {
             // Lọc ra những người chủ trì (executors)
             let taskUsers = uniqueUsers.filter(u => executorUserIds.includes(u._id.toString()));
             
-            // Luôn thêm người ban hành vào danh sách theo dõi công việc
-            if (senderUser && !taskUsers.some(u => u._id.toString() === senderUser._id.toString())) {
-                taskUsers.push(senderUser);
-            }
-            
+
             if (taskUsers.length > 0) {
                 await createTasksAndSyncGoogleCalendar(document, taskUsers);
             }
@@ -172,12 +168,6 @@ const syncCalendarForDocument = async (document) => {
         
         taskUsers = uniqueUsers.filter(u => executorUserIds.includes(u._id.toString()));
         
-        if (document.sentBy || document.sender) {
-            const senderUser = await User.findById(document.sentBy || document.sender);
-            if (senderUser && !taskUsers.some(u => u._id.toString() === senderUser._id.toString())) {
-                taskUsers.push(senderUser);
-            }
-        }
 
         if (taskUsers.length === 0) return;
 
