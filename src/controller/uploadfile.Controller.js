@@ -841,6 +841,7 @@ async function updateDocument(req, res) {
             resource: fileMetadata,
             media: media,
             fields: "id, name, mimeType, size",
+            supportsAllDrives: true
           });
   
           updatedFiles.push({
@@ -867,6 +868,9 @@ async function updateDocument(req, res) {
     } catch (error) {
       console.error("Error in updateDocument:", error);
       if (!res.headersSent) {
+        if (error.message && error.message.includes("File not found")) {
+           return res.status(500).json({ message: "Lỗi kết nối Google Drive: Không tìm thấy thư mục lưu trữ (có thể thư mục gốc đã bị xóa hoặc mất quyền chia sẻ). Vui lòng kiểm tra lại Cấu hình Google Drive.", error: error.message });
+        }
         res.status(500).json({ message: "Lỗi cập nhật: " + error.message, error: error.message });
       }
     }
