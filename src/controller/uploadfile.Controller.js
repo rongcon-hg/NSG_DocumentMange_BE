@@ -806,22 +806,8 @@ async function updateDocument(req, res) {
             return res.status(400).json({ message: "existingFiles must be an array" });
           }
   
-          // Xóa file khỏi Google Drive nếu không còn trong existingFiles
-          const currentFileIds = existingDocument.files.map(f => f.fileId);
-          const newFileIds = parsedExistingFiles.map(f => f.fileId);
-          const deletedFileIds = currentFileIds.filter(id => !newFileIds.includes(id));
-  
-          if (deletedFileIds.length > 0) {
-            const auth = await authorize();
-            const drive = google.drive({ version: "v3", auth });
-            for (const fileId of deletedFileIds) {
-              try {
-                await drive.files.delete({ fileId });
-              } catch (error) {
-                console.error(`Failed to delete file ${fileId} from Google Drive:`, error);
-              }
-            }
-          }
+          // Chỉ xóa thông tin trên hệ thống, KHÔNG xóa file trên Google Drive
+          // theo yêu cầu mới nhất của người dùng.
   
           // Cập nhật danh sách file cũ
           updatedFiles = parsedExistingFiles.map(file => ({
