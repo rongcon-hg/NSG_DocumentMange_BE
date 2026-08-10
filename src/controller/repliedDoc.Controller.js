@@ -854,9 +854,11 @@ const getReviewedDoc = async (req, res) => {
       status: { $in: ["inReview", "rejectedByReviewer", "approvedByReviewer", "approved", "rejected"] },
     };
 
-    // Nếu truyền reviewerUser → lọc theo reviewer
+    // Nếu truyền reviewerUser → lọc theo reviewer cụ thể, ngược lại chỉ lấy các văn bản có reviewer (đã được gửi duyệt)
     if (reviewerUser && mongoose.Types.ObjectId.isValid(reviewerUser)) {
       filter.reviewer = reviewerUser;
+    } else {
+      filter.reviewer = { $exists: true, $ne: null };
     }
 
     // Nếu có truyền status (lọc chính xác)
