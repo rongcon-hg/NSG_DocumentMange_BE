@@ -804,12 +804,15 @@ async function updateDocument(req, res) {
           const newFileIds = parsedExistingFiles.map(f => f.fileId);
           const deletedFileIds = currentFileIds.filter(id => !newFileIds.includes(id));
   
-          for (const fileId of deletedFileIds) {
-            try {
-              await drive.files.delete({ fileId });
-            } catch (error) {
-              console.error(`Failed to delete file ${fileId} from Google Drive:`, error);
-              // Có thể tiếp tục hoặc trả về lỗi tùy thuộc vào yêu cầu
+          if (deletedFileIds.length > 0) {
+            const auth = await authorize();
+            const drive = google.drive({ version: "v3", auth });
+            for (const fileId of deletedFileIds) {
+              try {
+                await drive.files.delete({ fileId });
+              } catch (error) {
+                console.error(`Failed to delete file ${fileId} from Google Drive:`, error);
+              }
             }
           }
   
@@ -871,7 +874,7 @@ async function updateDocument(req, res) {
     } catch (error) {
       console.error("Error in updateDocument:", error);
       if (!res.headersSent) {
-        res.status(500).json({ message: "Error updating document", error: error.message });
+        res.status(500).json({ message: "Lỗi cập nhật: " + error.message, error: error.message });
       }
     }
 }
