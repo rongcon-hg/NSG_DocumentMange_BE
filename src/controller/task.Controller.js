@@ -174,11 +174,19 @@ const createTask = async (req, res) => {
                 .populate("assignees", "name email")
                 .populate("collaborators", "name email");
                 
-            const uniqueUsers = [...(populatedTask.assignees || []), ...(populatedTask.collaborators || [])].filter((user, index, self) => 
-                index === self.findIndex((t) => (
-                    t._id.toString() === user._id.toString()
-                ))
-            );
+            const uniqueUsersMap = new Map();
+            if (populatedTask.assignees) populatedTask.assignees.forEach(u => uniqueUsersMap.set(u._id.toString(), u));
+            if (populatedTask.collaborators) populatedTask.collaborators.forEach(u => uniqueUsersMap.set(u._id.toString(), u));
+            
+            // Lấy thêm thông tin người tạo nếu chưa có
+            if (!uniqueUsersMap.has(createdBy.toString())) {
+                const creatorUser = await User.findById(createdBy);
+                if (creatorUser) {
+                    uniqueUsersMap.set(creatorUser._id.toString(), creatorUser);
+                }
+            }
+            
+            const uniqueUsers = Array.from(uniqueUsersMap.values());
             
             const { sendTaskNotificationEmail } = require('../service/NodeMailer.service/email');
             const { syncTaskToGoogleCalendar } = require('../service/Notification.service');

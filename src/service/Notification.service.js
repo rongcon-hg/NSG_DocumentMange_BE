@@ -32,10 +32,26 @@ const triggerDocumentNotifications = async (document) => {
 
         // 2. Create internal Task and sync Google Calendar if deadline is present
         if (document.deadlineDay) {
-            let taskUsers = [...uniqueUsers];
-            if (taskUsers.length === 0 && senderUser) {
+            let executorUserIds = [];
+            if (document.executors && document.executors.length > 0) {
+                for (const exec of document.executors) {
+                    if (exec.executorType === 'User') {
+                        executorUserIds.push(exec.executorId.toString());
+                    } else if (exec.executorType === 'Department') {
+                        const deptUsers = await User.find({ department: exec.executorId, role: { $ne: null } }).select('_id');
+                        deptUsers.forEach(u => executorUserIds.push(u._id.toString()));
+                    }
+                }
+            }
+            
+            // Lọc ra những người chủ trì (executors)
+            let taskUsers = uniqueUsers.filter(u => executorUserIds.includes(u._id.toString()));
+            
+            // Luôn thêm người ban hành vào danh sách theo dõi công việc
+            if (senderUser && !taskUsers.some(u => u._id.toString() === senderUser._id.toString())) {
                 taskUsers.push(senderUser);
             }
+            
             if (taskUsers.length > 0) {
                 await createTasksAndSyncGoogleCalendar(document, taskUsers);
             }
@@ -141,10 +157,26 @@ const syncCalendarForDocument = async (document) => {
         const uniqueUsers = Array.from(new Set(targetUsers.map(u => u._id.toString())))
             .map(id => targetUsers.find(u => u._id.toString() === id));
 
-        let taskUsers = [...uniqueUsers];
-        if (taskUsers.length === 0 && (document.sentBy || document.sender)) {
+        let taskUsers = [];
+        let executorUserIds = [];
+        if (document.executors && document.executors.length > 0) {
+            for (const exec of document.executors) {
+                if (exec.executorType === 'User') {
+                    executorUserIds.push(exec.executorId.toString());
+                } else if (exec.executorType === 'Department') {
+                    const deptUsers = await User.find({ department: exec.executorId, role: { $ne: null } }).select('_id');
+                    deptUsers.forEach(u => executorUserIds.push(u._id.toString()));
+                }
+            }
+        }
+        
+        taskUsers = uniqueUsers.filter(u => executorUserIds.includes(u._id.toString()));
+        
+        if (document.sentBy || document.sender) {
             const senderUser = await User.findById(document.sentBy || document.sender);
-            if (senderUser) taskUsers.push(senderUser);
+            if (senderUser && !taskUsers.some(u => u._id.toString() === senderUser._id.toString())) {
+                taskUsers.push(senderUser);
+            }
         }
 
         if (taskUsers.length === 0) return;
