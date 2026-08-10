@@ -156,13 +156,13 @@ Ví dụ: [Văn bản.pdf](https://drive.google.com/file/d/1abc.../view)`;
     let model;
     try {
       model = genAI.getGenerativeModel({ 
-        model: "gemini-2.5-flash",
+        model: "gemini-1.5-flash",
         systemInstruction,
         tools 
       });
     } catch (e) {
       model = genAI.getGenerativeModel({ 
-        model: "gemini-2.5-pro",
+        model: "gemini-1.5-pro",
         systemInstruction,
         tools 
       });
