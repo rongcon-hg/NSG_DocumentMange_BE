@@ -11,40 +11,73 @@ const dotenv = require("dotenv");
 const { Readable } = require("stream");
 dotenv.config();
 
-// Google Drive Authentication
+const DriveConfig = require('../models/driveConfig.model');
+
+// Lấy Folder ID từ DB, nếu không có lấy từ .env
+async function getDriveFolderId() {
+    const config = await DriveConfig.findOne();
+    if (config && config.folderId) return config.folderId;
+    return process.env.DRIVE_FOLDER_ID;
+}
+
+// Google Drive Authentication using Service Account
 async function authorize() {
-    const adminEmail = process.env.GOOGLE_ADMIN_EMAIL || 'qlvb@nsgpc.edu.vn';
-    const user = await User.findOne({ email: adminEmail, 'google.refreshToken': { $ne: null } });
-    
-    if (!user) {
-      throw new Error(`Admin account (${adminEmail}) has not authorized Google Drive.`);
+    const config = await DriveConfig.findOne();
+    if (!config || !config.clientEmail || !config.privateKey) {
+      throw new Error(`Chưa cấu hình Service Account cho Google Drive. Vui lòng vào Cấu hình Google Drive để thiết lập.`);
     }
 
-    const oauth2Client = new google.auth.OAuth2(
-        process.env.GOOGLE_CLIENT_ID,
-        process.env.GOOGLE_CLIENT_SECRET,
-        process.env.GOOGLE_REDIRECT_URI
-    );
-
-    oauth2Client.setCredentials({
-        access_token: user.google.accessToken,
-        refresh_token: user.google.refreshToken,
+    const auth = new google.auth.JWT({
+        email: config.clientEmail,
+        key: config.privateKey.replace(/\\n/g, '\n'),
+        scopes: ['https://www.googleapis.com/auth/drive'],
     });
     
-    return oauth2Client;
+    return auth;
+}
+
+// Helper function to sanitize file names
+function sanitizeFileName(str) {
+  if (!str) return "";
+  str = str.replace(/à|á|ạ|ả|ã|â|ầ|ấ|ậ|ẩ|ẫ|ă|ằ|ắ|ặ|ẳ|ẵ/g, "a");
+  str = str.replace(/è|é|ẹ|ẻ|ẽ|ê|ề|ế|ệ|ể|ễ/g, "e");
+  str = str.replace(/ì|í|ị|ỉ|ĩ/g, "i");
+  str = str.replace(/ò|ó|ọ|ỏ|õ|ô|ồ|ố|ộ|ổ|ố|ơ|ờ|ớ|ợ|ở|ỡ/g, "o");
+  str = str.replace(/ù|ú|ụ|ủ|ũ|ư|ừ|ứ|ự|ử|ữ/g, "u");
+  str = str.replace(/ỳ|ý|ỵ|ỷ|ỹ/g, "y");
+  str = str.replace(/đ/g, "d");
+  str = str.replace(/À|Á|Ạ|Ả|Ã|Â|Ầ|Ấ|Ậ|Ẩ|Ẫ|Ă|Ằ|Ắ|Ặ|Ẳ|Ẵ/g, "A");
+  str = str.replace(/È|É|Ẹ|Ẻ|Ẽ|Ê|Ề|Ế|Ệ|Ể|Ễ/g, "E");
+  str = str.replace(/Ì|Í|Ị|Ỉ|Ĩ/g, "I");
+  str = str.replace(/Ò|Ó|Ọ|Ỏ|Õ|Ô|Ồ|Ố|Ộ|Ổ|Ỗ|Ơ|Ờ|Ớ|Ợ|Ở|Ỡ/g, "O");
+  str = str.replace(/Ù|Ú|Ụ|Ủ|Ũ|Ư|Ừ|Ứ|Ự|Ử|Ữ/g, "U");
+  str = str.replace(/Ỳ|Ý|Ỵ|Ỷ|Ỹ/g, "Y");
+  str = str.replace(/Đ/g, "D");
+  str = str.replace(/\u0300|\u0301|\u0303|\u0309|\u0323/g, ""); // ̀ ́ ̃ ̉ ̣  huyền, sắc, ngã, hỏi, nặng
+  str = str.replace(/\u02C6|\u0306|\u031B/g, ""); // ˆ ̆ ̛  Â, Ê, Ă, Ơ, Ư
+  // Remove special characters, replace spaces with hyphens
+  str = str.replace(/!|@|%|\^|\*|\(|\)|\+|\=|\<|\>|\?|\/|,|\:|\;|\'|\"|\&|\#|\[|\]|~|\$|_|`|{|}|\||\\/g, "-");
+  str = str.replace(/ +/g, " ");
+  str = str.trim();
+  str = str.replace(/\s+/g, '-');
+  str = str.replace(/-+/g, '-');
+  return str;
 }
 
 // Helper function to get or create a folder like "YYYY-MM"
 async function getOrCreateMonthFolder(drive) {
   const date = new Date();
   const folderName = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-  const parentId = process.env.DRIVE_FOLDER_ID;
+  const parentId = await getDriveFolderId();
+  if (!parentId) throw new Error("Thư mục lưu trữ (Folder ID) chưa được cấu hình.");
 
   const query = `name='${folderName}' and '${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
   const response = await drive.files.list({
     q: query,
     fields: 'files(id, name)',
     spaces: 'drive',
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true
   });
 
   if (response.data.files && response.data.files.length > 0) {
@@ -60,6 +93,7 @@ async function getOrCreateMonthFolder(drive) {
   const createResponse = await drive.files.create({
     resource: folderMetadata,
     fields: 'id',
+    supportsAllDrives: true
   });
 
   return createResponse.data.id;
@@ -147,7 +181,7 @@ const replyDoc = async (req, res) => {
 
         const uploadPromises = req.files.map(async (file) => {
             const fileMetadata = {
-                name: file.originalname,
+                name: sanitizeFileName(file.originalname),
                 parents: [monthFolderId],
             };
 
@@ -157,9 +191,10 @@ const replyDoc = async (req, res) => {
             };
 
             const response = await drive.files.create({
-                resource: fileMetadata,
+                requestBody: fileMetadata,
                 media: media,
                 fields: "id, name, mimeType, size",
+                supportsAllDrives: true
             });
 
             return {
@@ -384,7 +419,10 @@ const updateRepliedDoc = async (req, res) => {
           const stillExists = existingFiles.find(f => f.fileId === oldFile.fileId);
           if (!stillExists) {
             try {
-              await drive.files.delete({ fileId: oldFile.fileId });
+              await drive.files.delete({ 
+                fileId: oldFile.fileId,
+                supportsAllDrives: true 
+              });
             } catch (err) {
               console.warn(`Failed to delete file ${oldFile.fileId}:`, err.message);
             }
@@ -401,7 +439,7 @@ const updateRepliedDoc = async (req, res) => {
       if (req.files && req.files.length > 0) {
         for (const file of req.files) {
           const fileMetadata = {
-            name: file.originalname,
+            name: sanitizeFileName(file.originalname),
             parents: [monthFolderId],
           };
           const media = {
@@ -410,9 +448,10 @@ const updateRepliedDoc = async (req, res) => {
           };
   
           const response = await drive.files.create({
-            resource: fileMetadata,
+            requestBody: fileMetadata,
             media: media,
             fields: "id, name, mimeType, size",
+            supportsAllDrives: true
           });
   
           uploadedFiles.push({
@@ -457,7 +496,10 @@ const deleteRepliedDoc = async (req, res) => {
         if (doc.files && Array.isArray(doc.files) && doc.files.length > 0) {
             for (const file of doc.files) {
                 try {
-                    await drive.files.delete({ fileId: file.fileId });
+                    await drive.files.delete({ 
+                        fileId: file.fileId,
+                        supportsAllDrives: true 
+                    });
                     console.log(`Deleted file from Drive: ${file.fileId}`);
                 } catch (err) {
                     console.warn(`Failed to delete file ${file.fileId} on Drive:`, err.message);
