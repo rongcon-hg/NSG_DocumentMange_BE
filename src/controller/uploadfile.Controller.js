@@ -690,8 +690,7 @@ async function updateDocument(req, res) {
         return res.status(404).json({ message: "Document not found" });
       }
   
-      const auth = await authorize(); // Giả sử authorize() là hàm xác thực Google API
-      const drive = google.drive({ version: "v3", auth });
+
   
       const fieldsToUpdate = [
         "sentBy",
@@ -828,6 +827,8 @@ async function updateDocument(req, res) {
   
       // Thêm file mới nếu có
       if (req.files && req.files.length > 0) {
+        const auth = await authorize();
+        const drive = google.drive({ version: "v3", auth });
         const monthFolderId = await getOrCreateMonthFolder(drive);
         for (const file of req.files) {
           const fileMetadata = {
