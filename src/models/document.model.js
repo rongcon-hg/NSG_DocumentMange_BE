@@ -142,7 +142,9 @@ const documentSchema = new mongoose.Schema(
   {
     timestamps: true,
     indexes: [
-      { key: { createdAt: 1 } }
+      { key: { createdAt: 1 } },
+      { key: { "assignedToUsers.userId": 1 } },
+      { key: { sentBy: 1 } }
     ]
   }
 );

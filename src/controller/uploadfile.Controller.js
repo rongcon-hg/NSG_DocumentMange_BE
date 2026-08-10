@@ -948,7 +948,8 @@ const getDocumentsByAssignedTo = async (req, res) => {
         .populate("unit", "unitName")
         .sort({ createdAt: -1 })
         .skip((pageNumber - 1) * pageSize)
-        .limit(pageSize);
+        .limit(pageSize)
+        .lean();
   
       const totalDocuments = await Document.countDocuments({ "assignedToUsers.userId": userId });
       const totalPages = Math.ceil(totalDocuments / pageSize);
