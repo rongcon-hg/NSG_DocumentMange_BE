@@ -11,9 +11,13 @@ const connection = require('./src/config/db');
 const mongoose = require('mongoose');
 const cookieParser = require("cookie-parser");  
 const cors = require("cors");
+const compression = require("compression");
 
 // Security Headers
 app.use(helmet());
+
+// Compress API responses
+app.use(compression());
 
 // Rate Limiting to prevent Brute-Force/DDoS
 const limiter = rateLimit({
