@@ -207,7 +207,7 @@ const createTask = async (req, res) => {
 
 const getTasks = async (req, res) => {
     try {
-        const { userId } = req.query; // If provided, filter by assignee or creator
+        const userId = (req.user && req.user._id) ? req.user._id : req.query.userId;
 
         let filter = {};
         if (userId) {
@@ -357,11 +357,18 @@ const updateTask = async (req, res) => {
 const deleteTask = async (req, res) => {
     try {
         const { taskId } = req.params;
-        const deletedTask = await Task.findByIdAndDelete(taskId);
         
-        if (!deletedTask) {
+        const existingTask = await Task.findById(taskId);
+        if (!existingTask) {
             return res.status(404).json({ success: false, message: "Task not found" });
         }
+        
+        const requestUserId = req.user ? req.user._id.toString() : null;
+        if (requestUserId && existingTask.createdBy.toString() !== requestUserId) {
+            return res.status(403).json({ success: false, message: "Bạn không có quyền xóa công việc này." });
+        }
+
+        await Task.findByIdAndDelete(taskId);
 
         res.status(200).json({ success: true, message: "Task deleted successfully" });
     } catch (error) {
