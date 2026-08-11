@@ -10,6 +10,7 @@ router.get("/search",verifyToken, uploadFile.searchDocuments);
 router.get("/nextdocnum/:docType/:docVariantId/:year",verifyToken, uploadFile.getNextDocNum);
 router.get("/by-sentby/:userId",verifyToken,uploadFile.getDocumentsBySentBy);
 router.get("/by-assignedto/:userId",verifyToken, uploadFile.getDocumentsByAssignedTo);
+router.get("/unread-count/:userId", verifyToken, uploadFile.getUnreadDocCount);
 router.get("/:userId/:docType", verifyToken,uploadFile.getDocumentsByUserAndType);
 router.get("/fillter",verifyToken,uploadFile.getFilteredDocuments );
 router.get("/deadline-notifications", verifyToken, uploadFile.getDeadlineStatusCounts);

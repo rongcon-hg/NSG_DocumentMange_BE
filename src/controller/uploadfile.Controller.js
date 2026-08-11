@@ -1255,6 +1255,21 @@ const searchDocuments = async(req, res) => {
   }
 }
 
+const getUnreadDocCount = async (req, res) => {
+    try {
+        const { userId } = req.params;
+        if (!userId) {
+            return res.status(400).json({ message: "userId is required" });
+        }
+        const count = await Document.countDocuments({
+            "assignedToUsers": { $elemMatch: { userId: userId, isRead: false } }
+        });
+        res.status(200).json({ success: true, count });
+    } catch (error) {
+        console.error("Error fetching unread document count:", error);
+        res.status(500).json({ success: false, message: "Error fetching unread document count", error: error.message });
+    }
+}
 
 module.exports = { 
     uploadToDrive,
@@ -1271,5 +1286,6 @@ module.exports = {
     getDocumentsByAssignedTo,
     getTotalDocNum,
     getDeadlineStatusCounts,
-    searchDocuments
+    searchDocuments,
+    getUnreadDocCount
  };
