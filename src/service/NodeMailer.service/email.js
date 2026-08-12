@@ -289,7 +289,7 @@ const sendReviewNotificationEmail = async (uniqueUsers, docData, actionType, not
         }
 
         const fullDocCode = docData.repliedDoc ? 
-            ((docData.repliedDoc.docNum && docData.repliedDoc.docCode) ? \`\${docData.repliedDoc.docNum}/\${docData.repliedDoc.docCode}\` : "N/A") 
+            ((docData.repliedDoc.docNum && docData.repliedDoc.docCode) ? `${docData.repliedDoc.docNum}/${docData.repliedDoc.docCode}` : "N/A") 
             : "N/A";
             
         const docTitle = docData.shortDescription || "Không có";
@@ -311,7 +311,7 @@ const sendReviewNotificationEmail = async (uniqueUsers, docData, actionType, not
             .replace(/{headerColorEnd}/g, headerColorEnd)
             .replace(/{headerBorderColor}/g, headerBorderColor);
 
-        const subject = \`[\${actionName}] \${docTitle}\`;
+        const subject = `[${actionName}] ${docTitle}`;
 
         const mailOptions = {
             from: '"Hệ thống quản lý văn bản NSG" <qlvb@nsgpc.edu.vn>',
@@ -320,7 +320,7 @@ const sendReviewNotificationEmail = async (uniqueUsers, docData, actionType, not
             subject: subject,
             html: htmlContent,
         }
-        await transporter.sendMail(mailOptions).catch(err => console.error(\`Error sending email:\`, err));
+        await transporter.sendMail(mailOptions).catch(err => console.error(`Error sending email:`, err));
         return true;
     } catch (error) {
         console.error("Error sending review notification to email:", error);
