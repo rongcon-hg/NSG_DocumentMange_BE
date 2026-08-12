@@ -318,8 +318,11 @@ const sendReviewNotificationEmail = async (uniqueUsers, docData, actionType, not
             
         const docTitle = docData.shortDescription || "Không có";
         const docType = docData.docVariant ? (docData.docVariant.docVariantName || "N/A") : "N/A";
-        const drafter = docData.repliedDoc ? (docData.repliedDoc.author || "N/A") : "N/A";
         const submitter = docData.replyBy ? (docData.replyBy.name || "N/A") : "N/A";
+        let drafter = submitter; // Normally, drafter and submitter are the same
+        if (docData.repliedDoc && docData.repliedDoc.sentBy && docData.repliedDoc.sentBy.name) {
+            drafter = docData.repliedDoc.sentBy.name;
+        }
 
         let htmlContent = REVIEW_NOTIFICATION_EMAIL_TEMPLATE
             .replace(/{actionName}/g, actionName)
