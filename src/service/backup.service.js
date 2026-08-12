@@ -66,7 +66,8 @@ async function uploadToDrive(auth, filePath, folderId, fileName) {
   const response = await drive.files.create({
     resource: fileMetadata,
     media: media,
-    fields: 'id, size'
+    fields: 'id, size',
+    supportsAllDrives: true
   });
   return response.data;
 }
@@ -77,7 +78,11 @@ async function restoreDatabaseFromDrive(fileId) {
     const auth = await authorize();
     const drive = google.drive({ version: 'v3', auth });
 
-    const response = await drive.files.get({ fileId: fileId, alt: 'media' }, { responseType: 'stream' });
+    const response = await drive.files.get({ 
+        fileId: fileId, 
+        alt: 'media',
+        supportsAllDrives: true 
+    }, { responseType: 'stream' });
 
     if (!fs.existsSync(extractPath)) {
       fs.mkdirSync(extractPath);
