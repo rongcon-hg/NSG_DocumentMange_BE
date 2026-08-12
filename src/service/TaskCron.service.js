@@ -55,4 +55,38 @@ const executeTaskReminders = async () => {
         }
     };
 
-module.exports = { executeTaskReminders };
+const BackupConfig = require('../models/backupConfig.model');
+const { performBackup } = require('./backup.service');
+
+const executeAutoBackup = async () => {
+    try {
+        const config = await BackupConfig.findOne();
+        if (!config || config.schedule === 'none') return;
+        
+        const now = new Date();
+        const lastBackup = config.lastBackupAt;
+        
+        let shouldRun = false;
+        
+        if (!lastBackup) {
+            shouldRun = true;
+        } else {
+            const timeDiff = now.getTime() - new Date(lastBackup).getTime();
+            const daysDiff = Math.floor(timeDiff / (1000 * 3600 * 24));
+            
+            if (config.schedule === 'daily' && daysDiff >= 1) shouldRun = true;
+            if (config.schedule === 'weekly' && daysDiff >= 7) shouldRun = true;
+            if (config.schedule === 'monthly' && daysDiff >= 30) shouldRun = true;
+        }
+        
+        if (shouldRun) {
+            console.log("Running auto backup job...");
+            await performBackup(null);
+            console.log("Auto backup job completed.");
+        }
+    } catch (error) {
+        console.error("Error running auto backup:", error);
+    }
+}
+
+module.exports = { executeTaskReminders, executeAutoBackup };

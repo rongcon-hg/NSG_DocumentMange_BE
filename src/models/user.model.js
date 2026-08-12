@@ -58,6 +58,12 @@ const userSchema = new mongoose.Schema({
         type: Boolean,
         default: false,
     },
+    restoreOtp: {
+        type: String,
+    },
+    restoreOtpExpire: {
+        type: Date,
+    },
     google: googleSchema,
 },
 {

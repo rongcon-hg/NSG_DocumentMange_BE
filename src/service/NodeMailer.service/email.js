@@ -34,6 +34,30 @@ const sentTempPassword = async (email,tempPass) => {
     }
 }
 
+const sendRestoreOtpEmail = async (email, otp) => {
+    try {
+        const transporter = createTransporter();
+        const mailOptions = {
+            from: '"Hệ thống quản lý văn bản NSG" <qlvb@nsgpc.edu.vn>',
+            to: email,
+            subject: "Mã xác nhận Khôi phục Cơ sở dữ liệu",
+            text: `Mã xác nhận của bạn là: ${otp}. Mã có hiệu lực trong 10 phút.`,
+            html: `
+                <div style="font-family: Arial, sans-serif; padding: 20px;">
+                    <h2>Cảnh báo Bảo mật</h2>
+                    <p>Bạn vừa yêu cầu khôi phục toàn bộ Cơ sở dữ liệu của hệ thống.</p>
+                    <p>Mã xác nhận (OTP) của bạn là: <strong>${otp}</strong></p>
+                    <p style="color: red;">Mã có hiệu lực trong 10 phút. <strong>LƯU Ý:</strong> Việc khôi phục sẽ ghi đè toàn bộ dữ liệu hiện tại.</p>
+                </div>
+            `,
+        }
+        await transporter.sendMail(mailOptions);
+        return true;
+    } catch (error) {
+        console.error("Error sending restore OTP to email:", error);
+    }
+}
+
 const sendNewDocumentEmail = async (uniqueUsers, docData, senderName = "Hệ thống") => {
     try {
         if (!uniqueUsers || uniqueUsers.length === 0) return;
@@ -329,6 +353,7 @@ const sendReviewNotificationEmail = async (uniqueUsers, docData, actionType, not
 
 module.exports = {
     sentTempPassword,
+    sendRestoreOtpEmail,
     sendNewDocumentEmail,
     sendTaskReminderEmail,
     sendTaskNotificationEmail,

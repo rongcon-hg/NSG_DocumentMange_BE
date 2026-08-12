@@ -1,12 +1,13 @@
 const express = require('express');
 const router = express.Router();
-const { executeTaskReminders } = require('../service/TaskCron.service');
+const { executeTaskReminders, executeAutoBackup } = require('../service/TaskCron.service');
 
 // API endpoint cho Vercel Cron
 // GET /api/cron/reminders
 router.get('/reminders', async (req, res) => {
   try {
     await executeTaskReminders();
+    await executeAutoBackup();
     return res.status(200).json({ success: true, message: 'Cron job executed successfully' });
   } catch (error) {
     console.error('Error executing cron reminder:', error);
