@@ -290,8 +290,8 @@ const sendReviewNotificationEmail = async (uniqueUsers, docData, actionType, not
             headerColorEnd = "#ef5350";
             headerBorderColor = "#f44336";
         } else if (actionType === 'managerAccept') {
-            actionName = actorName ? `${actorName} đã chấp nhận` : "Manager đã chấp nhận";
-            statusLabel = '<span style="color: #4CAF50; font-weight: bold;">Đã chấp nhận</span>';
+            actionName = actorName ? `${actorName} đã xác nhận` : "Manager đã xác nhận";
+            statusLabel = '<span style="color: #4CAF50; font-weight: bold;">Đã xác nhận</span>';
             headerColorStart = "#4CAF50";
             headerColorEnd = "#66bb6a";
             headerBorderColor = "#4CAF50";
