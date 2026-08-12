@@ -1,4 +1,4 @@
-const { TEMPPASSWORD_EMAIL_TEMPLATE, NEW_DOCUMENT_EMAIL_TEMPLATE, TASK_NOTIFICATION_EMAIL_TEMPLATE } = require("./emailTemplate");
+const { TEMPPASSWORD_EMAIL_TEMPLATE, NEW_DOCUMENT_EMAIL_TEMPLATE, TASK_NOTIFICATION_EMAIL_TEMPLATE, REVIEW_NOTIFICATION_EMAIL_TEMPLATE } = require("./emailTemplate");
 const nodemailer = require("nodemailer");
 const dotenv = require("dotenv");
 dotenv.config();
@@ -61,38 +61,41 @@ const sendNewDocumentEmail = async (uniqueUsers, docData, senderName = "Hệ th�
 
         const subject = `${fullDocCode} - ${docData.shortDescription || "N/A"}`;
 
-        for (const user of uniqueUsers) {
-            if (!user.email) continue;
-            
-            let htmlContent = NEW_DOCUMENT_EMAIL_TEMPLATE
-                .replace("{recipientName}", user.name || "Bạn")
-                .replace("{senderName}", senderName)
-                .replace("{docCode}", fullDocCode)
-                .replace("{shortDescription}", docData.shortDescription || "N/A")
-                .replace("{docType}", docData.docType === "received" ? "Văn bản đến" : "Văn bản đi")
-                .replace("{urgency}", docData.urgency || "Bình thường")
-                .replace("{dateValue}", dateValue)
-                .replace("{principalIdea}", docData.principalIdea || "N/A")
-                .replace("{deadlineDay}", deadlineValue)
-                .replace("{linksHtml}", linksHtml);
-    
-            const mailOptions = {
-                from: '"Hệ thống quản lý văn bản NSG" <qlvb@nsgpc.edu.vn>',
-                to: user.email, 
-                subject: subject,
-                html: htmlContent,
-            }
-            await transporter.sendMail(mailOptions).catch(err => console.error(`Error sending email to ${user.email}:`, err));
+        const bccList = uniqueUsers.map(u => u.email).filter(e => !!e);
+        if (bccList.length === 0) return;
+        
+        let htmlContent = NEW_DOCUMENT_EMAIL_TEMPLATE
+            .replace("{senderName}", senderName)
+            .replace("{docCode}", fullDocCode)
+            .replace("{shortDescription}", docData.shortDescription || "N/A")
+            .replace("{docType}", docData.docType === "received" ? "Văn bản đến" : "Văn bản đi")
+            .replace("{urgency}", docData.urgency || "Bình thường")
+            .replace("{dateValue}", dateValue)
+            .replace("{principalIdea}", docData.principalIdea || "N/A")
+            .replace("{deadlineDay}", deadlineValue)
+            .replace("{linksHtml}", linksHtml);
+
+        const mailOptions = {
+            from: '"Hệ thống quản lý văn bản NSG" <qlvb@nsgpc.edu.vn>',
+            to: '"Hệ thống quản lý văn bản NSG" <qlvb@nsgpc.edu.vn>',
+            bcc: bccList.join(','),
+            subject: subject,
+            html: htmlContent,
         }
+        await transporter.sendMail(mailOptions).catch(err => console.error(`Error sending email:`, err));
+
         return true;
     } catch (error) {
         console.error("Error sending document notification to email:", error);
     }
 }
 
-const sendTaskReminderEmail = async (email, taskData, reminderType) => {
+const sendTaskReminderEmail = async (emails, taskData, reminderType) => {
     try {
-        if (!email) return;
+        if (!emails || emails.length === 0) return;
+        const bccList = Array.isArray(emails) ? emails : [emails];
+        if (bccList.length === 0) return;
+
         const transporter = createTransporter();
         
         let subject = "";
@@ -131,7 +134,8 @@ const sendTaskReminderEmail = async (email, taskData, reminderType) => {
 
         const mailOptions = {
             from: '"Hệ thống quản lý văn bản NSG" <qlvb@nsgpc.edu.vn>',
-            to: email, 
+            to: '"Hệ thống quản lý văn bản NSG" <qlvb@nsgpc.edu.vn>',
+            bcc: bccList.join(','),
             subject: subject,
             html: htmlContent,
         }
@@ -202,36 +206,124 @@ const sendTaskNotificationEmail = async (uniqueUsers, taskData, actionType) => {
 
         const subject = `[${actionName}] ${taskData.title}`;
 
-        for (const user of uniqueUsers) {
-            if (!user.email) continue;
-            
-            let htmlContent = TASK_NOTIFICATION_EMAIL_TEMPLATE
-                .replace(/{recipientName}/g, user.name || "Bạn")
-                .replace(/{actionName}/g, actionName)
-                .replace(/{priorityHighlightBlock}/g, priorityHighlightBlock)
-                .replace(/{taskTitle}/g, taskData.title || "N/A")
-                .replace(/{taskDescription}/g, taskData.description || "Không có")
-                .replace(/{taskTime}/g, dateValue)
-                .replace(/{priorityLabel}/g, priorityLabel)
-                .replace(/{statusLabel}/g, statusLabel)
-                .replace(/{assigneesList}/g, assigneesList)
-                .replace(/{collaboratorsList}/g, collaboratorsList)
-                .replace(/{linksHtml}/g, linksHtml)
-                .replace(/{headerColorStart}/g, headerColorStart)
-                .replace(/{headerColorEnd}/g, headerColorEnd)
-                .replace(/{headerBorderColor}/g, headerBorderColor);
-    
-            const mailOptions = {
-                from: '"Hệ thống quản lý văn bản NSG" <qlvb@nsgpc.edu.vn>',
-                to: user.email, 
-                subject: subject,
-                html: htmlContent,
-            }
-            await transporter.sendMail(mailOptions).catch(err => console.error(`Error sending email to ${user.email}:`, err));
+        const bccList = uniqueUsers.map(u => u.email).filter(e => !!e);
+        if (bccList.length === 0) return;
+
+        let htmlContent = TASK_NOTIFICATION_EMAIL_TEMPLATE
+            .replace(/{actionName}/g, actionName)
+            .replace(/{priorityHighlightBlock}/g, priorityHighlightBlock)
+            .replace(/{taskTitle}/g, taskData.title || "N/A")
+            .replace(/{taskDescription}/g, taskData.description || "Không có")
+            .replace(/{taskTime}/g, dateValue)
+            .replace(/{priorityLabel}/g, priorityLabel)
+            .replace(/{statusLabel}/g, statusLabel)
+            .replace(/{assigneesList}/g, assigneesList)
+            .replace(/{collaboratorsList}/g, collaboratorsList)
+            .replace(/{linksHtml}/g, linksHtml)
+            .replace(/{headerColorStart}/g, headerColorStart)
+            .replace(/{headerColorEnd}/g, headerColorEnd)
+            .replace(/{headerBorderColor}/g, headerBorderColor);
+
+        const mailOptions = {
+            from: '"Hệ thống quản lý văn bản NSG" <qlvb@nsgpc.edu.vn>',
+            to: '"Hệ thống quản lý văn bản NSG" <qlvb@nsgpc.edu.vn>',
+            bcc: bccList.join(','),
+            subject: subject,
+            html: htmlContent,
         }
+        await transporter.sendMail(mailOptions).catch(err => console.error(`Error sending email:`, err));
+
         return true;
     } catch (error) {
         console.error("Error sending task notification to email:", error);
+    }
+}
+
+const sendReviewNotificationEmail = async (uniqueUsers, docData, actionType, notes = "") => {
+    try {
+        if (!uniqueUsers || uniqueUsers.length === 0) return;
+        const bccList = uniqueUsers.map(u => u.email).filter(e => !!e);
+        if (bccList.length === 0) return;
+
+        const transporter = createTransporter();
+        
+        let actionName = "Cập nhật xét duyệt";
+        let statusLabel = '<span style="color: #2196F3; font-weight: bold;">Đang xét duyệt</span>';
+        let headerColorStart = "#2196F3";
+        let headerColorEnd = "#42a5f5";
+        let headerBorderColor = "#2196F3";
+
+        if (actionType === 'submitToBGH') {
+            actionName = "Yêu cầu BGH xét duyệt";
+            statusLabel = '<span style="color: #ff9800; font-weight: bold;">Chờ BGH duyệt</span>';
+            headerColorStart = "#ff9800";
+            headerColorEnd = "#ffb74d";
+            headerBorderColor = "#ff9800";
+        } else if (actionType === 'bghReject') {
+            actionName = "BGH từ chối phê duyệt";
+            statusLabel = '<span style="color: #f44336; font-weight: bold;">BGH Từ chối</span>';
+            headerColorStart = "#f44336";
+            headerColorEnd = "#ef5350";
+            headerBorderColor = "#f44336";
+        } else if (actionType === 'managerAccept') {
+            actionName = "Manager đã chấp nhận";
+            statusLabel = '<span style="color: #4CAF50; font-weight: bold;">Đã chấp nhận</span>';
+            headerColorStart = "#4CAF50";
+            headerColorEnd = "#66bb6a";
+            headerBorderColor = "#4CAF50";
+        } else if (actionType === 'managerReject') {
+            actionName = "Manager từ chối phê duyệt";
+            statusLabel = '<span style="color: #f44336; font-weight: bold;">Từ chối</span>';
+            headerColorStart = "#f44336";
+            headerColorEnd = "#ef5350";
+            headerBorderColor = "#f44336";
+        }
+
+        let linksHtml = "";
+        if (docData.files && docData.files.length > 0) {
+            linksHtml = docData.files.map(f => 
+                `<li><a href="https://drive.google.com/file/d/${f.fileId}/view" target="_blank">${f.fileName || f.name || 'Xem file'}</a></li>`
+            ).join('');
+        } else {
+            linksHtml = "<li>Không có file đính kèm</li>";
+        }
+
+        const fullDocCode = docData.repliedDoc ? 
+            ((docData.repliedDoc.docNum && docData.repliedDoc.docCode) ? \`\${docData.repliedDoc.docNum}/\${docData.repliedDoc.docCode}\` : "N/A") 
+            : "N/A";
+            
+        const docTitle = docData.shortDescription || "Không có";
+        const docType = docData.docVariant ? (docData.docVariant.docVariantName || "N/A") : "N/A";
+        const drafter = docData.repliedDoc ? (docData.repliedDoc.author || "N/A") : "N/A";
+        const submitter = docData.replyBy ? (docData.replyBy.name || "N/A") : "N/A";
+
+        let htmlContent = REVIEW_NOTIFICATION_EMAIL_TEMPLATE
+            .replace(/{actionName}/g, actionName)
+            .replace(/{docTitle}/g, docTitle)
+            .replace(/{docCode}/g, fullDocCode)
+            .replace(/{docType}/g, docType)
+            .replace(/{drafter}/g, drafter)
+            .replace(/{submitter}/g, submitter)
+            .replace(/{statusLabel}/g, statusLabel)
+            .replace(/{notes}/g, notes || "Không có")
+            .replace(/{linksHtml}/g, linksHtml)
+            .replace(/{headerColorStart}/g, headerColorStart)
+            .replace(/{headerColorEnd}/g, headerColorEnd)
+            .replace(/{headerBorderColor}/g, headerBorderColor);
+
+        const subject = \`[\${actionName}] \${docTitle}\`;
+
+        const mailOptions = {
+            from: '"Hệ thống quản lý văn bản NSG" <qlvb@nsgpc.edu.vn>',
+            to: '"Hệ thống quản lý văn bản NSG" <qlvb@nsgpc.edu.vn>',
+            bcc: bccList.join(','),
+            subject: subject,
+            html: htmlContent,
+        }
+        await transporter.sendMail(mailOptions).catch(err => console.error(\`Error sending email:\`, err));
+        return true;
+    } catch (error) {
+        console.error("Error sending review notification to email:", error);
     }
 }
 
@@ -239,5 +331,6 @@ module.exports = {
     sentTempPassword,
     sendNewDocumentEmail,
     sendTaskReminderEmail,
-    sendTaskNotificationEmail
+    sendTaskNotificationEmail,
+    sendReviewNotificationEmail
 }

@@ -7,11 +7,18 @@ const triggerDocumentNotifications = async (document) => {
     try {
         // The Document pre-save middleware resolves executors and departments into assignedToUsers
         let targetUsers = [];
-        const { assignedToUsers } = document;
+        const { assignedToUsers, departments } = document;
 
         if (assignedToUsers && assignedToUsers.length > 0) {
             const userIds = assignedToUsers.map(u => u.userId || u);
-            targetUsers = await User.find({ _id: { $in: userIds } });
+            const assignedUsers = await User.find({ _id: { $in: userIds } });
+            targetUsers.push(...assignedUsers);
+        }
+
+        // Bổ sung lấy những người thuộc phòng ban nhận văn bản (đặc biệt cho văn bản đi)
+        if (departments && departments.length > 0) {
+            const deptUsers = await User.find({ department: { $in: departments }, role: { $ne: null } });
+            targetUsers.push(...deptUsers);
         }
 
         const uniqueUsers = Array.from(new Set(targetUsers.map(u => u._id.toString())))

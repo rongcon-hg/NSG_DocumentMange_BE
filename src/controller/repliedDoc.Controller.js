@@ -9,6 +9,7 @@ const Document = require("../models/document.model");
 const User = require("../models/user.model");
 const dotenv = require("dotenv");
 const { Readable } = require("stream");
+const { sendReviewNotificationEmail } = require("../service/NodeMailer.service/email");
 dotenv.config();
 
 const DriveConfig = require('../models/driveConfig.model');
@@ -279,6 +280,25 @@ const updateReplyDocStatus = async (req, res) => {
       // Lưu document để kích hoạt middleware pre-save
       await repliedDoc.save();
   
+      // GỬI EMAIL THÔNG BÁO CHO NGƯỜI SOẠN THẢO (DRAFTER)
+      try {
+        const fullDoc = await RepliedDoc.findById(repliedDocId)
+          .populate({ path: 'replyBy', select: 'name email' })
+          .populate({ path: 'docVariant', select: 'docVariantName' })
+          .populate({ 
+            path: 'repliedDoc', 
+            select: 'docCode docNum shortDescription',
+            populate: { path: 'sentBy', select: 'name email' }
+          });
+        if (fullDoc && fullDoc.repliedDoc && fullDoc.repliedDoc.sentBy) {
+          const actionType = newStatus === 'approved' ? 'managerAccept' : 'managerReject';
+          const notes = req.body.rejectionReason || "Không có";
+          await sendReviewNotificationEmail([fullDoc.repliedDoc.sentBy], fullDoc, actionType, notes);
+        }
+      } catch (err) {
+        console.error("Error sending email on updateReplyDocStatus:", err);
+      }
+
       res.status(200).json({
         message: `Document has been ${newStatus} successfully`,
         data: repliedDoc,
@@ -829,6 +849,24 @@ const sentToReview = async (req, res) => {
     repliedDoc.reviewer = new mongoose.Types.ObjectId(reviewerId);
     await repliedDoc.save();
 
+    // GỬI EMAIL THÔNG BÁO CHO BGH
+    try {
+      const fullDoc = await RepliedDoc.findById(id)
+        .populate({ path: 'reviewer', select: 'name email' })
+        .populate({ path: 'replyBy', select: 'name email' })
+        .populate({ path: 'docVariant', select: 'docVariantName' })
+        .populate({ 
+          path: 'repliedDoc', 
+          select: 'docCode docNum shortDescription',
+          populate: { path: 'sentBy', select: 'name email' } 
+        });
+      if (fullDoc && fullDoc.reviewer) {
+        await sendReviewNotificationEmail([fullDoc.reviewer], fullDoc, 'submitToBGH', '');
+      }
+    } catch (err) {
+      console.error("Error sending email on sentToReview:", err);
+    }
+
     return res.json({
       isSuccess: true,
       message: "Document sent to reviewer successfully",
@@ -949,6 +987,30 @@ const reviewerAction = async (req, res) => {
     }
 
     await repliedDoc.save();
+
+    // GỬI EMAIL THÔNG BÁO TỪ CHỐI CHO MANAGER VÀ DRAFTER
+    if (action === "rejectedByReviewer") {
+      try {
+        const fullDoc = await RepliedDoc.findById(id)
+          .populate({ path: 'replyBy', select: 'name email' })
+          .populate({ path: 'docVariant', select: 'docVariantName' })
+          .populate({ 
+            path: 'repliedDoc', 
+            select: 'docCode docNum shortDescription',
+            populate: { path: 'sentBy', select: 'name email' } 
+          });
+        if (fullDoc) {
+          const recipients = [];
+          if (fullDoc.replyBy) recipients.push(fullDoc.replyBy);
+          if (fullDoc.repliedDoc && fullDoc.repliedDoc.sentBy) recipients.push(fullDoc.repliedDoc.sentBy);
+          if (recipients.length > 0) {
+            await sendReviewNotificationEmail(recipients, fullDoc, 'bghReject', reviewerNotes);
+          }
+        }
+      } catch (err) {
+        console.error("Error sending email on reviewerAction:", err);
+      }
+    }
 
     return res.json({
       isSuccess: true,

@@ -40,8 +40,8 @@ const NEW_DOCUMENT_EMAIL_TEMPLATE = `
     <h1 style="color: #fff; margin: 0;">Thông báo văn bản mới</h1> 
   </div> 
   <div style="background-color: #F9F9F9; padding: 20px; border-radius: 0 0 5px 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);"> 
-    <p>Xin chào <strong>{recipientName}</strong>,</p> 
-    <p>Hệ thống Quản lý văn bản NSG vừa ghi nhận một văn bản mới liên quan đến bạn (được phát hành/chuyển đến bởi <strong>{senderName}</strong>):</p> 
+    <p>Kính chào Quý Thầy/Cô,</p> 
+    <p>Hệ thống Quản lý văn bản NSG vừa ghi nhận một văn bản mới liên quan đến Quý Thầy/Cô (được phát hành/chuyển đến bởi <strong>{senderName}</strong>):</p> 
     <div style="background: #fff; padding: 15px; border-left: 4px solid #4CAF50; margin: 20px 0;"> 
       <p><strong>Số/Ký hiệu:</strong> {docCode}</p> 
       <p><strong>Ngày phát hành/Ngày đến:</strong> {dateValue}</p> 
@@ -75,8 +75,8 @@ const TASK_NOTIFICATION_EMAIL_TEMPLATE = `
     <h1 style="color: #fff; margin: 0;">Thông báo: {actionName}</h1>
   </div>
   <div style="background-color: #F9F9F9; padding: 20px; border-radius: 0 0 5px 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
-    <p>Xin chào <strong>{recipientName}</strong>,</p>
-    <p>Hệ thống Quản lý văn bản NSG vừa ghi nhận một sự kiện công việc liên quan đến bạn: <strong>{actionName}</strong></p>
+    <p>Kính chào Quý Thầy/Cô,</p>
+    <p>Hệ thống Quản lý văn bản NSG vừa ghi nhận một sự kiện công việc liên quan đến Quý Thầy/Cô: <strong>{actionName}</strong></p>
     
     {priorityHighlightBlock}
     
@@ -101,8 +101,45 @@ const TASK_NOTIFICATION_EMAIL_TEMPLATE = `
 </html>
 `;
 
+const REVIEW_NOTIFICATION_EMAIL_TEMPLATE = `
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Thông báo trình ký: {actionName}</title>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <div style="background: linear-gradient(to right, {headerColorStart}, {headerColorEnd}); padding: 20px; text-align: center;">
+    <h1 style="color: #fff; margin: 0;">Thông báo trình ký: {actionName}</h1>
+  </div>
+  <div style="background-color: #F9F9F9; padding: 20px; border-radius: 0 0 5px 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
+    <p>Kính chào Quý Thầy/Cô,</p>
+    <p>Hệ thống Quản lý văn bản NSG vừa ghi nhận một sự kiện xét duyệt trình ký liên quan đến Quý Thầy/Cô: <strong>{actionName}</strong></p>
+    
+    <div style="background: #fff; padding: 15px; border-left: 4px solid {headerBorderColor}; margin: 20px 0;">
+      <p><strong>Tiêu đề / Trích yếu:</strong> {docTitle}</p>
+      <p><strong>Số/Ký hiệu:</strong> {docCode}</p>
+      <p><strong>Loại văn bản:</strong> {docType}</p>
+      <p><strong>Người soạn thảo:</strong> {drafter}</p>
+      <p><strong>Người trình ký:</strong> {submitter}</p>
+      <p><strong>Trạng thái:</strong> {statusLabel}</p>
+      <p><strong>Ghi chú / Ý kiến:</strong> {notes}</p>
+      <br>
+      <p><strong>Tệp đính kèm:</strong></p>
+      <ul style="padding-left: 20px;">
+        {linksHtml}
+      </ul>
+    </div>
+    <p>Vui lòng đăng nhập vào hệ thống để xem chi tiết.</p>
+    <p>Trân trọng,<br>Hệ thống Quản lý văn bản NSG</p>
+  </div>
+</body>
+</html>
+`;
+
 module.exports = {
   TEMPPASSWORD_EMAIL_TEMPLATE,
   NEW_DOCUMENT_EMAIL_TEMPLATE,
-  TASK_NOTIFICATION_EMAIL_TEMPLATE
+  TASK_NOTIFICATION_EMAIL_TEMPLATE,
+  REVIEW_NOTIFICATION_EMAIL_TEMPLATE
 }

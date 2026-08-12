@@ -23,9 +23,8 @@ const executeTaskReminders = async () => {
                 // 1. Quá hạn (1 ngày sau ngày hết hạn)
                 if (daysDiff === -1 && !task.overdueReminderSent) {
                     if (task.assignees && task.assignees.length > 0) {
-                        for (const user of task.assignees) {
-                            await sendTaskReminderEmail(user.email, task, "overdue");
-                        }
+                        const emails = task.assignees.map(u => u.email).filter(e => !!e);
+                        await sendTaskReminderEmail(emails, task, "overdue");
                     }
                     task.overdueReminderSent = true;
                     await task.save();
@@ -34,18 +33,16 @@ const executeTaskReminders = async () => {
                 // 2. Đúng ngày hạn
                 else if (daysDiff === 0) {
                     if (task.assignees && task.assignees.length > 0) {
-                        for (const user of task.assignees) {
-                            await sendTaskReminderEmail(user.email, task, "due_today");
-                        }
+                        const emails = task.assignees.map(u => u.email).filter(e => !!e);
+                        await sendTaskReminderEmail(emails, task, "due_today");
                     }
                 }
                 
                 // 3. Trước hạn <= 3 ngày (Gửi 1 lần)
                 else if (daysDiff > 0 && daysDiff <= 3 && !task.nearDeadlineReminderSent) {
                     if (task.assignees && task.assignees.length > 0) {
-                        for (const user of task.assignees) {
-                            await sendTaskReminderEmail(user.email, task, "near_deadline");
-                        }
+                        const emails = task.assignees.map(u => u.email).filter(e => !!e);
+                        await sendTaskReminderEmail(emails, task, "near_deadline");
                     }
                     task.nearDeadlineReminderSent = true;
                     await task.save();
