@@ -263,7 +263,7 @@ const sendTaskNotificationEmail = async (uniqueUsers, taskData, actionType) => {
     }
 }
 
-const sendReviewNotificationEmail = async (uniqueUsers, docData, actionType, notes = "") => {
+const sendReviewNotificationEmail = async (uniqueUsers, docData, actionType, notes = "", actorName = "") => {
     try {
         if (!uniqueUsers || uniqueUsers.length === 0) return;
         const bccList = uniqueUsers.map(u => u.email).filter(e => !!e);
@@ -278,25 +278,25 @@ const sendReviewNotificationEmail = async (uniqueUsers, docData, actionType, not
         let headerBorderColor = "#2196F3";
 
         if (actionType === 'submitToBGH') {
-            actionName = "Yêu cầu BGH xét duyệt";
+            actionName = actorName ? `${actorName} yêu cầu BGH xét duyệt` : "Yêu cầu BGH xét duyệt";
             statusLabel = '<span style="color: #ff9800; font-weight: bold;">Chờ BGH duyệt</span>';
             headerColorStart = "#ff9800";
             headerColorEnd = "#ffb74d";
             headerBorderColor = "#ff9800";
         } else if (actionType === 'bghReject') {
-            actionName = "BGH từ chối phê duyệt";
+            actionName = actorName ? `${actorName} từ chối phê duyệt` : "BGH từ chối phê duyệt";
             statusLabel = '<span style="color: #f44336; font-weight: bold;">BGH Từ chối</span>';
             headerColorStart = "#f44336";
             headerColorEnd = "#ef5350";
             headerBorderColor = "#f44336";
         } else if (actionType === 'managerAccept') {
-            actionName = "Manager đã chấp nhận";
+            actionName = actorName ? `${actorName} đã chấp nhận` : "Manager đã chấp nhận";
             statusLabel = '<span style="color: #4CAF50; font-weight: bold;">Đã chấp nhận</span>';
             headerColorStart = "#4CAF50";
             headerColorEnd = "#66bb6a";
             headerBorderColor = "#4CAF50";
         } else if (actionType === 'managerReject') {
-            actionName = "Manager từ chối phê duyệt";
+            actionName = actorName ? `${actorName} từ chối phê duyệt` : "Manager từ chối phê duyệt";
             statusLabel = '<span style="color: #f44336; font-weight: bold;">Từ chối</span>';
             headerColorStart = "#f44336";
             headerColorEnd = "#ef5350";
