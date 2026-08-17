@@ -1,4 +1,4 @@
-const { sendNewDocumentEmail } = require("./NodeMailer.service/email");
+const { sendNewDocumentEmail, sendTaskNotificationEmail } = require("./NodeMailer.service/email");
 const User = require("../models/user.model");
 const Task = require("../models/task.model");
 const { google } = require("googleapis");
@@ -65,8 +65,15 @@ const createTasksAndSyncGoogleCalendar = async (document, uniqueUsers) => {
         
         const taskTitle = `Xử lý VB: ${fullDocCode} - ${document.shortDescription || document.principalIdea || 'N/A'}`;
         const taskDescription = document.shortDescription || 'N/A';
-        const startDate = document.createAt || new Date();
+        const startDate = document.receivedAt || document.createAt || new Date();
         const endDate = new Date(document.deadlineDay);
+
+        let taskPriority = 'NORMAL';
+        if (document.urgency === 'high') {
+            taskPriority = 'URGENT';
+        } else if (document.urgency === 'immediately') {
+            taskPriority = 'FLASH';
+        }
 
         // Ensure valid creator
         const createdBy = document.sentBy || document.sender || (uniqueUsers[0] ? uniqueUsers[0]._id : null);
@@ -80,6 +87,7 @@ const createTasksAndSyncGoogleCalendar = async (document, uniqueUsers) => {
                 assignees: uniqueUsers.map(u => u._id),
                 createdBy: createdBy,
                 relatedDocument: document._id,
+                priority: taskPriority,
                 files: document.files ? document.files.map(f => ({
                     fileId: f.fileId,
                     fileName: f.fileName,
@@ -87,6 +95,14 @@ const createTasksAndSyncGoogleCalendar = async (document, uniqueUsers) => {
                 })) : []
             });
             await newTask.save().catch(err => console.error("Error saving task:", err));
+            // Send email to task users (assignees)
+            if (uniqueUsers.length > 0) {
+                const taskDataForEmail = {
+                    ...newTask.toObject(),
+                    assignees: uniqueUsers
+                };
+                sendTaskNotificationEmail(uniqueUsers, taskDataForEmail, 'create').catch(err => console.error("Error sending task email:", err));
+            }
         }
 
         // Sync with Google Calendar for users that have linked accounts
