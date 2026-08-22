@@ -112,11 +112,19 @@ const signPdf = async (req, res) => {
     try {
         const userId = req.user._id;
         const file = req.file;
-        const { x, y, width, height, pageNum } = req.body;
+        let signatures = req.body.signatures; // Dạng JSON string từ frontend
 
         if (!file) return res.status(400).json({ message: "No document provided" });
-        if (!x || !y || !width || !height || !pageNum) {
-            return res.status(400).json({ message: "Missing signature coordinates" });
+        if (!signatures) return res.status(400).json({ message: "Missing signatures data" });
+        
+        try {
+            signatures = JSON.parse(signatures);
+        } catch (e) {
+            return res.status(400).json({ message: "Invalid signatures format" });
+        }
+
+        if (!Array.isArray(signatures) || signatures.length === 0) {
+            return res.status(400).json({ message: "No signature coordinates provided" });
         }
 
         const user = await User.findById(userId);
@@ -141,63 +149,56 @@ const signPdf = async (req, res) => {
         // Load PDF
         const pdfDoc = await PDFDocument.load(pdfBuffer);
         const pages = pdfDoc.getPages();
-        const targetPage = pages[parseInt(pageNum) - 1]; // pageNum 1-indexed
 
-        if (!targetPage) return res.status(400).json({ message: "Invalid page number" });
-
-        // Nhúng hình ảnh
+        // Nhúng hình ảnh (chỉ cần nhúng 1 lần)
         let image;
         if (user.signature.mimeType === "image/png") {
             image = await pdfDoc.embedPng(signatureImageBuffer);
         } else if (user.signature.mimeType === "image/jpeg" || user.signature.mimeType === "image/jpg") {
             image = await pdfDoc.embedJpg(signatureImageBuffer);
         } else {
-            // Cố gắng embed dạng PNG trước
             try { image = await pdfDoc.embedPng(signatureImageBuffer); }
             catch(e) { image = await pdfDoc.embedJpg(signatureImageBuffer); }
         }
-
-        // Đóng dấu hình ảnh
-        targetPage.drawImage(image, {
-            x: parseFloat(x),
-            y: parseFloat(y),
-            width: parseFloat(width),
-            height: parseFloat(height),
-        });
-
-        // Đóng dấu Timestamp + Tên người ký (Dùng font chuẩn không dấu)
+        
         const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
         const now = new Date();
         const timeString = `${now.getDate().toString().padStart(2, '0')}/${(now.getMonth()+1).toString().padStart(2, '0')}/${now.getFullYear()} ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
         const stampText = `Ky boi: ${removeVietnameseTones(user.name)}\nThoi gian: ${timeString}`;
 
-        targetPage.drawText(stampText, {
-            x: parseFloat(x),
-            y: parseFloat(y) - 25, // Viết ngay dưới chữ ký
-            size: 10,
-            font,
-            color: rgb(0, 0, 0.8),
-            lineHeight: 12
-        });
+        // Lặp qua từng vị trí chữ ký
+        for (const sig of signatures) {
+            const targetPage = pages[parseInt(sig.pageNum) - 1]; // pageNum 1-indexed
+            if (!targetPage) continue; // Bỏ qua nếu trang không hợp lệ
+
+            // Đóng dấu hình ảnh
+            targetPage.drawImage(image, {
+                x: parseFloat(sig.x),
+                y: parseFloat(sig.y),
+                width: parseFloat(sig.width),
+                height: parseFloat(sig.height),
+            });
+
+            // Đóng dấu Text
+            targetPage.drawText(stampText, {
+                x: parseFloat(sig.x),
+                y: parseFloat(sig.y) - 25, 
+                size: 10,
+                font,
+                color: rgb(0, 0, 0.8),
+                lineHeight: 12
+            });
+        }
 
         const signedPdfBytes = await pdfDoc.save();
 
         // Lưu file PDF đã ký lên Google Drive
         const folderId = await getOrCreateMonthFolder(drive);
-        
-        // Đặt tên file: Tên gốc (bỏ đuôi .docx) + _signed.pdf
         const originalBaseName = file.originalname.replace(/\.[^/.]+$/, "");
         const signedFileName = `${sanitizeFileName(originalBaseName)}_signed.pdf`;
 
-        const fileMetadata = {
-            name: signedFileName,
-            parents: [folderId],
-        };
-
-        const media = {
-            mimeType: "application/pdf",
-            body: Readable.from(Buffer.from(signedPdfBytes)),
-        };
+        const fileMetadata = { name: signedFileName, parents: [folderId] };
+        const media = { mimeType: "application/pdf", body: Readable.from(Buffer.from(signedPdfBytes)) };
 
         const uploadRes = await drive.files.create({
             requestBody: fileMetadata,
@@ -216,11 +217,7 @@ const signPdf = async (req, res) => {
         });
         await signedDoc.save();
 
-        res.status(200).json({
-            message: "Document signed successfully",
-            signedDocument: signedDoc
-        });
-
+        res.status(200).json({ message: "Document signed successfully", signedDocument: signedDoc });
     } catch (error) {
         console.error("Error signing PDF:", error);
         res.status(500).json({ message: "Server Error", error: error.message });
@@ -238,9 +235,32 @@ const getMyArchive = async (req, res) => {
     }
 };
 
+const convertPreview = async (req, res) => {
+    try {
+        const file = req.file;
+        if (!file) return res.status(400).json({ message: "No file provided" });
+
+        let pdfBuffer = file.buffer;
+        if (file.mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || 
+            file.mimetype === "application/msword") {
+            pdfBuffer = await libreConvert(file.buffer, ".pdf", undefined);
+        }
+
+        res.set({
+            "Content-Type": "application/pdf",
+            "Content-Disposition": "inline; filename=preview.pdf",
+        });
+        res.send(pdfBuffer);
+    } catch (error) {
+        console.error("Error converting for preview:", error);
+        res.status(500).json({ message: "Server Error during conversion" });
+    }
+};
+
 module.exports = {
     getMySignature,
     uploadSignature,
     signPdf,
-    getMyArchive
+    getMyArchive,
+    convertPreview
 };

@@ -16,4 +16,7 @@ router.get("/archive", verifyToken, signatureController.getMyArchive);
 // Đóng dấu tài liệu
 router.post("/sign-pdf", verifyToken, upload.single("pdfFile"), signatureController.signPdf);
 
+// Chuyển đổi DOCX sang PDF để Preview
+router.post("/convert-preview", verifyToken, upload.single("file"), signatureController.convertPreview);
+
 module.exports = router;
