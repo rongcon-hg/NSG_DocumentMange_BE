@@ -14,7 +14,7 @@ const cors = require("cors");
 const compression = require("compression");
 
 // Security Headers
-app.use(helmet());
+app.use(helmet({ crossOriginResourcePolicy: false }));
 
 // Compress API responses
 app.use(compression());
