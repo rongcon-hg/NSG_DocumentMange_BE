@@ -895,15 +895,19 @@ async function updateDocument(req, res) {
           existingDocument.history = [];
         }
         
-        // Nếu là Forwarded, có thể thêm danh sách người nhận vào note nếu có
         let historyNote = "";
+        let forwardedTo = [];
         if (req.body.historyAction === "Forwarded" && req.body.forwardedUsers) {
-           // Có thể lấy tên từ DB nhưng để đơn giản, ta chỉ lưu id hoặc rỗng để frontend tự tra (hoặc không cần thiết nếu ta đã xử lý ở giao diện)
+          try {
+             const fUsers = typeof req.body.forwardedUsers === "string" ? JSON.parse(req.body.forwardedUsers) : req.body.forwardedUsers;
+             forwardedTo = fUsers.map(id => new mongoose.Types.ObjectId(id));
+          } catch (e) {}
         }
         
         existingDocument.history.push({
           action: req.body.historyAction,
           actor: req.body.historyActor,
+          forwardedTo: forwardedTo,
           date: new Date(),
           note: req.body.historyNote || historyNote
         });
