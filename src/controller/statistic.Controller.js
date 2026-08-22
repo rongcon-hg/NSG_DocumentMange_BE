@@ -14,7 +14,7 @@ async function getUserStatistics(req, res) {
       userId
     } = req.query;
 
-    const query = { role: { $in: ['manager', 'staff'] } };
+    const query = { role: { $in: ['manager', 'staff', 'cappho', 'chuyenvien'] } };
     if (userId) {
       query._id = new mongoose.Types.ObjectId(String(userId));
     }

@@ -1066,7 +1066,7 @@ const countInReviewReplyDocs = async (req, res) => {
     // Nếu user là manager hoặc admin → lấy tất cả
     if (["manager", "admin"].includes(user.role)) {
       // filter giữ nguyên → lấy ALL inReview
-    } else if (user.role === "staff") {
+    } else if (["staff", "cappho", "chuyenvien"].includes(user.role)) {
       // User thường → chỉ lấy những gì họ xét duyệt
       filter.reviewer = reviewerId;
     } else {

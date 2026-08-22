@@ -278,7 +278,7 @@ async function exportAllUserStatistics(req, res) {
   try {
     const { year, docVariantId, fromDate, toDate, userId } = req.query;
 
-    const query = { role: { $in: ['manager', 'staff'] } };
+    const query = { role: { $in: ['manager', 'staff', 'cappho', 'chuyenvien'] } };
     if (userId) {
       query._id = new mongoose.Types.ObjectId(String(userId));
     }

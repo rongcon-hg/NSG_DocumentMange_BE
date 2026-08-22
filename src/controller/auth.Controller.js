@@ -9,7 +9,7 @@ const dotenv = require("dotenv");
 const { read } = require("fs");
 dotenv.config();
 const characters = process.env.CHARACTERS;
-const VALID_ROLES = ["staff", "manager"];
+const VALID_ROLES = ["staff", "manager", "cappho", "chuyenvien"];
 
 const createUser = async (req,res)=>{
     const {email,password,name,mobile,position,department,description,role} = req.body;
