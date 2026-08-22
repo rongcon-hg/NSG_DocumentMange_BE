@@ -19,4 +19,7 @@ router.post("/sign-pdf", verifyToken, upload.single("pdfFile"), signatureControl
 // Chuyển đổi DOCX sang PDF để Preview
 router.post("/convert-preview", verifyToken, upload.single("file"), signatureController.convertPreview);
 
+// Proxy ảnh chữ ký
+router.get("/image/:fileId", signatureController.getSignatureImage);
+
 module.exports = router;

@@ -56,15 +56,6 @@ const uploadSignature = async (req, res) => {
             supportsAllDrives: true
         });
 
-        // Đặt quyền truy cập công khai để Frontend có thể hiển thị ảnh qua thẻ <img>
-        await drive.permissions.create({
-            fileId: response.data.id,
-            requestBody: {
-                role: "reader",
-                type: "anyone"
-            }
-        });
-
         // Cập nhật URL / fileId vào User
         user.signature = {
             fileId: response.data.id,
@@ -266,10 +257,30 @@ const convertPreview = async (req, res) => {
     }
 };
 
+const getSignatureImage = async (req, res) => {
+    try {
+        const fileId = req.params.fileId;
+        const auth = await authorize();
+        const drive = google.drive({ version: "v3", auth });
+        const buffer = await getDriveFileBuffer(drive, fileId);
+        
+        // Cố gắng lấy mimeType, hoặc mặc định image/png
+        res.set({
+            "Content-Type": "image/png",
+            "Cache-Control": "public, max-age=86400"
+        });
+        res.send(buffer);
+    } catch (error) {
+        console.error("Error fetching signature image:", error);
+        res.status(500).json({ message: "Error fetching image" });
+    }
+};
+
 module.exports = {
     getMySignature,
     uploadSignature,
     signPdf,
     getMyArchive,
-    convertPreview
+    convertPreview,
+    getSignatureImage
 };
