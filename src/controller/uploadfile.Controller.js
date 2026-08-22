@@ -706,8 +706,6 @@ async function updateDocument(req, res) {
         return res.status(404).json({ message: "Document not found" });
       }
   
-
-  
       const fieldsToUpdate = [
         "sentBy",
         "docType",
@@ -803,6 +801,32 @@ async function updateDocument(req, res) {
           }
         }
       }
+        
+        if (req.body.forwardedUsers) {
+          let fUsers = [];
+          if (typeof req.body.forwardedUsers === "string") {
+            try { fUsers = JSON.parse(req.body.forwardedUsers); } catch(e) {}
+          } else if (Array.isArray(req.body.forwardedUsers)) {
+            fUsers = req.body.forwardedUsers;
+          }
+          
+          if (fUsers.length > 0) {
+            if (!existingDocument.assignedToUsers) existingDocument.assignedToUsers = [];
+            fUsers.forEach(userId => {
+              // Ensure we don't add duplicates
+              const exists = existingDocument.assignedToUsers.some(a => a.userId.toString() === userId.toString());
+              if (!exists) {
+                existingDocument.assignedToUsers.push({
+                  userId: new mongoose.Types.ObjectId(userId),
+                  status: "received",
+                  isRead: false,
+                  receivedDate: null,
+                  onTime: null
+                });
+              }
+            });
+          }
+        }
   
       // Handle file updates
       let updatedFiles = existingDocument.files || [];
@@ -870,10 +894,18 @@ async function updateDocument(req, res) {
         if (!existingDocument.history) {
           existingDocument.history = [];
         }
+        
+        // Nếu là Forwarded, có thể thêm danh sách người nhận vào note nếu có
+        let historyNote = "";
+        if (req.body.historyAction === "Forwarded" && req.body.forwardedUsers) {
+           // Có thể lấy tên từ DB nhưng để đơn giản, ta chỉ lưu id hoặc rỗng để frontend tự tra (hoặc không cần thiết nếu ta đã xử lý ở giao diện)
+        }
+        
         existingDocument.history.push({
           action: req.body.historyAction,
           actor: req.body.historyActor,
-          date: new Date()
+          date: new Date(),
+          note: req.body.historyNote || historyNote
         });
       }
 

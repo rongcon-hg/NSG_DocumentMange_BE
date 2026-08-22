@@ -143,6 +143,7 @@ const documentSchema = new mongoose.Schema(
         action: { type: String, enum: ["Issued", "Forwarded"] },
         actor: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
         date: { type: Date, default: Date.now },
+        note: { type: String }
       }
     ]
   },
