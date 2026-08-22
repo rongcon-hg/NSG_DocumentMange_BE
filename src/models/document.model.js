@@ -170,9 +170,20 @@ documentSchema.pre('save', async function (next) {
     // Bước 1: Xử lý assignedToUsers ban đầu (ưu tiên giữ nguyên thông tin)
     if (Array.isArray(this.assignedToUsers)) {
       this.assignedToUsers.forEach(user => {
+        let newOnTime = user.onTime;
+        // Chỉ tự động gán lại nếu chưa có giá trị onTime hợp lệ (trường hợp tạo mới văn bản)
+        if (newOnTime === undefined || (newOnTime !== null && !["soon", "pending", "late", "onTime"].includes(newOnTime))) {
+           newOnTime = this.deadlineDay ? "pending" : "onTime";
+        }
+        
+        // Nếu user đã được set onTime: null từ controller (chẳng hạn forward) thì GIỮ NGUYÊN
+        if (user.onTime === null) {
+           newOnTime = null; 
+        }
+
         const preparedUser = {
           ...user._doc, // giữ tất cả field gốc
-          onTime: this.deadlineDay ? "pending" : "onTime", // gán onTime ban đầu
+          onTime: newOnTime,
         };
         autoAssignedUsers.set(user.userId.toString(), preparedUser);
       });
