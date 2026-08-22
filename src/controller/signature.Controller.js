@@ -76,12 +76,171 @@ const uploadSignature = async (req, res) => {
     }
 };
 
+const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
+const libre = require("libreoffice-convert");
+const { promisify } = require("util");
+const libreConvert = promisify(libre.convert);
+const SignedDocument = require("../models/signedDocument.model");
+
+// Helper: Tải file từ Google Drive về Buffer
+const getDriveFileBuffer = async (drive, fileId) => {
+    const response = await drive.files.get({ fileId, alt: "media" }, { responseType: "arraybuffer" });
+    return Buffer.from(response.data);
+};
+
+// Helper: Xóa dấu Tiếng Việt (do StandardFonts không hỗ trợ Unicode)
+const removeVietnameseTones = (str) => {
+    if (!str) return "";
+    str = str.replace(/à|á|ạ|ả|ã|â|ầ|ấ|ậ|ẩ|ẫ|ă|ằ|ắ|ặ|ẳ|ẵ/g, "a");
+    str = str.replace(/è|é|ẹ|ẻ|ẽ|ê|ề|ế|ệ|ể|ễ/g, "e");
+    str = str.replace(/ì|í|ị|ỉ|ĩ/g, "i");
+    str = str.replace(/ò|ó|ọ|ỏ|õ|ô|ồ|ố|ộ|ổ|ỗ|ơ|ờ|ớ|ợ|ở|ỡ/g, "o");
+    str = str.replace(/ù|ú|ụ|ủ|ũ|ư|ừ|ứ|ự|ử|ữ/g, "u");
+    str = str.replace(/ỳ|ý|ỵ|ỷ|ỹ/g, "y");
+    str = str.replace(/đ/g, "d");
+    str = str.replace(/À|Á|Ạ|Ả|Ã|Â|Ầ|Ấ|Ậ|Ẩ|Ẫ|Ă|Ằ|Ắ|Ặ|Ẳ|Ẵ/g, "A");
+    str = str.replace(/È|É|Ẹ|Ẻ|Ẽ|Ê|Ề|Ế|Ệ|Ể|Ễ/g, "E");
+    str = str.replace(/Ì|Í|Ị|Ỉ|Ĩ/g, "I");
+    str = str.replace(/Ò|Ó|Ọ|Ỏ|Õ|Ô|Ồ|Ố|Ộ|Ổ|Ỗ|Ơ|Ờ|Ớ|Ợ|Ở|Ỡ/g, "O");
+    str = str.replace(/Ù|Ú|Ụ|Ủ|Ũ|Ư|Ừ|Ứ|Ự|Ử|Ữ/g, "U");
+    str = str.replace(/Ỳ|Ý|Ỵ|Ỷ|Ỹ/g, "Y");
+    str = str.replace(/Đ/g, "D");
+    return str;
+};
+
 const signPdf = async (req, res) => {
-    res.status(501).json({ message: "Not implemented yet" });
+    try {
+        const userId = req.user._id;
+        const file = req.file;
+        const { x, y, width, height, pageNum } = req.body;
+
+        if (!file) return res.status(400).json({ message: "No document provided" });
+        if (!x || !y || !width || !height || !pageNum) {
+            return res.status(400).json({ message: "Missing signature coordinates" });
+        }
+
+        const user = await User.findById(userId);
+        if (!user || !user.signature || !user.signature.fileId) {
+            return res.status(400).json({ message: "User has no configured signature" });
+        }
+
+        let pdfBuffer = file.buffer;
+        
+        // Chuyển đổi Word sang PDF nếu cần
+        if (file.mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || 
+            file.mimetype === "application/msword") {
+            pdfBuffer = await libreConvert(file.buffer, ".pdf", undefined);
+        }
+
+        const auth = await authorize();
+        const drive = google.drive({ version: "v3", auth });
+
+        // Tải ảnh chữ ký từ Drive
+        const signatureImageBuffer = await getDriveFileBuffer(drive, user.signature.fileId);
+
+        // Load PDF
+        const pdfDoc = await PDFDocument.load(pdfBuffer);
+        const pages = pdfDoc.getPages();
+        const targetPage = pages[parseInt(pageNum) - 1]; // pageNum 1-indexed
+
+        if (!targetPage) return res.status(400).json({ message: "Invalid page number" });
+
+        // Nhúng hình ảnh
+        let image;
+        if (user.signature.mimeType === "image/png") {
+            image = await pdfDoc.embedPng(signatureImageBuffer);
+        } else if (user.signature.mimeType === "image/jpeg" || user.signature.mimeType === "image/jpg") {
+            image = await pdfDoc.embedJpg(signatureImageBuffer);
+        } else {
+            // Cố gắng embed dạng PNG trước
+            try { image = await pdfDoc.embedPng(signatureImageBuffer); }
+            catch(e) { image = await pdfDoc.embedJpg(signatureImageBuffer); }
+        }
+
+        // Đóng dấu hình ảnh
+        targetPage.drawImage(image, {
+            x: parseFloat(x),
+            y: parseFloat(y),
+            width: parseFloat(width),
+            height: parseFloat(height),
+        });
+
+        // Đóng dấu Timestamp + Tên người ký (Dùng font chuẩn không dấu)
+        const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+        const now = new Date();
+        const timeString = `${now.getDate().toString().padStart(2, '0')}/${(now.getMonth()+1).toString().padStart(2, '0')}/${now.getFullYear()} ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+        const stampText = `Ky boi: ${removeVietnameseTones(user.name)}\nThoi gian: ${timeString}`;
+
+        targetPage.drawText(stampText, {
+            x: parseFloat(x),
+            y: parseFloat(y) - 25, // Viết ngay dưới chữ ký
+            size: 10,
+            font,
+            color: rgb(0, 0, 0.8),
+            lineHeight: 12
+        });
+
+        const signedPdfBytes = await pdfDoc.save();
+
+        // Lưu file PDF đã ký lên Google Drive
+        const folderId = await getOrCreateMonthFolder(drive);
+        
+        // Đặt tên file: Tên gốc (bỏ đuôi .docx) + _signed.pdf
+        const originalBaseName = file.originalname.replace(/\.[^/.]+$/, "");
+        const signedFileName = `${sanitizeFileName(originalBaseName)}_signed.pdf`;
+
+        const fileMetadata = {
+            name: signedFileName,
+            parents: [folderId],
+        };
+
+        const media = {
+            mimeType: "application/pdf",
+            body: Readable.from(Buffer.from(signedPdfBytes)),
+        };
+
+        const uploadRes = await drive.files.create({
+            requestBody: fileMetadata,
+            media: media,
+            fields: "id, name, mimeType",
+            supportsAllDrives: true
+        });
+
+        // Lưu vào cơ sở dữ liệu
+        const signedDoc = new SignedDocument({
+            user: userId,
+            originalFileName: file.originalname,
+            signedFileName: uploadRes.data.name,
+            fileId: uploadRes.data.id,
+            mimeType: uploadRes.data.mimeType
+        });
+        await signedDoc.save();
+
+        res.status(200).json({
+            message: "Document signed successfully",
+            signedDocument: signedDoc
+        });
+
+    } catch (error) {
+        console.error("Error signing PDF:", error);
+        res.status(500).json({ message: "Server Error", error: error.message });
+    }
+};
+
+const getMyArchive = async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const docs = await SignedDocument.find({ user: userId }).sort({ signDate: -1 });
+        res.status(200).json({ data: docs });
+    } catch (error) {
+        console.error("Error fetching archive:", error);
+        res.status(500).json({ message: "Server Error" });
+    }
 };
 
 module.exports = {
     getMySignature,
     uploadSignature,
-    signPdf
+    signPdf,
+    getMyArchive
 };

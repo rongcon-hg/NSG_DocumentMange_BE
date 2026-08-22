@@ -10,6 +10,9 @@ router.get("/me", verifyToken, signatureController.getMySignature);
 // Tải lên chữ ký cá nhân
 router.post("/upload", verifyToken, upload.single("signatureImage"), signatureController.uploadSignature);
 
+// Lấy danh sách văn bản đã ký
+router.get("/archive", verifyToken, signatureController.getMyArchive);
+
 // Đóng dấu tài liệu
 router.post("/sign-pdf", verifyToken, upload.single("pdfFile"), signatureController.signPdf);
 
