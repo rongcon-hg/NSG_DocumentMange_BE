@@ -88,25 +88,7 @@ const getDriveFileBuffer = async (drive, fileId) => {
     return Buffer.from(response.data);
 };
 
-// Helper: Xóa dấu Tiếng Việt (do StandardFonts không hỗ trợ Unicode)
-const removeVietnameseTones = (str) => {
-    if (!str) return "";
-    str = str.replace(/à|á|ạ|ả|ã|â|ầ|ấ|ậ|ẩ|ẫ|ă|ằ|ắ|ặ|ẳ|ẵ/g, "a");
-    str = str.replace(/è|é|ẹ|ẻ|ẽ|ê|ề|ế|ệ|ể|ễ/g, "e");
-    str = str.replace(/ì|í|ị|ỉ|ĩ/g, "i");
-    str = str.replace(/ò|ó|ọ|ỏ|õ|ô|ồ|ố|ộ|ổ|ỗ|ơ|ờ|ớ|ợ|ở|ỡ/g, "o");
-    str = str.replace(/ù|ú|ụ|ủ|ũ|ư|ừ|ứ|ự|ử|ữ/g, "u");
-    str = str.replace(/ỳ|ý|ỵ|ỷ|ỹ/g, "y");
-    str = str.replace(/đ/g, "d");
-    str = str.replace(/À|Á|Ạ|Ả|Ã|Â|Ầ|Ấ|Ậ|Ẩ|Ẫ|Ă|Ằ|Ắ|Ặ|Ẳ|Ẵ/g, "A");
-    str = str.replace(/È|É|Ẹ|Ẻ|Ẽ|Ê|Ề|Ế|Ệ|Ể|Ễ/g, "E");
-    str = str.replace(/Ì|Í|Ị|Ỉ|Ĩ/g, "I");
-    str = str.replace(/Ò|Ó|Ọ|Ỏ|Õ|Ô|Ồ|Ố|Ộ|Ổ|Ỗ|Ơ|Ờ|Ớ|Ợ|Ở|Ỡ/g, "O");
-    str = str.replace(/Ù|Ú|Ụ|Ủ|Ũ|Ư|Ừ|Ứ|Ự|Ử|Ữ/g, "U");
-    str = str.replace(/Ỳ|Ý|Ỵ|Ỷ|Ỹ/g, "Y");
-    str = str.replace(/Đ/g, "D");
-    return str;
-};
+
 
 const signPdf = async (req, res) => {
     try {
@@ -161,11 +143,6 @@ const signPdf = async (req, res) => {
             catch(e) { image = await pdfDoc.embedJpg(signatureImageBuffer); }
         }
         
-        const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-        const now = new Date();
-        const timeString = `${now.getDate().toString().padStart(2, '0')}/${(now.getMonth()+1).toString().padStart(2, '0')}/${now.getFullYear()} ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-        const stampText = `Ky boi: ${removeVietnameseTones(user.name)}\nThoi gian: ${timeString}`;
-
         // Lặp qua từng vị trí chữ ký
         for (const sig of signatures) {
             const targetPage = pages[parseInt(sig.pageNum) - 1]; // pageNum 1-indexed
@@ -177,16 +154,6 @@ const signPdf = async (req, res) => {
                 y: parseFloat(sig.y),
                 width: parseFloat(sig.width),
                 height: parseFloat(sig.height),
-            });
-
-            // Đóng dấu Text
-            targetPage.drawText(stampText, {
-                x: parseFloat(sig.x),
-                y: parseFloat(sig.y) - 25, 
-                size: 10,
-                font,
-                color: rgb(0, 0, 0.8),
-                lineHeight: 12
             });
         }
 
