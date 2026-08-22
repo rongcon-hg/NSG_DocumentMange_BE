@@ -1309,5 +1309,9 @@ module.exports = {
     getTotalDocNum,
     getDeadlineStatusCounts,
     searchDocuments,
-    getUnreadDocCount
+    getUnreadDocCount,
+    authorize,
+    getDriveFolderId,
+    getOrCreateMonthFolder,
+    sanitizeFileName
  };

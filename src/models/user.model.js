@@ -65,6 +65,11 @@ const userSchema = new mongoose.Schema({
         type: Date,
     },
     google: googleSchema,
+    signature: {
+        fileId: { type: String },
+        fileName: { type: String },
+        mimeType: { type: String },
+    },
 },
 {
   timestamps: true,
