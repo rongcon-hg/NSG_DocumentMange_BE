@@ -56,6 +56,15 @@ const uploadSignature = async (req, res) => {
             supportsAllDrives: true
         });
 
+        // Đặt quyền truy cập công khai để Frontend có thể hiển thị ảnh qua thẻ <img>
+        await drive.permissions.create({
+            fileId: response.data.id,
+            requestBody: {
+                role: "reader",
+                type: "anyone"
+            }
+        });
+
         // Cập nhật URL / fileId vào User
         user.signature = {
             fileId: response.data.id,
