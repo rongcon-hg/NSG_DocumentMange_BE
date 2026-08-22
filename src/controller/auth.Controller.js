@@ -41,7 +41,7 @@ const signin = async (req, res) => {
         if (user && (await user.comparePassword(password)))
             {
                 if (user.role === null) {
-                    return res.status(403).json({ message: "Your account has been disabled." });
+                    return res.status(403).json({ message: "Tài khoản đang bị vô hiệu hóa vui lòng liên hệ quản trị viên để được hỗ trợ, hướng dẫn, Xin cảm ơn!" });
                   }
                 const { accessToken} = generateToken(user._id,user.role);
                 return res.status(200).json({
