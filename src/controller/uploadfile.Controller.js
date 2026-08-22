@@ -267,6 +267,13 @@ async function uploadToDrive(req, res) {
       unit: docType === 'received' ? unit : undefined,
       files: uploadedFiles,
       receivedAt: receivedAt ? new Date(receivedAt) : undefined,
+      history: [
+        {
+          action: "Issued",
+          actor: sentBy,
+          date: new Date()
+        }
+      ]
     });
 
     await newDocument.save();
@@ -346,6 +353,7 @@ const getAllDocuments = async (req, res) => {
         .populate("saveAt", "saveAt")
         .populate("createAt", "createAt")
         .populate("unit", "unitName")
+        .populate("history.actor", "name")
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(Number(limit))
@@ -561,6 +569,7 @@ const getFilteredDocuments = async (req, res) => {
         .populate("saveAt", "saveAt")
         .populate("createAt", "createAt")
         .populate("unit", "unitName")
+        .populate("history.actor", "name")
         .sort({ createdAt: -1 }) // Sắp xếp theo điều kiện
         .skip((pageNumber - 1) * pageSize) // Áp dụng phân trang
         .limit(pageSize); // Giới hạn số tài liệu mỗi trang
@@ -855,7 +864,19 @@ async function updateDocument(req, res) {
   
       // Cập nhật danh sách file
       existingDocument.files = updatedFiles;
-  
+
+      // Xử lý ghi nhận lịch sử (ví dụ khi Chuyển tiếp)
+      if (req.body.historyAction && req.body.historyActor) {
+        if (!existingDocument.history) {
+          existingDocument.history = [];
+        }
+        existingDocument.history.push({
+          action: req.body.historyAction,
+          actor: req.body.historyActor,
+          date: new Date()
+        });
+      }
+
       await existingDocument.save();
 
       const { syncCalendarForDocument } = require("../service/Notification.service");
@@ -947,6 +968,7 @@ const getDocumentsByAssignedTo = async (req, res) => {
         .populate("assignedToUsers.userId", "name email")
         .populate("sentBy", "name")
         .populate("unit", "unitName")
+        .populate("history.actor", "name")
         .sort({ createdAt: -1 })
         .skip((pageNumber - 1) * pageSize)
         .limit(pageSize)

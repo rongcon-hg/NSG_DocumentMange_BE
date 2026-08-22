@@ -138,6 +138,13 @@ const documentSchema = new mongoose.Schema(
         ref: "User",
       }
     ],
+    history: [
+      {
+        action: { type: String, enum: ["Issued", "Forwarded"] },
+        actor: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        date: { type: Date, default: Date.now },
+      }
+    ]
   },
   {
     timestamps: true,
