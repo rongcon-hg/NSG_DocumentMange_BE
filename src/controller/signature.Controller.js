@@ -243,11 +243,39 @@ const getSignatureImage = async (req, res) => {
     }
 };
 
+const deleteArchiveDoc = async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const docId = req.params.id;
+
+        const doc = await SignedDocument.findOne({ _id: docId, user: userId });
+        if (!doc) {
+            return res.status(404).json({ message: "Không tìm thấy văn bản" });
+        }
+
+        const auth = await authorize();
+        const drive = google.drive({ version: "v3", auth });
+
+        try {
+            await drive.files.delete({ fileId: doc.fileId, supportsAllDrives: true });
+        } catch (driveErr) {
+            console.error("Lỗi xóa file trên Drive:", driveErr);
+        }
+
+        await SignedDocument.findByIdAndDelete(docId);
+        res.status(200).json({ message: "Xóa thành công" });
+    } catch (error) {
+        console.error("Error deleting archive doc:", error);
+        res.status(500).json({ message: "Lỗi Server" });
+    }
+};
+
 module.exports = {
     getMySignature,
     uploadSignature,
     signPdf,
     getMyArchive,
     convertPreview,
-    getSignatureImage
+    getSignatureImage,
+    deleteArchiveDoc
 };

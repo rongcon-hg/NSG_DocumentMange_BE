@@ -22,4 +22,7 @@ router.post("/convert-preview", verifyToken, upload.single("file"), signatureCon
 // Proxy ảnh chữ ký
 router.get("/image/:fileId", signatureController.getSignatureImage);
 
+// Xóa văn bản đã ký
+router.delete("/archive/:id", verifyToken, signatureController.deleteArchiveDoc);
+
 module.exports = router;
