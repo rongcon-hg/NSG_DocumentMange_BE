@@ -272,14 +272,14 @@ const sendReviewNotificationEmail = async (uniqueUsers, docData, actionType, not
         const transporter = createTransporter();
         
         let actionName = "Cập nhật xét duyệt";
-        let statusLabel = '<span style="color: #2196F3; font-weight: bold;">Đang xét duyệt</span>';
+        let statusLabel = '<span style="color: #2196F3; font-weight: bold;">Chuyển BGH duyệt</span>';
         let headerColorStart = "#2196F3";
         let headerColorEnd = "#42a5f5";
         let headerBorderColor = "#2196F3";
 
         if (actionType === 'submitToBGH') {
             actionName = actorName ? `${actorName} yêu cầu BGH xét duyệt` : "Yêu cầu BGH xét duyệt";
-            statusLabel = '<span style="color: #ff9800; font-weight: bold;">Chờ BGH duyệt</span>';
+            statusLabel = '<span style="color: #ff9800; font-weight: bold;">Chuyển BGH duyệt</span>';
             headerColorStart = "#ff9800";
             headerColorEnd = "#ffb74d";
             headerBorderColor = "#ff9800";

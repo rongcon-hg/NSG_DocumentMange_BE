@@ -15,11 +15,9 @@ const triggerDocumentNotifications = async (document) => {
             targetUsers.push(...assignedUsers);
         }
 
-        // Bổ sung lấy những người thuộc phòng ban nhận văn bản (đặc biệt cho văn bản đi)
-        if (departments && departments.length > 0) {
-            const deptUsers = await User.find({ department: { $in: departments }, role: { $ne: null } });
-            targetUsers.push(...deptUsers);
-        }
+        // The Document pre-save middleware resolves executors and recipient departments into assignedToUsers,
+        // so assignedToUsers already contains all the intended recipients.
+        // document.departments is the ISSUING department (signer's department), so we shouldn't notify them.
 
         const uniqueUsers = Array.from(new Set(targetUsers.map(u => u._id.toString())))
             .map(id => targetUsers.find(u => u._id.toString() === id));
