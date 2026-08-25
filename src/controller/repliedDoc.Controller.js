@@ -919,9 +919,9 @@ const getReviewedDoc = async (req, res) => {
     const docs = await RepliedDoc.find(filter)
       .populate("reviewer", "name ")
       .populate("replyBy", "name")
-      .populate("repliedDoc", "title code")
+
       .populate('docVariant', 'docVariantName') // Populate nếu cần hiển thị tên loại VB
-      .populate('repliedDoc', 'shortDescription docCode docNum') // Populate nếu cần hiển thị thông tin VB gốc
+      .populate({ path: 'repliedDoc', select: 'shortDescription docCode docNum sentBy' }) // Populate nếu cần hiển thị thông tin VB gốc
       .populate('replyBy', 'name email') // Populate để biết ai đã gửi trả lời;
       .sort({ createdAt: -1 })
       .limit(50);
