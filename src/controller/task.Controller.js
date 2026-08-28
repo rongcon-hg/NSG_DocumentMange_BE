@@ -95,7 +95,7 @@ async function getOrCreateMonthFolder(drive) {
 
 const createTask = async (req, res) => {
     try {
-        const { title, description, startDate, endDate, relatedDocument, priority } = req.body;
+        const { title, description, notes, startDate, endDate, relatedDocument, priority } = req.body;
         const createdBy = req.user ? req.user._id : req.body.createdBy;
 
         const parseJSON = (data) => {
@@ -151,6 +151,7 @@ const createTask = async (req, res) => {
         const newTask = new Task({
             title,
             description,
+            notes,
             startDate,
             endDate,
             assignees,
