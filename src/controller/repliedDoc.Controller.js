@@ -1000,8 +1000,8 @@ const reviewerAction = async (req, res) => {
 
     await repliedDoc.save();
 
-    // GỬI EMAIL THÔNG BÁO TỪ CHỐI CHO MANAGER VÀ DRAFTER
-    if (action === "rejectedByReviewer") {
+    // GỬI EMAIL THÔNG BÁO CHO MANAGER VÀ DRAFTER
+    if (action === "rejectedByReviewer" || action === "approvedByReviewer") {
       try {
         const fullDoc = await RepliedDoc.findById(id)
           .populate({ path: 'replyBy', select: 'name email' })
@@ -1017,7 +1017,8 @@ const reviewerAction = async (req, res) => {
           if (fullDoc.repliedDoc && fullDoc.repliedDoc.sentBy) recipients.push(fullDoc.repliedDoc.sentBy);
           if (recipients.length > 0) {
             const actorName = req.user ? req.user.name : "BGH";
-            await sendReviewNotificationEmail(recipients, fullDoc, 'bghReject', reviewerNotes, actorName);
+            const emailAction = action === "rejectedByReviewer" ? 'bghReject' : 'bghApprove';
+            await sendReviewNotificationEmail(recipients, fullDoc, emailAction, reviewerNotes, actorName);
           }
         }
       } catch (err) {

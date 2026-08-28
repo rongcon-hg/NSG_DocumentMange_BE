@@ -289,6 +289,12 @@ const sendReviewNotificationEmail = async (uniqueUsers, docData, actionType, not
             headerColorStart = "#f44336";
             headerColorEnd = "#ef5350";
             headerBorderColor = "#f44336";
+        } else if (actionType === 'bghApprove') {
+            actionName = actorName ? `${actorName} đã phê duyệt` : "BGH đã phê duyệt";
+            statusLabel = '<span style="color: #4CAF50; font-weight: bold;">BGH Đã duyệt</span>';
+            headerColorStart = "#4CAF50";
+            headerColorEnd = "#81c784";
+            headerBorderColor = "#4CAF50";
         } else if (actionType === 'managerAccept') {
             actionName = actorName ? `${actorName} đã xác nhận` : "Manager đã xác nhận";
             statusLabel = '<span style="color: #4CAF50; font-weight: bold;">Đã xác nhận</span>';

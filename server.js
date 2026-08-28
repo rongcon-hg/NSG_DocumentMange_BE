@@ -122,4 +122,16 @@ app.get("/test", (req, res) => {
     }
 })();
 
+// --- RUN CRON JOBS LOCALLY ON VPS ---
+const cron = require('node-cron');
+const { executeTaskReminders, executeAutoBackup } = require('./src/service/TaskCron.service');
+
+// Chạy hàng ngày vào lúc 00:05
+cron.schedule('5 0 * * *', async () => {
+    console.log('--- Bắt đầu chạy Cron Jobs (Nhắc nhở & Backup) ---');
+    await executeTaskReminders();
+    await executeAutoBackup();
+    console.log('--- Hoàn tất Cron Jobs ---');
+});
+
 module.exports = app;
