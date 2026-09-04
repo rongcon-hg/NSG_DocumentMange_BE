@@ -2,6 +2,12 @@ const express = require('express');
 const router = express.Router();
 const authController = require('../controller/auth.Controller');
 const {verifyAdmin,verifyManager,verifyToken} = require('../middleware/authMiddleware');
+const upload = require('../middleware/multer');
+
+// Avatar routes
+router.post('/avatar', verifyToken, upload.single('avatar'), authController.uploadAvatar);
+router.get('/avatar/:fileId', authController.getAvatarImage);
+router.delete('/avatar', verifyToken, authController.deleteAvatar);
 
 router.post('/createUser',verifyManager,authController.createUser)
 router.post('/signin',authController.signin)

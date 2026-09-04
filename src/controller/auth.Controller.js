@@ -4,9 +4,12 @@ const Department = require("../models/department.model");
 const jwt = require("jsonwebtoken");
 const { generateToken } = require("../service/Token.service/Token");
 const crypto = require("crypto");
-const{sentTempPassword} = require("../service/NodeMailer.service/email")
+const { sentTempPassword } = require("../service/NodeMailer.service/email");
 const dotenv = require("dotenv");
 const { read } = require("fs");
+const { google } = require("googleapis");
+const { Readable } = require("stream");
+const { authorize, getOrCreateMonthFolder, sanitizeFileName } = require("./uploadfile.Controller");
 dotenv.config();
 const characters = process.env.CHARACTERS;
 const VALID_ROLES = ["staff", "manager", "cappho", "chuyenvien"];
@@ -317,6 +320,151 @@ const deleteUser = async (req, res) => {
   }
 };
 
+const uploadAvatar = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const file = req.file;
+
+    if (!file) {
+      return res.status(400).json({ success: false, message: "Vui lòng chọn file ảnh để tải lên" });
+    }
+
+    if (!file.mimetype.startsWith("image/")) {
+      return res.status(400).json({ success: false, message: "File tải lên phải là định dạng hình ảnh (JPG, PNG, WEBP...)" });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy người dùng" });
+    }
+
+    const auth = await authorize();
+    const drive = google.drive({ version: "v3", auth });
+    const folderId = await getOrCreateMonthFolder(drive);
+
+    // Xóa file avatar cũ trên Google Drive nếu có
+    if (user.avatar && user.avatar.fileId) {
+      try {
+        await drive.files.delete({ fileId: user.avatar.fileId, supportsAllDrives: true });
+      } catch (delErr) {
+        console.warn("Could not delete old avatar on Drive:", delErr.message);
+      }
+    }
+
+    const sanitizedName = sanitizeFileName(file.originalname || "avatar.png");
+    const fileMetadata = {
+      name: `avatar_${userId}_${Date.now()}_${sanitizedName}`,
+      parents: [folderId],
+    };
+
+    const media = {
+      mimeType: file.mimetype,
+      body: Readable.from(file.buffer),
+    };
+
+    const response = await drive.files.create({
+      requestBody: fileMetadata,
+      media: media,
+      fields: "id, name, mimeType",
+      supportsAllDrives: true,
+    });
+
+    try {
+      await drive.permissions.create({
+        fileId: response.data.id,
+        requestBody: { role: 'reader', type: 'anyone' },
+        supportsAllDrives: true,
+      });
+    } catch (permErr) {
+      // Ignored if domain restricted
+    }
+
+    const avatarData = {
+      fileId: response.data.id,
+      fileName: response.data.name,
+      mimeType: response.data.mimeType || file.mimetype,
+      url: `/authen/avatar/${response.data.id}`,
+    };
+
+    user.avatar = avatarData;
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Tải ảnh đại diện thành công",
+      avatar: avatarData,
+    });
+  } catch (error) {
+    console.error("Error in uploadAvatar controller:", error);
+    res.status(500).json({ success: false, message: "Lỗi máy chủ khi tải ảnh đại diện", error: error.message });
+  }
+};
+
+const getAvatarImage = async (req, res) => {
+  try {
+    const { fileId } = req.params;
+    if (!fileId) {
+      return res.status(400).json({ message: "FileId is required" });
+    }
+
+    const auth = await authorize();
+    const drive = google.drive({ version: "v3", auth });
+
+    let mimeType = "image/jpeg";
+    try {
+      const meta = await drive.files.get({ fileId, fields: "mimeType", supportsAllDrives: true });
+      if (meta.data && meta.data.mimeType) {
+        mimeType = meta.data.mimeType;
+      }
+    } catch (e) {
+      // fallback
+    }
+
+    const response = await drive.files.get({ fileId, alt: "media", supportsAllDrives: true }, { responseType: "arraybuffer" });
+    const buffer = Buffer.from(response.data);
+
+    res.set({
+      "Content-Type": mimeType,
+      "Cache-Control": "public, max-age=604800, immutable",
+    });
+    res.send(buffer);
+  } catch (error) {
+    console.error("Error fetching avatar image:", error);
+    res.status(404).json({ message: "Không tìm thấy ảnh đại diện" });
+  }
+};
+
+const deleteAvatar = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    if (user.avatar && user.avatar.fileId) {
+      try {
+        const auth = await authorize();
+        const drive = google.drive({ version: "v3", auth });
+        await drive.files.delete({ fileId: user.avatar.fileId, supportsAllDrives: true });
+      } catch (driveErr) {
+        console.warn("Could not delete avatar from Drive:", driveErr.message);
+      }
+    }
+
+    user.avatar = undefined;
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Xóa ảnh đại diện thành công",
+    });
+  } catch (error) {
+    console.error("Error deleting avatar:", error);
+    res.status(500).json({ success: false, message: "Lỗi máy chủ khi xóa ảnh đại diện", error: error.message });
+  }
+};
+
 module.exports = {
     signin,
     createUser,
@@ -328,5 +476,8 @@ module.exports = {
     upadteInfo,
     disableUser,
     restoreUser,
-    deleteUser
-}
+    deleteUser,
+    uploadAvatar,
+    getAvatarImage,
+    deleteAvatar,
+};

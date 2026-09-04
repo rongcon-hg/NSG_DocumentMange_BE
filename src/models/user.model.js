@@ -65,6 +65,12 @@ const userSchema = new mongoose.Schema({
         type: Date,
     },
     google: googleSchema,
+    avatar: {
+        fileId: { type: String },
+        fileName: { type: String },
+        mimeType: { type: String },
+        url: { type: String },
+    },
     signature: {
         fileId: { type: String },
         fileName: { type: String },
