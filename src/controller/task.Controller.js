@@ -383,6 +383,11 @@ const evaluateTask = async (req, res) => {
 
         const currentUserId = req.user ? req.user._id : null;
         const currentUserRole = req.user ? req.user.role : null;
+
+        if (currentUserRole === 'chuyenvien') {
+            return res.status(403).json({ success: false, message: "Chuyên viên không có quyền đánh giá KPI công việc." });
+        }
+
         const isCreator = currentUserId && existingTask.createdBy.toString() === currentUserId.toString();
         const isManagerOrAdmin = ['admin', 'manager', 'cappho'].includes(currentUserRole);
 
