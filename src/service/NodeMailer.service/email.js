@@ -85,7 +85,8 @@ const sendNewDocumentEmail = async (uniqueUsers, docData, senderName = "Há»‡ thá
 
         const subject = `${fullDocCode} - ${docData.shortDescription || "N/A"}`;
 
-        const bccList = uniqueUsers.map(u => u.email).filter(e => !!e);
+        const allowedUsers = uniqueUsers.filter(u => !u.emailNotifications || u.emailNotifications.docNew !== false);
+        const bccList = allowedUsers.map(u => u.email).filter(e => !!e);
         if (bccList.length === 0) return;
         
         let htmlContent = NEW_DOCUMENT_EMAIL_TEMPLATE
@@ -230,7 +231,8 @@ const sendTaskNotificationEmail = async (uniqueUsers, taskData, actionType) => {
 
         const subject = `[${actionName}] ${taskData.title}`;
 
-        const bccList = uniqueUsers.map(u => u.email).filter(e => !!e);
+        const allowedUsers = uniqueUsers.filter(u => !u.emailNotifications || u.emailNotifications.taskAssign !== false);
+        const bccList = allowedUsers.map(u => u.email).filter(e => !!e);
         if (bccList.length === 0) return;
 
         let htmlContent = TASK_NOTIFICATION_EMAIL_TEMPLATE
@@ -266,7 +268,8 @@ const sendTaskNotificationEmail = async (uniqueUsers, taskData, actionType) => {
 const sendReviewNotificationEmail = async (uniqueUsers, docData, actionType, notes = "", actorName = "") => {
     try {
         if (!uniqueUsers || uniqueUsers.length === 0) return;
-        const bccList = uniqueUsers.map(u => u.email).filter(e => !!e);
+        const allowedUsers = uniqueUsers.filter(u => !u.emailNotifications || u.emailNotifications.docReview !== false);
+        const bccList = allowedUsers.map(u => u.email).filter(e => !!e);
         if (bccList.length === 0) return;
 
         const transporter = createTransporter();

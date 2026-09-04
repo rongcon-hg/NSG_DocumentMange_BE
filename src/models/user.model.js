@@ -70,6 +70,12 @@ const userSchema = new mongoose.Schema({
         fileName: { type: String },
         mimeType: { type: String },
     },
+    emailNotifications: {
+        docNew: { type: Boolean, default: true },
+        docReview: { type: Boolean, default: true },
+        taskAssign: { type: Boolean, default: true },
+        taskReminder: { type: Boolean, default: true },
+    },
 },
 {
   timestamps: true,

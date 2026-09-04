@@ -221,7 +221,14 @@ const upadteInfo = async (req, res) => {
       // Cập nhật các trường hợp lệ
       Object.keys(updatedData).forEach((key) => {
         if (updatedData[key] !== undefined) {
-          user[key] = updatedData[key];
+          if (key === 'emailNotifications' && typeof updatedData[key] === 'object' && updatedData[key] !== null) {
+            user.emailNotifications = {
+              ...(user.emailNotifications?.toObject ? user.emailNotifications.toObject() : (user.emailNotifications || {})),
+              ...updatedData[key]
+            };
+          } else {
+            user[key] = updatedData[key];
+          }
         }
       });
   

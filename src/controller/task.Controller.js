@@ -172,8 +172,8 @@ const createTask = async (req, res) => {
         
         try {
             const populatedTask = await Task.findById(newTask._id)
-                .populate("assignees", "name email")
-                .populate("collaborators", "name email");
+                .populate("assignees", "name email emailNotifications")
+                .populate("collaborators", "name email emailNotifications");
                 
             const uniqueUsersMap = new Map();
             if (populatedTask.assignees) populatedTask.assignees.forEach(u => uniqueUsersMap.set(u._id.toString(), u));
@@ -326,8 +326,8 @@ const updateTask = async (req, res) => {
 
         try {
             const populatedTask = await Task.findById(updatedTask._id)
-                .populate("assignees", "name email")
-                .populate("collaborators", "name email");
+                .populate("assignees", "name email emailNotifications")
+                .populate("collaborators", "name email emailNotifications");
                 
             const uniqueUsers = [...(populatedTask.assignees || []), ...(populatedTask.collaborators || [])].filter((user, index, self) => 
                 index === self.findIndex((t) => (
