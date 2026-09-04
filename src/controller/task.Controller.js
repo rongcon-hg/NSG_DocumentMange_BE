@@ -441,14 +441,6 @@ const getKpiStats = async (req, res) => {
         const currentUser = req.user;
         const currentRole = currentUser?.role;
 
-        // 1. Quyền chuyenvien không được truy cập KPI
-        if (currentRole === 'chuyenvien') {
-            return res.status(403).json({
-                success: false,
-                message: "Chuyên viên không có quyền truy cập báo cáo Đánh giá & KPI."
-            });
-        }
-
         // Lấy thông tin phòng ban của user hiện tại
         let userDeptCode = null;
         if (currentUser && currentUser.department) {
@@ -458,11 +450,18 @@ const getKpiStats = async (req, res) => {
 
         // Kiểm tra đặc quyền nhóm BGH (admin, manager, hoặc phòng ban BGH)
         const isBGH = currentRole === 'admin' || currentRole === 'manager' || userDeptCode === 'BGH';
+        const isChuyenVien = currentRole === 'chuyenvien';
 
         let { month, year, departmentId, userId } = req.query;
 
-        // 2. Quyền cappho (hoặc cán bộ cấp đơn vị): chỉ xem được thông tin của thành viên trong đơn vị mình
-        if (!isBGH) {
+        // Phân quyền phạm vi dữ liệu:
+        // - chuyenvien: BẮT BUỘC chỉ xem thông tin cá nhân của chính mình, không xem được của người khác
+        // - cappho (hoặc cán bộ cấp đơn vị): chỉ xem được thông tin của thành viên trong đơn vị mình
+        // - BGH (admin, manager, phòng ban BGH): xem được toàn bộ các đơn vị và nhân sự
+        if (isChuyenVien) {
+            departmentId = currentUser && currentUser.department ? currentUser.department.toString() : null;
+            userId = currentUser._id ? currentUser._id.toString() : null;
+        } else if (!isBGH) {
             departmentId = currentUser && currentUser.department ? currentUser.department.toString() : null;
         }
 
@@ -495,7 +494,10 @@ const getKpiStats = async (req, res) => {
             role: { $nin: [null, ""] },
             email: { $not: /^qlvb@nsgpc\.edu\.vn$/i }
         };
-        if (!isBGH) {
+        if (isChuyenVien) {
+            // Chuyên viên: BẮT BUỘC chỉ lấy thông tin cá nhân của chính mình
+            userFilter._id = currentUser._id;
+        } else if (!isBGH) {
             // Cán bộ cấp phó: Bắt buộc chỉ lọc người thuộc đơn vị mình
             userFilter.department = currentUser && currentUser.department ? currentUser.department : null;
             if (userId) {
