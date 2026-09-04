@@ -533,8 +533,19 @@ const getKpiStats = async (req, res) => {
 
         tasks.forEach(task => {
             const priorityWeight = (priorityWeights[task.priority] || 1.0) * (task.weight || 1.0);
-            const isDone = task.status === 'DONE';
-            const completedTime = task.completedAt || (isDone ? task.updatedAt : null);
+            // Xác định thời điểm hoàn thành thực tế
+            let completedTime = task.completedAt;
+            if (!completedTime && isDone) {
+                if (Array.isArray(task.history)) {
+                    const doneEntry = [...task.history].reverse().find(h => 
+                        h.details && h.details.includes('Hoàn thành')
+                    );
+                    if (doneEntry && doneEntry.timestamp) {
+                        completedTime = doneEntry.timestamp;
+                    }
+                }
+                if (!completedTime) completedTime = task.updatedAt;
+            }
 
             // Tính hạn chót là hết ngày (23:59:59.999) của ngày endDate (qua 00:00 ngày hôm sau mới tính quá hạn)
             const endOfDayDeadline = new Date(task.endDate);
@@ -690,7 +701,17 @@ const getKpiStats = async (req, res) => {
             if (t.status !== 'DONE') return false;
             const endOfDay = new Date(t.endDate);
             endOfDay.setHours(23, 59, 59, 999);
-            const comp = t.completedAt ? new Date(t.completedAt) : new Date(t.updatedAt);
+            let compTime = t.completedAt;
+            if (!compTime) {
+                if (Array.isArray(t.history)) {
+                    const doneEntry = [...t.history].reverse().find(h => 
+                        h.details && h.details.includes('Hoàn thành')
+                    );
+                    if (doneEntry && doneEntry.timestamp) compTime = doneEntry.timestamp;
+                }
+                if (!compTime) compTime = t.updatedAt;
+            }
+            const comp = new Date(compTime);
             return comp.getTime() <= endOfDay.getTime();
         }).length;
         const totalLateTasks = totalCompletedTasks - totalOnTimeTasks;
