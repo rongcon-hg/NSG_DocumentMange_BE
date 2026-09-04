@@ -386,8 +386,11 @@ const uploadAvatar = async (req, res) => {
       url: `/authen/avatar/${response.data.id}`,
     };
 
-    user.avatar = avatarData;
-    await user.save();
+    await User.findByIdAndUpdate(
+      userId,
+      { $set: { avatar: avatarData } },
+      { runValidators: false, new: true }
+    );
 
     res.status(200).json({
       success: true,
@@ -453,8 +456,11 @@ const deleteAvatar = async (req, res) => {
       }
     }
 
-    user.avatar = undefined;
-    await user.save();
+    await User.findByIdAndUpdate(
+      userId,
+      { $unset: { avatar: 1 } },
+      { runValidators: false, new: true }
+    );
 
     res.status(200).json({
       success: true,
