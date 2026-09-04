@@ -1,5 +1,7 @@
 const Task = require("../models/task.model");
 const User = require("../models/user.model");
+const Department = require("../models/department.model");
+const Position = require("../models/position.model");
 const { google } = require("googleapis");
 const { Readable } = require("stream");
 const mongoose = require("mongoose");
@@ -428,7 +430,33 @@ const evaluateTask = async (req, res) => {
 
 const getKpiStats = async (req, res) => {
     try {
-        const { month, year, departmentId, userId } = req.query;
+        const currentUser = req.user;
+        const currentRole = currentUser?.role;
+
+        // 1. Quyền chuyenvien không được truy cập KPI
+        if (currentRole === 'chuyenvien') {
+            return res.status(403).json({
+                success: false,
+                message: "Chuyên viên không có quyền truy cập báo cáo Đánh giá & KPI."
+            });
+        }
+
+        // Lấy thông tin phòng ban của user hiện tại
+        let userDeptCode = null;
+        if (currentUser && currentUser.department) {
+            const userDept = await Department.findById(currentUser.department).select("departmentCode").lean();
+            if (userDept) userDeptCode = userDept.departmentCode;
+        }
+
+        // Kiểm tra đặc quyền nhóm BGH (admin, manager, hoặc phòng ban BGH)
+        const isBGH = currentRole === 'admin' || currentRole === 'manager' || userDeptCode === 'BGH';
+
+        let { month, year, departmentId, userId } = req.query;
+
+        // 2. Quyền cappho (hoặc cán bộ cấp đơn vị): chỉ xem được thông tin của thành viên trong đơn vị mình
+        if (!isBGH) {
+            departmentId = currentUser && currentUser.department ? currentUser.department.toString() : null;
+        }
 
         // Build date range filter if month and/or year specified
         let dateFilter = {};
@@ -533,6 +561,7 @@ const getKpiStats = async (req, res) => {
 
         tasks.forEach(task => {
             const priorityWeight = (priorityWeights[task.priority] || 1.0) * (task.weight || 1.0);
+            const isDone = task.status === 'DONE';
             // Xác định thời điểm hoàn thành thực tế
             let completedTime = task.completedAt;
             if (!completedTime && isDone) {
