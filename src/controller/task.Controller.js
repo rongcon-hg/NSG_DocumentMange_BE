@@ -764,6 +764,12 @@ const getKpiStats = async (req, res) => {
             endOfDay.setHours(23, 59, 59, 999);
             return now.getTime() > endOfDay.getTime();
         }).length;
+        const totalInProgressTasks = tasks.filter(t => {
+            if (t.status === 'DONE') return false;
+            const endOfDay = new Date(t.endDate);
+            endOfDay.setHours(23, 59, 59, 999);
+            return now.getTime() <= endOfDay.getTime();
+        }).length;
         const overallOnTimeRate = totalCompletedTasks > 0 ? Math.round((totalOnTimeTasks / totalCompletedTasks) * 100) : 0;
         
         const overallKpiAverage = userStats.length > 0 
@@ -776,6 +782,7 @@ const getKpiStats = async (req, res) => {
                 summary: {
                     totalTasksCount,
                     totalCompletedTasks,
+                    totalInProgressTasks,
                     totalOnTimeTasks,
                     totalLateTasks,
                     totalOverdueTasks,
