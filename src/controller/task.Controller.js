@@ -532,7 +532,11 @@ const getKpiStats = async (req, res) => {
             const priorityWeight = (priorityWeights[task.priority] || 1.0) * (task.weight || 1.0);
             const isDone = task.status === 'DONE';
             const completedTime = task.completedAt || (isDone ? task.updatedAt : null);
-            const endTime = new Date(task.endDate);
+
+            // Tính hạn chót là hết ngày (23:59:59.999) của ngày endDate (qua 00:00 ngày hôm sau mới tính quá hạn)
+            const endOfDayDeadline = new Date(task.endDate);
+            endOfDayDeadline.setHours(23, 59, 59, 999);
+            const deadlineTime = endOfDayDeadline.getTime();
             
             let isOnTime = false;
             let isLate = false;
@@ -541,21 +545,22 @@ const getKpiStats = async (req, res) => {
             let progressScore = 0;
 
             if (isDone) {
-                if (completedTime && new Date(completedTime) <= endTime) {
+                const compTime = completedTime ? new Date(completedTime).getTime() : deadlineTime;
+                if (compTime <= deadlineTime) {
                     isOnTime = true;
                     progressScore = 100;
                 } else {
                     isLate = true;
-                    daysLate = completedTime ? Math.max(1, Math.ceil((new Date(completedTime) - endTime) / (1000 * 60 * 60 * 24))) : 1;
+                    daysLate = Math.max(1, Math.ceil((compTime - deadlineTime) / (1000 * 60 * 60 * 24)));
                     progressScore = Math.max(50, 100 - daysLate * 5);
                 }
             } else {
-                if (now > endTime) {
+                if (now.getTime() > deadlineTime) {
                     isOverdue = true;
-                    daysLate = Math.max(1, Math.ceil((now - endTime) / (1000 * 60 * 60 * 24)));
+                    daysLate = Math.max(1, Math.ceil((now.getTime() - deadlineTime) / (1000 * 60 * 60 * 24)));
                     progressScore = 0;
                 } else {
-                    progressScore = 70; // In progress within deadline
+                    progressScore = 70; // Đang thực hiện trong hạn (chưa qua 00:00 ngày hôm sau)
                 }
             }
 
@@ -636,33 +641,35 @@ const getKpiStats = async (req, res) => {
             }
         });
 
-        // Compute final score and ranks
-        const userStats = Object.values(userStatsMap).map(stat => {
-            const kpiScore = stat.totalMaxPossibleScore > 0 
-                ? Math.round((stat.totalWeightedScore / stat.totalMaxPossibleScore) * 100)
-                : 0;
-            
-            let rank = 'D';
-            if (kpiScore >= 90) rank = 'A';
-            else if (kpiScore >= 75) rank = 'B';
-            else if (kpiScore >= 50) rank = 'C';
+        // Compute final score and ranks (Chỉ tính cho cán bộ CÓ công việc được phân công)
+        const userStats = Object.values(userStatsMap)
+            .filter(stat => stat.totalTasks > 0)
+            .map(stat => {
+                const kpiScore = stat.totalMaxPossibleScore > 0 
+                    ? Math.round((stat.totalWeightedScore / stat.totalMaxPossibleScore) * 100)
+                    : 0;
+                
+                let rank = 'D';
+                if (kpiScore >= 90) rank = 'A';
+                else if (kpiScore >= 75) rank = 'B';
+                else if (kpiScore >= 50) rank = 'C';
 
-            const onTimeRate = (stat.onTimeTasks + stat.lateTasks) > 0 
-                ? Math.round((stat.onTimeTasks / (stat.onTimeTasks + stat.lateTasks)) * 100) 
-                : 0;
+                const onTimeRate = (stat.onTimeTasks + stat.lateTasks) > 0 
+                    ? Math.round((stat.onTimeTasks / (stat.onTimeTasks + stat.lateTasks)) * 100) 
+                    : 0;
 
-            const averageQualityScore = stat.evaluatedTasksCount > 0 
-                ? Math.round(stat.totalEvaluationScore / stat.evaluatedTasksCount) 
-                : null;
+                const averageQualityScore = stat.evaluatedTasksCount > 0 
+                    ? Math.round(stat.totalEvaluationScore / stat.evaluatedTasksCount) 
+                    : null;
 
-            return {
-                ...stat,
-                kpiScore,
-                rank,
-                onTimeRate,
-                averageQualityScore
-            };
-        });
+                return {
+                    ...stat,
+                    kpiScore,
+                    rank,
+                    onTimeRate,
+                    averageQualityScore
+                };
+            });
 
         // Sort by KPI score descending
         userStats.sort((a, b) => b.kpiScore - a.kpiScore);
@@ -670,9 +677,20 @@ const getKpiStats = async (req, res) => {
         // Overall summary statistics
         const totalTasksCount = tasks.length;
         const totalCompletedTasks = tasks.filter(t => t.status === 'DONE').length;
-        const totalOnTimeTasks = tasks.filter(t => t.status === 'DONE' && (t.completedAt ? new Date(t.completedAt) <= new Date(t.endDate) : new Date(t.updatedAt) <= new Date(t.endDate))).length;
+        const totalOnTimeTasks = tasks.filter(t => {
+            if (t.status !== 'DONE') return false;
+            const endOfDay = new Date(t.endDate);
+            endOfDay.setHours(23, 59, 59, 999);
+            const comp = t.completedAt ? new Date(t.completedAt) : new Date(t.updatedAt);
+            return comp.getTime() <= endOfDay.getTime();
+        }).length;
         const totalLateTasks = totalCompletedTasks - totalOnTimeTasks;
-        const totalOverdueTasks = tasks.filter(t => t.status !== 'DONE' && new Date() > new Date(t.endDate)).length;
+        const totalOverdueTasks = tasks.filter(t => {
+            if (t.status === 'DONE') return false;
+            const endOfDay = new Date(t.endDate);
+            endOfDay.setHours(23, 59, 59, 999);
+            return now.getTime() > endOfDay.getTime();
+        }).length;
         const overallOnTimeRate = totalCompletedTasks > 0 ? Math.round((totalOnTimeTasks / totalCompletedTasks) * 100) : 0;
         
         const overallKpiAverage = userStats.length > 0 
