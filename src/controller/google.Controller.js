@@ -2,7 +2,29 @@ const { google } = require("googleapis");
 const mongoose = require("mongoose");
 const User = mongoose.model("User");
 const Document = mongoose.model("Document");
+const GoogleLoginConfig = require("../models/googleLoginConfig.model");
 const { generateToken } = require("../service/Token.service/Token");
+
+const getDynamicOAuth2Client = async () => {
+  let clientId = process.env.GOOGLE_CLIENT_ID;
+  let clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  let redirectUri = process.env.GOOGLE_REDIRECT_URI;
+  let isEnabled = true;
+
+  try {
+    const config = await GoogleLoginConfig.findOne();
+    if (config) {
+      if (config.clientId) clientId = config.clientId;
+      if (config.clientSecret) clientSecret = config.clientSecret;
+      if (config.isEnabled !== undefined) isEnabled = config.isEnabled;
+    }
+  } catch (e) {
+    console.error("Error fetching Google login config:", e);
+  }
+
+  const client = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
+  return { client, isEnabled };
+};
 
 const oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
@@ -16,7 +38,9 @@ async function getGoogleAuthUrl(req, res) {
   const stateObj = { action: 'authorize', origin: feOrigin };
   const stateBase64 = Buffer.from(JSON.stringify(stateObj)).toString('base64');
 
-  const url = oauth2Client.generateAuthUrl({
+  const { client } = await getDynamicOAuth2Client();
+
+  const url = client.generateAuthUrl({
     access_type: "offline",
     prompt: "consent",
     scope: [
@@ -32,21 +56,30 @@ async function getGoogleAuthUrl(req, res) {
 
 // Lấy URL cho mục đích Đăng nhập vào hệ thống
 async function getGoogleAuthLoginUrl(req, res) {
-  const feOrigin = req.headers.origin || process.env.FE_URL || 'http://localhost:5173';
-  const stateObj = { action: 'login', origin: feOrigin };
-  const stateBase64 = Buffer.from(JSON.stringify(stateObj)).toString('base64');
+  try {
+    const { client, isEnabled } = await getDynamicOAuth2Client();
+    if (!isEnabled) {
+      return res.status(403).json({ success: false, message: "Tính năng Đăng nhập bằng Google hiện đang tạm tắt bởi Quản trị viên!" });
+    }
 
-  const url = oauth2Client.generateAuthUrl({
-    access_type: "offline",
-    prompt: "consent",
-    scope: [
-        "https://www.googleapis.com/auth/calendar.events", 
-        "https://www.googleapis.com/auth/userinfo.email", 
-        "https://www.googleapis.com/auth/userinfo.profile"
-      ],
-    state: stateBase64
-  });
-  res.json({ url });
+    const feOrigin = req.headers.origin || process.env.FE_URL || 'http://localhost:5173';
+    const stateObj = { action: 'login', origin: feOrigin };
+    const stateBase64 = Buffer.from(JSON.stringify(stateObj)).toString('base64');
+
+    const url = client.generateAuthUrl({
+      access_type: "offline",
+      prompt: "consent",
+      scope: [
+          "https://www.googleapis.com/auth/calendar.events", 
+          "https://www.googleapis.com/auth/userinfo.email", 
+          "https://www.googleapis.com/auth/userinfo.profile"
+        ],
+      state: stateBase64
+    });
+    res.json({ url });
+  } catch (error) {
+    res.status(500).json({ message: "Lỗi tạo URL đăng nhập Google", error: error.message });
+  }
 };
 
 // 2. Callback sau khi user đồng ý
@@ -69,11 +102,10 @@ const googleCallback = async (req, res) => {
         // Fallback cho state cũ (plain text)
     }
 
-    const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      process.env.GOOGLE_REDIRECT_URI
-    );
+    const { client: oauth2Client, isEnabled } = await getDynamicOAuth2Client();
+    if (action === "login" && !isEnabled) {
+      return res.redirect(`${feOrigin}/login?error=google_login_disabled`);
+    }
    
     const { tokens } = await oauth2Client.getToken(code);
     oauth2Client.setCredentials(tokens);

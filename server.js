@@ -70,6 +70,8 @@ const driveConfigRoutes = require('./src/routes/driveConfig');
 const driveRoutes = require('./src/routes/driveRoutes');
 const backupRoutes = require("./src/routes/backupRoutes");
 const signatureRoutes = require("./src/routes/signatureRoutes");
+const smtpConfigRoutes = require("./src/routes/smtpConfig.routes");
+const googleLoginConfigRoutes = require("./src/routes/googleLoginConfig.routes");
 
 // Ensure DB connection is established before handling requests in Vercel Serverless
 app.use(async (req, res, next) => {
@@ -99,6 +101,8 @@ app.use('/api/drive-config', driveConfigRoutes);
 app.use('/api/drive', driveRoutes);
 app.use('/api/backup', backupRoutes);
 app.use('/api/signature', signatureRoutes);
+app.use('/api/smtp-config', smtpConfigRoutes);
+app.use('/api/google-login-config', googleLoginConfigRoutes);
 
 // Cron endpoint for Vercel
 const cronRoutes = require('./src/routes/cronRoutes');

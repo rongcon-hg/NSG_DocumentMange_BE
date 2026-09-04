@@ -1,26 +1,49 @@
 const { TEMPPASSWORD_EMAIL_TEMPLATE, NEW_DOCUMENT_EMAIL_TEMPLATE, TASK_NOTIFICATION_EMAIL_TEMPLATE, REVIEW_NOTIFICATION_EMAIL_TEMPLATE } = require("./emailTemplate");
 const nodemailer = require("nodemailer");
 const dotenv = require("dotenv");
+const SmtpConfig = require("../../models/smtpConfig.model");
 dotenv.config();
 
-const createTransporter = () => {
-    return nodemailer.createTransport({
-      host: "smtp.gmail.com",
-      port: 587,
-      secure: false, // true cho port 465, false cho các port khác
-      auth: {
-        user: process.env.EMAIL_USERNAME,
-        pass: process.env.EMAIL_PASSWORD,
-      },
+const getTransporterAndSender = async () => {
+    let host = "smtp.gmail.com";
+    let port = 465;
+    let secure = true;
+    let user = process.env.EMAIL_USERNAME;
+    let pass = process.env.EMAIL_PASSWORD;
+    let senderName = "Hệ thống quản lý văn bản NSG";
+
+    try {
+        const config = await SmtpConfig.findOne();
+        if (config && config.user && config.pass) {
+            host = config.host || host;
+            port = config.port || port;
+            secure = (port === 465);
+            user = config.user;
+            pass = config.pass;
+            senderName = config.senderName || senderName;
+        }
+    } catch (e) {
+        console.error("Error fetching SMTP config for email service:", e);
+    }
+
+    const transporter = nodemailer.createTransport({
+        host,
+        port,
+        secure,
+        auth: { user, pass },
     });
-  };
+
+    const sender = `"${senderName}" <${user || 'qlvb@nsgpc.edu.vn'}>`;
+
+    return { transporter, sender };
+};
 
 const sentTempPassword = async (email,tempPass) => {
     try {
-        const transporter = createTransporter();
+        const { transporter, sender } = await getTransporterAndSender();
 
         const mailOptions = {
-            from: '"Hệ thống quản lý văn bản NSG" <qlvb@nsgpc.edu.vn>', // sender address
+            from: sender, // sender address
             to: email, // list of receivers
             subject: "OTP tạm thời", // Subject line
             text: "Mã khôi phục mật khẩu", // plain text body
@@ -36,9 +59,9 @@ const sentTempPassword = async (email,tempPass) => {
 
 const sendRestoreOtpEmail = async (email, otp) => {
     try {
-        const transporter = createTransporter();
+        const { transporter, sender } = await getTransporterAndSender();
         const mailOptions = {
-            from: '"Hệ thống quản lý văn bản NSG" <qlvb@nsgpc.edu.vn>',
+            from: sender,
             to: email,
             subject: "Mã xác nhận Khôi phục Cơ sở dữ liệu",
             text: `Mã xác nhận của bạn là: ${otp}. Mã có hiệu lực trong 10 phút.`,
@@ -61,7 +84,7 @@ const sendRestoreOtpEmail = async (email, otp) => {
 const sendNewDocumentEmail = async (uniqueUsers, docData, senderName = "Hệ thống") => {
     try {
         if (!uniqueUsers || uniqueUsers.length === 0) return;
-        const transporter = createTransporter();
+        const { transporter, sender } = await getTransporterAndSender();
         
         let linksHtml = "";
         if (docData.files && docData.files.length > 0) {
@@ -101,8 +124,8 @@ const sendNewDocumentEmail = async (uniqueUsers, docData, senderName = "Hệ th�
             .replace("{linksHtml}", linksHtml);
 
         const mailOptions = {
-            from: '"Hệ thống quản lý văn bản NSG" <qlvb@nsgpc.edu.vn>',
-            to: '"Hệ thống quản lý văn bản NSG" <qlvb@nsgpc.edu.vn>',
+            from: sender,
+            to: sender,
             bcc: bccList.join(','),
             subject: subject,
             html: htmlContent,
@@ -121,7 +144,7 @@ const sendTaskReminderEmail = async (emails, taskData, reminderType) => {
         const bccList = Array.isArray(emails) ? emails : [emails];
         if (bccList.length === 0) return;
 
-        const transporter = createTransporter();
+        const { transporter, sender } = await getTransporterAndSender();
         
         let subject = "";
         let headerTitle = "";
@@ -158,8 +181,8 @@ const sendTaskReminderEmail = async (emails, taskData, reminderType) => {
         </div>`;
 
         const mailOptions = {
-            from: '"Hệ thống quản lý văn bản NSG" <qlvb@nsgpc.edu.vn>',
-            to: '"Hệ thống quản lý văn bản NSG" <qlvb@nsgpc.edu.vn>',
+            from: sender,
+            to: sender,
             bcc: bccList.join(','),
             subject: subject,
             html: htmlContent,
@@ -174,7 +197,7 @@ const sendTaskReminderEmail = async (emails, taskData, reminderType) => {
 const sendTaskNotificationEmail = async (uniqueUsers, taskData, actionType) => {
     try {
         if (!uniqueUsers || uniqueUsers.length === 0) return;
-        const transporter = createTransporter();
+        const { transporter, sender } = await getTransporterAndSender();
         
         let actionName = "Cập nhật công việc";
         if (actionType === 'create') actionName = "Tạo công việc mới";
@@ -251,8 +274,8 @@ const sendTaskNotificationEmail = async (uniqueUsers, taskData, actionType) => {
             .replace(/{headerBorderColor}/g, headerBorderColor);
 
         const mailOptions = {
-            from: '"Hệ thống quản lý văn bản NSG" <qlvb@nsgpc.edu.vn>',
-            to: '"Hệ thống quản lý văn bản NSG" <qlvb@nsgpc.edu.vn>',
+            from: sender,
+            to: sender,
             bcc: bccList.join(','),
             subject: subject,
             html: htmlContent,
@@ -272,7 +295,7 @@ const sendReviewNotificationEmail = async (uniqueUsers, docData, actionType, not
         const bccList = allowedUsers.map(u => u.email).filter(e => !!e);
         if (bccList.length === 0) return;
 
-        const transporter = createTransporter();
+        const { transporter, sender } = await getTransporterAndSender();
         
         let actionName = "Cập nhật xét duyệt";
         let statusLabel = '<span style="color: #2196F3; font-weight: bold;">Chuyển BGH duyệt</span>';
@@ -350,8 +373,8 @@ const sendReviewNotificationEmail = async (uniqueUsers, docData, actionType, not
         const subject = `[${actionName}] ${docTitle}`;
 
         const mailOptions = {
-            from: '"Hệ thống quản lý văn bản NSG" <qlvb@nsgpc.edu.vn>',
-            to: '"Hệ thống quản lý văn bản NSG" <qlvb@nsgpc.edu.vn>',
+            from: sender,
+            to: sender,
             bcc: bccList.join(','),
             subject: subject,
             html: htmlContent,
