@@ -392,6 +392,7 @@ const uploadAvatar = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Tải ảnh đại diện thành công",
+      data: avatarData,
       avatar: avatarData,
     });
   } catch (error) {
