@@ -66,6 +66,20 @@ const taskSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    completedAt: {
+      type: Date,
+    },
+    evaluation: {
+      score: { type: Number, min: 0, max: 100 },
+      rating: { type: Number, min: 1, max: 5 },
+      feedback: { type: String },
+      evaluatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+      evaluatedAt: { type: Date },
+    },
+    weight: {
+      type: Number,
+      default: 1,
+    },
     history: [
       {
         action: String,

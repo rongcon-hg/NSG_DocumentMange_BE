@@ -226,6 +226,7 @@ const getTasks = async (req, res) => {
             .populate("collaborators", "name email")
             .populate("createdBy", "name email")
             .populate("history.user", "name email")
+            .populate("evaluation.evaluatedBy", "name email")
             .populate("relatedDocument", "docCode shortDescription files")
             .sort({ startDate: 1 });
 
@@ -317,6 +318,14 @@ const updateTask = async (req, res) => {
             const oldStatus = statusLabels[existingTask.status] || existingTask.status;
             const newStatus = statusLabels[updates.status] || updates.status;
             historyEntry.details = `Chuyển trạng thái từ ${oldStatus} sang ${newStatus}`;
+
+            if (updates.status === 'DONE') {
+                if (!updates.completedAt) {
+                    updates.completedAt = new Date();
+                }
+            } else if (existingTask.status === 'DONE') {
+                updates.completedAt = null;
+            }
         }
         
         // Remove history from updates object if it was somehow sent by client
@@ -327,7 +336,8 @@ const updateTask = async (req, res) => {
         try {
             const populatedTask = await Task.findById(updatedTask._id)
                 .populate("assignees", "name email emailNotifications")
-                .populate("collaborators", "name email emailNotifications");
+                .populate("collaborators", "name email emailNotifications")
+                .populate("evaluation.evaluatedBy", "name email");
                 
             const uniqueUsers = [...(populatedTask.assignees || []), ...(populatedTask.collaborators || [])].filter((user, index, self) => 
                 index === self.findIndex((t) => (
@@ -351,6 +361,342 @@ const updateTask = async (req, res) => {
         res.status(200).json({ success: true, message: "Task updated", data: updatedTask });
     } catch (error) {
         console.error("Error updating task:", error);
+        res.status(500).json({ success: false, message: "Server Error", error: error.message });
+    }
+};
+
+const evaluateTask = async (req, res) => {
+    try {
+        const { taskId } = req.params;
+        const { score, rating, feedback } = req.body;
+
+        const existingTask = await Task.findById(taskId);
+        if (!existingTask) {
+            return res.status(404).json({ success: false, message: "Task not found" });
+        }
+
+        if (existingTask.status !== 'DONE') {
+            return res.status(400).json({ success: false, message: "Chỉ có thể đánh giá công việc đã hoàn thành." });
+        }
+
+        const currentUserId = req.user ? req.user._id : null;
+        const currentUserRole = req.user ? req.user.role : null;
+        const isCreator = currentUserId && existingTask.createdBy.toString() === currentUserId.toString();
+        const isManagerOrAdmin = ['admin', 'manager', 'cappho'].includes(currentUserRole);
+
+        if (!isCreator && !isManagerOrAdmin) {
+            return res.status(403).json({ success: false, message: "Bạn không có quyền đánh giá công việc này." });
+        }
+
+        const calculatedScore = score !== undefined ? Number(score) : (rating ? Number(rating) * 20 : 80);
+        const calculatedRating = rating !== undefined ? Number(rating) : Math.round(calculatedScore / 20);
+
+        const evaluationData = {
+            score: calculatedScore,
+            rating: calculatedRating,
+            feedback: feedback || '',
+            evaluatedBy: currentUserId,
+            evaluatedAt: new Date()
+        };
+
+        const historyEntry = {
+            action: 'Đánh giá KPI',
+            user: currentUserId,
+            details: `Đánh giá chất lượng: ${calculatedScore}/100 điểm (${calculatedRating} sao). ${feedback ? `Nhận xét: "${feedback}"` : ''}`,
+            timestamp: new Date()
+        };
+
+        const updatedTask = await Task.findByIdAndUpdate(
+            taskId,
+            { 
+                $set: { evaluation: evaluationData },
+                $push: { history: historyEntry }
+            },
+            { new: true }
+        )
+        .populate("assignees", "name email")
+        .populate("collaborators", "name email")
+        .populate("createdBy", "name email")
+        .populate("evaluation.evaluatedBy", "name email");
+
+        res.status(200).json({ success: true, message: "Đánh giá công việc thành công", data: updatedTask });
+    } catch (error) {
+        console.error("Error evaluating task:", error);
+        res.status(500).json({ success: false, message: "Server Error", error: error.message });
+    }
+};
+
+const getKpiStats = async (req, res) => {
+    try {
+        const { month, year, departmentId, userId } = req.query;
+
+        // Build date range filter if month and/or year specified
+        let dateFilter = {};
+        const targetYear = year ? parseInt(year) : new Date().getFullYear();
+        if (month) {
+            const targetMonth = parseInt(month) - 1; // 0-indexed
+            const startDate = new Date(targetYear, targetMonth, 1);
+            const endDate = new Date(targetYear, targetMonth + 1, 0, 23, 59, 59, 999);
+            dateFilter = {
+                $or: [
+                    { endDate: { $gte: startDate, $lte: endDate } },
+                    { completedAt: { $gte: startDate, $lte: endDate } }
+                ]
+            };
+        } else if (year) {
+            const startDate = new Date(targetYear, 0, 1);
+            const endDate = new Date(targetYear, 11, 31, 23, 59, 59, 999);
+            dateFilter = {
+                $or: [
+                    { endDate: { $gte: startDate, $lte: endDate } },
+                    { completedAt: { $gte: startDate, $lte: endDate } }
+                ]
+            };
+        }
+
+        // Fetch users matching departmentId or userId filter
+        let userFilter = {};
+        if (userId) {
+            userFilter._id = userId;
+        } else if (departmentId) {
+            userFilter.department = departmentId;
+        }
+
+        const users = await User.find(userFilter)
+            .select("name email department position role")
+            .populate("department", "departmentName departmentCode")
+            .populate("position", "positionName")
+            .lean();
+
+        const userIds = users.map(u => u._id.toString());
+
+        // Find tasks related to these users
+        let taskQuery = { ...dateFilter };
+        if (userIds.length > 0) {
+            const userMatch = {
+                $or: [
+                    { assignees: { $in: userIds } },
+                    { collaborators: { $in: userIds } }
+                ]
+            };
+            if (taskQuery.$or) {
+                taskQuery = {
+                    $and: [
+                        { $or: taskQuery.$or },
+                        userMatch
+                    ]
+                };
+            } else {
+                taskQuery = { ...taskQuery, ...userMatch };
+            }
+        }
+
+        const tasks = await Task.find(taskQuery)
+            .populate("assignees", "name email department")
+            .populate("collaborators", "name email department")
+            .populate("evaluation.evaluatedBy", "name email")
+            .lean();
+
+        const priorityWeights = {
+            FLASH: 1.5,
+            URGENT: 1.2,
+            NORMAL: 1.0
+        };
+
+        // Initialize user KPI map
+        const userStatsMap = {};
+        users.forEach(u => {
+            userStatsMap[u._id.toString()] = {
+                user: u,
+                totalAssignedTasks: 0,
+                totalCollaboratedTasks: 0,
+                totalTasks: 0,
+                completedTasks: 0,
+                onTimeTasks: 0,
+                lateTasks: 0,
+                overdueTasks: 0,
+                inProgressTasks: 0,
+                totalWeightedScore: 0,
+                totalMaxPossibleScore: 0,
+                evaluatedTasksCount: 0,
+                totalEvaluationScore: 0,
+                kpiScore: 0,
+                rank: 'D',
+                details: []
+            };
+        });
+
+        const now = new Date();
+
+        tasks.forEach(task => {
+            const priorityWeight = (priorityWeights[task.priority] || 1.0) * (task.weight || 1.0);
+            const isDone = task.status === 'DONE';
+            const completedTime = task.completedAt || (isDone ? task.updatedAt : null);
+            const endTime = new Date(task.endDate);
+            
+            let isOnTime = false;
+            let isLate = false;
+            let isOverdue = false;
+            let daysLate = 0;
+            let progressScore = 0;
+
+            if (isDone) {
+                if (completedTime && new Date(completedTime) <= endTime) {
+                    isOnTime = true;
+                    progressScore = 100;
+                } else {
+                    isLate = true;
+                    daysLate = completedTime ? Math.max(1, Math.ceil((new Date(completedTime) - endTime) / (1000 * 60 * 60 * 24))) : 1;
+                    progressScore = Math.max(50, 100 - daysLate * 5);
+                }
+            } else {
+                if (now > endTime) {
+                    isOverdue = true;
+                    daysLate = Math.max(1, Math.ceil((now - endTime) / (1000 * 60 * 60 * 24)));
+                    progressScore = 0;
+                } else {
+                    progressScore = 70; // In progress within deadline
+                }
+            }
+
+            const qualityScore = (task.evaluation && task.evaluation.score !== undefined) 
+                ? task.evaluation.score 
+                : (isDone ? 80 : 50);
+
+            // Combined task score out of 100
+            const combinedTaskScore = Math.round((progressScore * 0.5) + (qualityScore * 0.5));
+
+            // Helper to accumulate for user
+            const accumulateForUser = (uId, roleType) => {
+                const stat = userStatsMap[uId];
+                if (!stat) return;
+
+                const roleWeight = roleType === 'assignee' ? 1.0 : 0.5;
+                const taskEffectiveWeight = priorityWeight * roleWeight;
+
+                if (roleType === 'assignee') {
+                    stat.totalAssignedTasks += 1;
+                } else {
+                    stat.totalCollaboratedTasks += 1;
+                }
+                stat.totalTasks += 1;
+
+                if (isDone) {
+                    stat.completedTasks += 1;
+                    if (isOnTime) stat.onTimeTasks += 1;
+                    if (isLate) stat.lateTasks += 1;
+                } else {
+                    if (isOverdue) stat.overdueTasks += 1;
+                    else stat.inProgressTasks += 1;
+                }
+
+                if (task.evaluation && task.evaluation.score !== undefined) {
+                    stat.evaluatedTasksCount += 1;
+                    stat.totalEvaluationScore += task.evaluation.score;
+                }
+
+                stat.totalWeightedScore += combinedTaskScore * taskEffectiveWeight;
+                stat.totalMaxPossibleScore += 100 * taskEffectiveWeight;
+
+                stat.details.push({
+                    taskId: task._id,
+                    title: task.title,
+                    role: roleType,
+                    priority: task.priority,
+                    status: task.status,
+                    startDate: task.startDate,
+                    endDate: task.endDate,
+                    completedAt: task.completedAt,
+                    isOnTime,
+                    isLate,
+                    isOverdue,
+                    daysLate,
+                    progressScore,
+                    qualityScore,
+                    combinedTaskScore,
+                    evaluation: task.evaluation || null
+                });
+            };
+
+            if (Array.isArray(task.assignees)) {
+                task.assignees.forEach(a => {
+                    const id = (a._id || a).toString();
+                    accumulateForUser(id, 'assignee');
+                });
+            }
+
+            if (Array.isArray(task.collaborators)) {
+                task.collaborators.forEach(c => {
+                    const id = (c._id || c).toString();
+                    const isAlsoAssignee = task.assignees && task.assignees.some(a => (a._id || a).toString() === id);
+                    if (!isAlsoAssignee) {
+                        accumulateForUser(id, 'collaborator');
+                    }
+                });
+            }
+        });
+
+        // Compute final score and ranks
+        const userStats = Object.values(userStatsMap).map(stat => {
+            const kpiScore = stat.totalMaxPossibleScore > 0 
+                ? Math.round((stat.totalWeightedScore / stat.totalMaxPossibleScore) * 100)
+                : 0;
+            
+            let rank = 'D';
+            if (kpiScore >= 90) rank = 'A';
+            else if (kpiScore >= 75) rank = 'B';
+            else if (kpiScore >= 50) rank = 'C';
+
+            const onTimeRate = (stat.onTimeTasks + stat.lateTasks) > 0 
+                ? Math.round((stat.onTimeTasks / (stat.onTimeTasks + stat.lateTasks)) * 100) 
+                : 0;
+
+            const averageQualityScore = stat.evaluatedTasksCount > 0 
+                ? Math.round(stat.totalEvaluationScore / stat.evaluatedTasksCount) 
+                : null;
+
+            return {
+                ...stat,
+                kpiScore,
+                rank,
+                onTimeRate,
+                averageQualityScore
+            };
+        });
+
+        // Sort by KPI score descending
+        userStats.sort((a, b) => b.kpiScore - a.kpiScore);
+
+        // Overall summary statistics
+        const totalTasksCount = tasks.length;
+        const totalCompletedTasks = tasks.filter(t => t.status === 'DONE').length;
+        const totalOnTimeTasks = tasks.filter(t => t.status === 'DONE' && (t.completedAt ? new Date(t.completedAt) <= new Date(t.endDate) : new Date(t.updatedAt) <= new Date(t.endDate))).length;
+        const totalLateTasks = totalCompletedTasks - totalOnTimeTasks;
+        const totalOverdueTasks = tasks.filter(t => t.status !== 'DONE' && new Date() > new Date(t.endDate)).length;
+        const overallOnTimeRate = totalCompletedTasks > 0 ? Math.round((totalOnTimeTasks / totalCompletedTasks) * 100) : 0;
+        
+        const overallKpiAverage = userStats.length > 0 
+            ? Math.round(userStats.reduce((sum, u) => sum + u.kpiScore, 0) / userStats.length)
+            : 0;
+
+        res.status(200).json({
+            success: true,
+            data: {
+                summary: {
+                    totalTasksCount,
+                    totalCompletedTasks,
+                    totalOnTimeTasks,
+                    totalLateTasks,
+                    totalOverdueTasks,
+                    overallOnTimeRate,
+                    overallKpiAverage,
+                    totalUsersCount: userStats.length
+                },
+                leaderboard: userStats
+            }
+        });
+    } catch (error) {
+        console.error("Error calculating KPI stats:", error);
         res.status(500).json({ success: false, message: "Server Error", error: error.message });
     }
 };
@@ -382,5 +728,7 @@ module.exports = {
     createTask,
     getTasks,
     updateTask,
+    evaluateTask,
+    getKpiStats,
     deleteTask
 };
