@@ -454,8 +454,11 @@ const getKpiStats = async (req, res) => {
             };
         }
 
-        // Fetch users matching departmentId or userId filter
-        let userFilter = {};
+        // Fetch users matching departmentId or userId filter (loại bỏ tài khoản vô hiệu hóa và admin qlvb@nsgpc.edu.vn)
+        let userFilter = {
+            role: { $nin: [null, ""] },
+            email: { $not: /^qlvb@nsgpc\.edu\.vn$/i }
+        };
         if (userId) {
             userFilter._id = userId;
         } else if (departmentId) {
@@ -641,9 +644,15 @@ const getKpiStats = async (req, res) => {
             }
         });
 
-        // Compute final score and ranks (Chỉ tính cho cán bộ CÓ công việc được phân công)
+        // Compute final score and ranks (Chỉ tính cho cán bộ CÓ công việc được phân công, còn hoạt động và không phải admin qlvb)
         const userStats = Object.values(userStatsMap)
-            .filter(stat => stat.totalTasks > 0)
+            .filter(stat => {
+                if (stat.totalTasks <= 0) return false;
+                const u = stat.user;
+                if (!u || !u.role) return false;
+                if (u.email && u.email.toLowerCase() === 'qlvb@nsgpc.edu.vn') return false;
+                return true;
+            })
             .map(stat => {
                 const kpiScore = stat.totalMaxPossibleScore > 0 
                     ? Math.round((stat.totalWeightedScore / stat.totalMaxPossibleScore) * 100)
