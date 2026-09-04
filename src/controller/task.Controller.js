@@ -108,7 +108,10 @@ const createTask = async (req, res) => {
           }
         };
 
-        const assignees = parseJSON(req.body.assignees);
+        const parsedAssignees = parseJSON(req.body.assignees);
+        const assignees = (Array.isArray(parsedAssignees) && parsedAssignees.length > 0)
+            ? parsedAssignees
+            : (createdBy ? [createdBy] : []);
         const collaborators = parseJSON(req.body.collaborators);
 
         let uploadedFiles = [];
@@ -515,13 +518,14 @@ const getKpiStats = async (req, res) => {
 
         const userIds = users.map(u => u._id.toString());
 
-        // Find tasks related to these users
+        // Find tasks related to these users (bao gồm cả công việc do cá nhân tự tạo)
         let taskQuery = { ...dateFilter };
         if (userIds.length > 0) {
             const userMatch = {
                 $or: [
                     { assignees: { $in: userIds } },
-                    { collaborators: { $in: userIds } }
+                    { collaborators: { $in: userIds } },
+                    { createdBy: { $in: userIds } }
                 ]
             };
             if (taskQuery.$or) {
@@ -539,6 +543,7 @@ const getKpiStats = async (req, res) => {
         const tasks = await Task.find(taskQuery)
             .populate("assignees", "name email department")
             .populate("collaborators", "name email department")
+            .populate("createdBy", "name email department")
             .populate("evaluation.evaluatedBy", "name email")
             .lean();
 
@@ -680,19 +685,27 @@ const getKpiStats = async (req, res) => {
                 });
             };
 
-            if (Array.isArray(task.assignees)) {
+            const processedUserIds = new Set();
+
+            if (Array.isArray(task.assignees) && task.assignees.length > 0) {
                 task.assignees.forEach(a => {
                     const id = (a._id || a).toString();
                     accumulateForUser(id, 'assignee');
+                    processedUserIds.add(id);
                 });
+            } else if (task.createdBy) {
+                // Công việc do cá nhân tự thêm nhưng không chọn người thực hiện -> tính cho người tạo là người thực hiện chính
+                const creatorId = (task.createdBy._id || task.createdBy).toString();
+                accumulateForUser(creatorId, 'assignee');
+                processedUserIds.add(creatorId);
             }
 
             if (Array.isArray(task.collaborators)) {
                 task.collaborators.forEach(c => {
                     const id = (c._id || c).toString();
-                    const isAlsoAssignee = task.assignees && task.assignees.some(a => (a._id || a).toString() === id);
-                    if (!isAlsoAssignee) {
+                    if (!processedUserIds.has(id)) {
                         accumulateForUser(id, 'collaborator');
+                        processedUserIds.add(id);
                     }
                 });
             }
