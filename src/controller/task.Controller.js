@@ -492,10 +492,19 @@ const getKpiStats = async (req, res) => {
             role: { $nin: [null, ""] },
             email: { $not: /^qlvb@nsgpc\.edu\.vn$/i }
         };
-        if (userId) {
-            userFilter._id = userId;
-        } else if (departmentId) {
-            userFilter.department = departmentId;
+        if (!isBGH) {
+            // Cán bộ cấp phó: Bắt buộc chỉ lọc người thuộc đơn vị mình
+            userFilter.department = currentUser && currentUser.department ? currentUser.department : null;
+            if (userId) {
+                userFilter._id = userId;
+            }
+        } else {
+            // Nhóm BGH (admin, manager, đơn vị BGH): Có thể lọc theo bất kỳ user hoặc department nào
+            if (userId) {
+                userFilter._id = userId;
+            } else if (departmentId) {
+                userFilter.department = departmentId;
+            }
         }
 
         const users = await User.find(userFilter)
