@@ -4,6 +4,7 @@ const path = require('path');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const app = express();
+app.set('trust proxy', 1);
 const port = process.env.PORT || 8888;
 const hostname = process.env.HOST_NAME;
 
@@ -22,10 +23,11 @@ app.use(compression());
 // Rate Limiting to prevent Brute-Force/DDoS
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 phút
-  max: 1500, // Giới hạn 1500 requests mỗi 15 phút trên Vercel Free
+  max: 3000, // Giới hạn 3000 requests mỗi 15 phút
   message: { success: false, message: "Quá nhiều yêu cầu từ IP này, vui lòng thử lại sau." },
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false }
 });
 app.use(limiter);
 
