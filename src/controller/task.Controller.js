@@ -670,6 +670,7 @@ const getKpiStats = async (req, res) => {
                 stat.details.push({
                     taskId: task._id,
                     title: task.title,
+                    description: task.description || '',
                     role: roleType,
                     priority: task.priority,
                     status: task.status,
