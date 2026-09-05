@@ -245,7 +245,16 @@ const createTask = async (req, res) => {
             console.error("Lỗi gửi email tạo task:", emailErr);
         }
 
-        res.status(201).json({ success: true, message: "Task created successfully", data: newTask });
+        const fullPopulatedTask = await Task.findById(newTask._id)
+            .populate("assignees", "name email emailNotifications")
+            .populate("collaborators", "name email emailNotifications")
+            .populate("createdBy", "name email")
+            .populate("history.user", "name email")
+            .populate("relatedDocument", "docCode shortDescription files")
+            .populate("subtasks.assignee", "name email")
+            .populate("subtasks.createdBy", "name email");
+
+        res.status(201).json({ success: true, message: "Task created successfully", data: fullPopulatedTask || newTask });
     } catch (error) {
         console.error("Error creating task:", error);
         res.status(500).json({ success: false, message: "Server Error", error: error.message });
@@ -651,20 +660,25 @@ const evaluateTask = async (req, res) => {
             timestamp: new Date()
         };
 
-        const updatedTask = await Task.findByIdAndUpdate(
+        await Task.findByIdAndUpdate(
             taskId,
             { 
                 $set: { evaluation: evaluationData },
                 $push: { history: historyEntry }
-            },
-            { new: true }
-        )
-        .populate("assignees", "name email")
-        .populate("collaborators", "name email")
-        .populate("createdBy", "name email")
-        .populate("evaluation.evaluatedBy", "name email");
+            }
+        );
 
-        res.status(200).json({ success: true, message: "Đánh giá công việc thành công", data: updatedTask });
+        const populatedTask = await Task.findById(taskId)
+            .populate("assignees", "name email emailNotifications")
+            .populate("collaborators", "name email emailNotifications")
+            .populate("createdBy", "name email")
+            .populate("history.user", "name email")
+            .populate("evaluation.evaluatedBy", "name email")
+            .populate("relatedDocument", "docCode shortDescription files")
+            .populate("subtasks.assignee", "name email")
+            .populate("subtasks.createdBy", "name email");
+
+        res.status(200).json({ success: true, message: "Đánh giá công việc thành công", data: populatedTask });
     } catch (error) {
         console.error("Error evaluating task:", error);
         res.status(500).json({ success: false, message: "Server Error", error: error.message });
@@ -1087,6 +1101,10 @@ const addSubtask = async (req, res) => {
             return res.status(404).json({ success: false, message: "Không tìm thấy công việc." });
         }
 
+        if (existingTask.status === 'DONE') {
+            return res.status(400).json({ success: false, message: "Công việc đã hoàn thành, không thể thêm công việc con mới." });
+        }
+
         const updater = req.user ? req.user._id : null;
         const newSubtask = {
             title: title.trim(),
@@ -1141,6 +1159,10 @@ const updateSubtask = async (req, res) => {
         const existingTask = await Task.findById(taskId);
         if (!existingTask) {
             return res.status(404).json({ success: false, message: "Không tìm thấy công việc." });
+        }
+
+        if (existingTask.status === 'DONE') {
+            return res.status(400).json({ success: false, message: "Công việc đã hoàn thành, không thể chỉnh sửa công việc con." });
         }
 
         const subtask = existingTask.subtasks.id(subtaskId);
@@ -1223,6 +1245,10 @@ const deleteSubtask = async (req, res) => {
         const existingTask = await Task.findById(taskId);
         if (!existingTask) {
             return res.status(404).json({ success: false, message: "Không tìm thấy công việc." });
+        }
+
+        if (existingTask.status === 'DONE') {
+            return res.status(400).json({ success: false, message: "Công việc đã hoàn thành, không thể xóa công việc con." });
         }
 
         const subtask = existingTask.subtasks.id(subtaskId);
