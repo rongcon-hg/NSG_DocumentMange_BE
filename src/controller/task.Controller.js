@@ -177,6 +177,22 @@ const createTask = async (req, res) => {
             }
         }
 
+        let subtasks = [];
+        if (req.body.subtasks) {
+            const parsedSubtasks = parseJSON(req.body.subtasks);
+            if (Array.isArray(parsedSubtasks)) {
+                subtasks = parsedSubtasks.map(s => ({
+                    title: s.title ? s.title.trim() : "",
+                    assignee: s.assignee || null,
+                    startDate: s.startDate ? new Date(s.startDate) : null,
+                    endDate: s.endDate ? new Date(s.endDate) : null,
+                    status: s.status || "TODO",
+                    createdBy: createdBy,
+                    createdAt: new Date()
+                })).filter(s => s.title);
+            }
+        }
+
         const newTask = new Task({
             title,
             description,
@@ -185,6 +201,7 @@ const createTask = async (req, res) => {
             endDate,
             assignees,
             collaborators,
+            subtasks,
             files: uploadedFiles,
             relatedDocument,
             priority: priority || 'NORMAL',
@@ -192,7 +209,7 @@ const createTask = async (req, res) => {
             history: [{
                 action: 'Tạo mới',
                 user: createdBy,
-                details: 'Khởi tạo công việc',
+                details: subtasks.length > 0 ? `Khởi tạo công việc kèm ${subtasks.length} công việc con` : 'Khởi tạo công việc',
                 timestamp: new Date()
             }]
         });
@@ -257,6 +274,8 @@ const getTasks = async (req, res) => {
             .populate("history.user", "name email")
             .populate("evaluation.evaluatedBy", "name email")
             .populate("relatedDocument", "docCode shortDescription files")
+            .populate("subtasks.assignee", "name email")
+            .populate("subtasks.createdBy", "name email")
             .sort({ startDate: 1 });
 
         res.status(200).json({ success: true, data: tasks });
@@ -286,6 +305,7 @@ const updateTask = async (req, res) => {
 
         if (updates.assignees) updates.assignees = parseJSON(updates.assignees);
         if (updates.collaborators) updates.collaborators = parseJSON(updates.collaborators);
+        if (updates.subtasks) updates.subtasks = parseJSON(updates.subtasks);
 
         let updatedFiles = existingTask.files || [];
         if (req.body.existingFiles) {
@@ -364,6 +384,18 @@ const updateTask = async (req, res) => {
         // Thay đổi trạng thái
         let statusChanged = false;
         if (updates.status && updates.status !== existingTask.status) {
+            // Ràng buộc: Không thể hoàn thành công việc lớn khi còn công việc con chưa hoàn thành
+            if (updates.status === 'DONE') {
+                const effectiveSubtasks = updates.subtasks !== undefined ? updates.subtasks : (existingTask.subtasks || []);
+                const hasUnfinishedSubtasks = Array.isArray(effectiveSubtasks) && effectiveSubtasks.some(s => s.status !== 'DONE');
+                if (hasUnfinishedSubtasks) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "Không thể hoàn thành công việc lớn khi còn công việc con chưa hoàn thành. Vui lòng hoàn thành tất cả công việc con trước."
+                    });
+                }
+            }
+
             statusChanged = true;
             const statusLabels = { 'TODO': 'Chưa làm', 'IN_PROGRESS': 'Đang làm', 'DONE': 'Hoàn thành' };
             const oldStatus = statusLabels[existingTask.status] || existingTask.status;
@@ -376,6 +408,15 @@ const updateTask = async (req, res) => {
                 }
             } else if (existingTask.status === 'DONE') {
                 updates.completedAt = null;
+            }
+        }
+
+        // Thay đổi công việc con
+        if (updates.subtasks && Array.isArray(updates.subtasks)) {
+            const oldLen = (existingTask.subtasks || []).length;
+            const newLen = updates.subtasks.length;
+            if (oldLen !== newLen) {
+                changes.push(`Cập nhật danh sách công việc con (${newLen} việc con)`);
             }
         }
 
@@ -533,7 +574,9 @@ const updateTask = async (req, res) => {
             .populate("createdBy", "name email")
             .populate("history.user", "name email")
             .populate("evaluation.evaluatedBy", "name email")
-            .populate("relatedDocument", "docCode shortDescription files");
+            .populate("relatedDocument", "docCode shortDescription files")
+            .populate("subtasks.assignee", "name email")
+            .populate("subtasks.createdBy", "name email");
 
         try {
             const uniqueUsers = [...(populatedTask.assignees || []), ...(populatedTask.collaborators || [])].filter((user, index, self) => 
@@ -1030,11 +1073,201 @@ const deleteTask = async (req, res) => {
     }
 };
 
+const addSubtask = async (req, res) => {
+    try {
+        const { taskId } = req.params;
+        const { title, assignee, startDate, endDate, status } = req.body;
+
+        if (!title || !title.trim()) {
+            return res.status(400).json({ success: false, message: "Tiêu đề công việc con không được để trống." });
+        }
+
+        const existingTask = await Task.findById(taskId);
+        if (!existingTask) {
+            return res.status(404).json({ success: false, message: "Không tìm thấy công việc." });
+        }
+
+        const updater = req.user ? req.user._id : null;
+        const newSubtask = {
+            title: title.trim(),
+            assignee: assignee || null,
+            startDate: startDate ? new Date(startDate) : null,
+            endDate: endDate ? new Date(endDate) : null,
+            status: status || 'TODO',
+            completedAt: status === 'DONE' ? new Date() : null,
+            createdBy: updater,
+            createdAt: new Date()
+        };
+
+        let assigneeName = '';
+        if (assignee) {
+            const assignedUser = await User.findById(assignee).select('name');
+            if (assignedUser) assigneeName = ` (Giao cho: ${assignedUser.name})`;
+        }
+
+        const historyEntry = {
+            action: 'Thêm việc con',
+            user: updater,
+            details: `Thêm công việc con: "${title.trim()}"${assigneeName}`,
+            timestamp: new Date()
+        };
+
+        existingTask.subtasks.push(newSubtask);
+        existingTask.history.push(historyEntry);
+        await existingTask.save();
+
+        const populatedTask = await Task.findById(existingTask._id)
+            .populate("assignees", "name email emailNotifications")
+            .populate("collaborators", "name email emailNotifications")
+            .populate("createdBy", "name email")
+            .populate("history.user", "name email")
+            .populate("evaluation.evaluatedBy", "name email")
+            .populate("relatedDocument", "docCode shortDescription files")
+            .populate("subtasks.assignee", "name email")
+            .populate("subtasks.createdBy", "name email");
+
+        res.status(201).json({ success: true, message: "Thêm công việc con thành công", data: populatedTask });
+    } catch (error) {
+        console.error("Error adding subtask:", error);
+        res.status(500).json({ success: false, message: "Server Error", error: error.message });
+    }
+};
+
+const updateSubtask = async (req, res) => {
+    try {
+        const { taskId, subtaskId } = req.params;
+        const { title, assignee, startDate, endDate, status } = req.body;
+
+        const existingTask = await Task.findById(taskId);
+        if (!existingTask) {
+            return res.status(404).json({ success: false, message: "Không tìm thấy công việc." });
+        }
+
+        const subtask = existingTask.subtasks.id(subtaskId);
+        if (!subtask) {
+            return res.status(404).json({ success: false, message: "Không tìm thấy công việc con." });
+        }
+
+        const updater = req.user ? req.user._id : null;
+        const historyDetails = [];
+
+        if (title && title.trim() !== subtask.title) {
+            historyDetails.push(`Đổi tên việc con từ "${subtask.title}" sang "${title.trim()}"`);
+            subtask.title = title.trim();
+        }
+
+        if (assignee !== undefined) {
+            const oldAssigneeId = subtask.assignee ? subtask.assignee.toString() : null;
+            const newAssigneeId = assignee ? assignee.toString() : null;
+            if (oldAssigneeId !== newAssigneeId) {
+                if (newAssigneeId) {
+                    const newUser = await User.findById(newAssigneeId).select('name');
+                    historyDetails.push(`Phân công việc con "${subtask.title}" cho: ${newUser?.name || 'nhân sự mới'}`);
+                } else {
+                    historyDetails.push(`Bỏ phân công việc con "${subtask.title}"`);
+                }
+                subtask.assignee = assignee || null;
+            }
+        }
+
+        if (startDate !== undefined) {
+            subtask.startDate = startDate ? new Date(startDate) : null;
+        }
+        if (endDate !== undefined) {
+            subtask.endDate = endDate ? new Date(endDate) : null;
+        }
+
+        if (status && status !== subtask.status) {
+            const statusLabels = { 'TODO': 'Chưa làm', 'IN_PROGRESS': 'Đang làm', 'DONE': 'Hoàn thành' };
+            historyDetails.push(`Việc con "${subtask.title}": Chuyển trạng thái sang "${statusLabels[status] || status}"`);
+            subtask.status = status;
+            if (status === 'DONE') {
+                subtask.completedAt = new Date();
+            } else {
+                subtask.completedAt = null;
+            }
+        }
+
+        if (historyDetails.length > 0) {
+            existingTask.history.push({
+                action: 'Cập nhật việc con',
+                user: updater,
+                details: historyDetails.join('; '),
+                timestamp: new Date()
+            });
+        }
+
+        await existingTask.save();
+
+        const populatedTask = await Task.findById(existingTask._id)
+            .populate("assignees", "name email emailNotifications")
+            .populate("collaborators", "name email emailNotifications")
+            .populate("createdBy", "name email")
+            .populate("history.user", "name email")
+            .populate("evaluation.evaluatedBy", "name email")
+            .populate("relatedDocument", "docCode shortDescription files")
+            .populate("subtasks.assignee", "name email")
+            .populate("subtasks.createdBy", "name email");
+
+        res.status(200).json({ success: true, message: "Cập nhật công việc con thành công", data: populatedTask });
+    } catch (error) {
+        console.error("Error updating subtask:", error);
+        res.status(500).json({ success: false, message: "Server Error", error: error.message });
+    }
+};
+
+const deleteSubtask = async (req, res) => {
+    try {
+        const { taskId, subtaskId } = req.params;
+
+        const existingTask = await Task.findById(taskId);
+        if (!existingTask) {
+            return res.status(404).json({ success: false, message: "Không tìm thấy công việc." });
+        }
+
+        const subtask = existingTask.subtasks.id(subtaskId);
+        if (!subtask) {
+            return res.status(404).json({ success: false, message: "Không tìm thấy công việc con." });
+        }
+
+        const updater = req.user ? req.user._id : null;
+        const deletedTitle = subtask.title;
+
+        existingTask.subtasks.pull(subtaskId);
+        existingTask.history.push({
+            action: 'Xóa việc con',
+            user: updater,
+            details: `Xóa công việc con: "${deletedTitle}"`,
+            timestamp: new Date()
+        });
+
+        await existingTask.save();
+
+        const populatedTask = await Task.findById(existingTask._id)
+            .populate("assignees", "name email emailNotifications")
+            .populate("collaborators", "name email emailNotifications")
+            .populate("createdBy", "name email")
+            .populate("history.user", "name email")
+            .populate("evaluation.evaluatedBy", "name email")
+            .populate("relatedDocument", "docCode shortDescription files")
+            .populate("subtasks.assignee", "name email")
+            .populate("subtasks.createdBy", "name email");
+
+        res.status(200).json({ success: true, message: "Đã xóa công việc con", data: populatedTask });
+    } catch (error) {
+        console.error("Error deleting subtask:", error);
+        res.status(500).json({ success: false, message: "Server Error", error: error.message });
+    }
+};
+
 module.exports = {
     createTask,
     getTasks,
     updateTask,
     evaluateTask,
     getKpiStats,
-    deleteTask
+    deleteTask,
+    addSubtask,
+    updateSubtask,
+    deleteSubtask
 };

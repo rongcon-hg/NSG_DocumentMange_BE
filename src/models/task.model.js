@@ -91,6 +91,22 @@ const taskSchema = new mongoose.Schema(
         timestamp: { type: Date, default: Date.now }
       }
     ],
+    subtasks: [
+      {
+        title: { type: String, required: true },
+        assignee: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        startDate: { type: Date },
+        endDate: { type: Date },
+        status: {
+          type: String,
+          enum: ["TODO", "IN_PROGRESS", "DONE"],
+          default: "TODO",
+        },
+        completedAt: { type: Date },
+        createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
   },
   {
     timestamps: true,

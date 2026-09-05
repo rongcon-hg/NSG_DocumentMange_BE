@@ -11,4 +11,9 @@ router.put('/:taskId', verifyToken, upload.array('files', 10), taskController.up
 router.patch('/:taskId/evaluate', verifyToken, taskController.evaluateTask);
 router.delete('/:taskId', verifyToken, taskController.deleteTask);
 
+// Routes quản lý công việc con (Subtasks)
+router.post('/:taskId/subtasks', verifyToken, taskController.addSubtask);
+router.put('/:taskId/subtasks/:subtaskId', verifyToken, taskController.updateSubtask);
+router.delete('/:taskId/subtasks/:subtaskId', verifyToken, taskController.deleteSubtask);
+
 module.exports = router;
