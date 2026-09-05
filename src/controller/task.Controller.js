@@ -424,6 +424,12 @@ const updateTask = async (req, res) => {
         if (updates.subtasks && Array.isArray(updates.subtasks)) {
             const oldLen = (existingTask.subtasks || []).length;
             const newLen = updates.subtasks.length;
+            if (existingTask.status === 'DONE' && newLen > oldLen) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Công việc đã hoàn thành, không thể thêm công việc con mới."
+                });
+            }
             if (oldLen !== newLen) {
                 changes.push(`Cập nhật danh sách công việc con (${newLen} việc con)`);
             }
