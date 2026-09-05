@@ -80,6 +80,9 @@ const taskSchema = new mongoose.Schema(
       type: Number,
       default: 1,
     },
+    timeChangeReason: {
+      type: String,
+    },
     history: [
       {
         action: String,

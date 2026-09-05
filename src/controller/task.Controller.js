@@ -61,6 +61,30 @@ function sanitizeFileName(str) {
   return str;
 }
 
+function formatDateStr(d) {
+  if (!d) return "";
+  const date = new Date(d);
+  if (isNaN(date.getTime())) return "";
+  try {
+    return new Intl.DateTimeFormat('vi-VN', {
+      timeZone: 'Asia/Ho_Chi_Minh',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    }).format(date);
+  } catch (e) {
+    const dd = String(date.getDate()).padStart(2, '0');
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const yyyy = date.getFullYear();
+    const hh = String(date.getHours()).padStart(2, '0');
+    const min = String(date.getMinutes()).padStart(2, '0');
+    return `${dd}/${mm}/${yyyy} ${hh}:${min}`;
+  }
+}
+
 async function getOrCreateMonthFolder(drive) {
   const date = new Date();
   const folderName = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
@@ -310,19 +334,41 @@ const updateTask = async (req, res) => {
         updates.files = updatedFiles;
 
         const updater = req.user ? req.user._id : (req.body.updatedBy || existingTask.createdBy);
-        let historyEntry = {
-            action: 'Cập nhật',
-            user: updater,
-            details: 'Cập nhật thông tin công việc',
-            timestamp: new Date()
-        };
+        const currentUserRole = req.user ? req.user.role : '';
 
+        // 1. Kiểm tra quyền thay đổi thời gian: Chỉ người tạo, người chủ trì (assignees) hoặc admin/manager
+        const isCreator = existingTask.createdBy && (existingTask.createdBy._id || existingTask.createdBy).toString() === updater.toString();
+        const isAssignee = Array.isArray(existingTask.assignees) && existingTask.assignees.some(a => (a._id || a).toString() === updater.toString());
+        const isAdminOrManager = ['admin', 'manager'].includes(currentUserRole);
+
+        const oldStart = existingTask.startDate ? new Date(existingTask.startDate).getTime() : 0;
+        const newStart = updates.startDate ? new Date(updates.startDate).getTime() : oldStart;
+        const startDiff = Math.abs(oldStart - newStart);
+
+        const oldEnd = existingTask.endDate ? new Date(existingTask.endDate).getTime() : 0;
+        const newEnd = updates.endDate ? new Date(updates.endDate).getTime() : oldEnd;
+        const endDiff = Math.abs(oldEnd - newEnd);
+
+        const isTimeModified = (startDiff > 59000) || (endDiff > 59000);
+
+        if (isTimeModified && !isCreator && !isAssignee && !isAdminOrManager) {
+            return res.status(403).json({
+                success: false,
+                message: "Chỉ người tạo công việc và người chủ trì mới được phép thay đổi thời gian thực hiện."
+            });
+        }
+
+        // 2. Thu thập danh sách thay đổi chi tiết
+        const changes = [];
+
+        // Thay đổi trạng thái
+        let statusChanged = false;
         if (updates.status && updates.status !== existingTask.status) {
-            historyEntry.action = 'Cập nhật trạng thái';
+            statusChanged = true;
             const statusLabels = { 'TODO': 'Chưa làm', 'IN_PROGRESS': 'Đang làm', 'DONE': 'Hoàn thành' };
             const oldStatus = statusLabels[existingTask.status] || existingTask.status;
             const newStatus = statusLabels[updates.status] || updates.status;
-            historyEntry.details = `Chuyển trạng thái từ ${oldStatus} sang ${newStatus}`;
+            changes.push(`Chuyển trạng thái từ "${oldStatus}" sang "${newStatus}"`);
 
             if (updates.status === 'DONE') {
                 if (!updates.completedAt) {
@@ -332,18 +378,164 @@ const updateTask = async (req, res) => {
                 updates.completedAt = null;
             }
         }
-        
-        // Remove history from updates object if it was somehow sent by client
+
+        // Thay đổi thời gian thực hiện
+        let timeChanged = false;
+        if (isTimeModified) {
+            timeChanged = true;
+            const timeParts = [];
+            if (startDiff > 59000 && endDiff > 59000) {
+                timeParts.push(`Từ [${formatDateStr(existingTask.startDate)} - ${formatDateStr(existingTask.endDate)}] sang [${formatDateStr(updates.startDate)} - ${formatDateStr(updates.endDate)}]`);
+            } else if (endDiff > 59000) {
+                timeParts.push(`Hạn hoàn thành từ ${formatDateStr(existingTask.endDate)} sang ${formatDateStr(updates.endDate)}`);
+            } else if (startDiff > 59000) {
+                timeParts.push(`Ngày bắt đầu từ ${formatDateStr(existingTask.startDate)} sang ${formatDateStr(updates.startDate)}`);
+            }
+
+            let timeLog = `Thay đổi thời gian: ${timeParts.join(', ')}`;
+            const timeReason = req.body.timeChangeReason || updates.timeChangeReason;
+            if (timeReason && timeReason.trim()) {
+                timeLog += `. Lý do: "${timeReason.trim()}"`;
+                updates.timeChangeReason = timeReason.trim();
+            }
+            changes.push(timeLog);
+        }
+
+        // Thay đổi tệp đính kèm
+        const oldFiles = Array.isArray(existingTask.files) ? existingTask.files : [];
+        const newFiles = Array.isArray(updatedFiles) ? updatedFiles : [];
+        const oldFileIds = new Set(oldFiles.map(f => f.fileId).filter(Boolean));
+        const newFileIds = new Set(newFiles.map(f => f.fileId).filter(Boolean));
+
+        const addedFiles = newFiles.filter(f => f.fileId && !oldFileIds.has(f.fileId));
+        if (addedFiles.length > 0) {
+            const addedNames = addedFiles.map(f => f.fileName || 'Tệp mới').join(', ');
+            changes.push(`Thêm tệp đính kèm: ${addedNames}`);
+        }
+
+        const removedFiles = oldFiles.filter(f => f.fileId && !newFileIds.has(f.fileId));
+        if (removedFiles.length > 0) {
+            const removedNames = removedFiles.map(f => f.fileName || 'Tệp').join(', ');
+            changes.push(`Xóa tệp đính kèm: ${removedNames}`);
+        }
+
+        // Thay đổi tiêu đề
+        let titleChanged = false;
+        if (updates.title && updates.title.trim() !== (existingTask.title || '').trim()) {
+            titleChanged = true;
+            changes.push(`Đổi tiêu đề từ "${existingTask.title}" sang "${updates.title.trim()}"`);
+        }
+
+        // Thay đổi mức độ ưu tiên
+        let priorityChanged = false;
+        const priorityLabels = { 'NORMAL': 'Bình thường', 'URGENT': 'Khẩn', 'FLASH': 'Hỏa tốc' };
+        if (updates.priority && updates.priority !== existingTask.priority) {
+            priorityChanged = true;
+            const oldP = priorityLabels[existingTask.priority] || existingTask.priority;
+            const newP = priorityLabels[updates.priority] || updates.priority;
+            changes.push(`Thay đổi mức độ ưu tiên từ "${oldP}" sang "${newP}"`);
+        }
+
+        // Thay đổi người thực hiện
+        let assigneesChanged = false;
+        if (updates.assignees && Array.isArray(updates.assignees)) {
+            const oldIds = (existingTask.assignees || []).map(a => (a._id || a).toString()).sort();
+            const newIds = updates.assignees.map(a => (a._id || a).toString()).sort();
+            if (JSON.stringify(oldIds) !== JSON.stringify(newIds)) {
+                assigneesChanged = true;
+                const addedIds = newIds.filter(id => !oldIds.includes(id));
+                const removedIds = oldIds.filter(id => !newIds.includes(id));
+                const aParts = [];
+                if (addedIds.length > 0) {
+                    const addedUsers = await User.find({ _id: { $in: addedIds } }).select('name');
+                    aParts.push(`Thêm: ${addedUsers.map(u => u.name).join(', ')}`);
+                }
+                if (removedIds.length > 0) {
+                    const removedUsers = await User.find({ _id: { $in: removedIds } }).select('name');
+                    aParts.push(`Bớt: ${removedUsers.map(u => u.name).join(', ')}`);
+                }
+                changes.push(`Cập nhật người thực hiện (${aParts.join('; ') || 'Thay đổi danh sách'})`);
+            }
+        }
+
+        // Thay đổi người phối hợp
+        let collaboratorsChanged = false;
+        if (updates.collaborators && Array.isArray(updates.collaborators)) {
+            const oldIds = (existingTask.collaborators || []).map(c => (c._id || c).toString()).sort();
+            const newIds = updates.collaborators.map(c => (c._id || c).toString()).sort();
+            if (JSON.stringify(oldIds) !== JSON.stringify(newIds)) {
+                collaboratorsChanged = true;
+                const addedIds = newIds.filter(id => !oldIds.includes(id));
+                const removedIds = oldIds.filter(id => !newIds.includes(id));
+                const cParts = [];
+                if (addedIds.length > 0) {
+                    const addedUsers = await User.find({ _id: { $in: addedIds } }).select('name');
+                    cParts.push(`Thêm: ${addedUsers.map(u => u.name).join(', ')}`);
+                }
+                if (removedIds.length > 0) {
+                    const removedUsers = await User.find({ _id: { $in: removedIds } }).select('name');
+                    cParts.push(`Bớt: ${removedUsers.map(u => u.name).join(', ')}`);
+                }
+                changes.push(`Cập nhật người phối hợp (${cParts.join('; ') || 'Thay đổi danh sách'})`);
+            }
+        }
+
+        // Thay đổi mô tả / ghi chú
+        let descChanged = false;
+        if (updates.description !== undefined && updates.description !== existingTask.description) {
+            descChanged = true;
+            changes.push('Cập nhật mô tả nội dung công việc');
+        }
+        if (updates.notes !== undefined && updates.notes !== existingTask.notes) {
+            changes.push('Cập nhật ghi chú công việc');
+        }
+
+        // 3. Xác định tên hành động và chi tiết
+        let action = 'Cập nhật';
+        let details = 'Cập nhật thông tin công việc';
+
+        if (changes.length === 1) {
+            if (statusChanged) action = 'Cập nhật trạng thái';
+            else if (timeChanged) action = 'Thay đổi thời gian';
+            else if (addedFiles.length > 0 && removedFiles.length > 0) action = 'Cập nhật tệp đính kèm';
+            else if (addedFiles.length > 0) action = 'Thêm tệp đính kèm';
+            else if (removedFiles.length > 0) action = 'Xóa tệp đính kèm';
+            else if (titleChanged) action = 'Sửa tiêu đề';
+            else if (priorityChanged) action = 'Thay đổi mức độ';
+            else if (assigneesChanged) action = 'Thay đổi người thực hiện';
+            else if (collaboratorsChanged) action = 'Thay đổi người phối hợp';
+            else if (descChanged) action = 'Cập nhật mô tả';
+            details = changes[0];
+        } else if (changes.length > 1) {
+            if (statusChanged && timeChanged) action = 'Cập nhật trạng thái & thời gian';
+            else if (statusChanged) action = 'Cập nhật trạng thái & thông tin';
+            else if (timeChanged) action = 'Cập nhật thời gian & thông tin';
+            else if (addedFiles.length > 0 || removedFiles.length > 0) action = 'Cập nhật tệp & thông tin';
+            else action = 'Cập nhật công việc';
+            details = changes.map(c => `• ${c}`).join('\n');
+        }
+
+        const historyEntry = {
+            action,
+            user: updater,
+            details,
+            timestamp: new Date()
+        };
+
+        // Xóa history khỏi updates nếu client gửi lên
         if (updates.history) delete updates.history;
 
         const updatedTask = await Task.findByIdAndUpdate(taskId, { $set: updates, $push: { history: historyEntry } }, { new: true });
 
+        const populatedTask = await Task.findById(updatedTask._id)
+            .populate("assignees", "name email emailNotifications")
+            .populate("collaborators", "name email emailNotifications")
+            .populate("createdBy", "name email")
+            .populate("history.user", "name email")
+            .populate("evaluation.evaluatedBy", "name email")
+            .populate("relatedDocument", "docCode shortDescription files");
+
         try {
-            const populatedTask = await Task.findById(updatedTask._id)
-                .populate("assignees", "name email emailNotifications")
-                .populate("collaborators", "name email emailNotifications")
-                .populate("evaluation.evaluatedBy", "name email");
-                
             const uniqueUsers = [...(populatedTask.assignees || []), ...(populatedTask.collaborators || [])].filter((user, index, self) => 
                 index === self.findIndex((t) => (
                     t._id.toString() === user._id.toString()
@@ -351,7 +543,7 @@ const updateTask = async (req, res) => {
             );
             
             let actionType = 'update';
-            if (updates.status && updates.status !== existingTask.status) {
+            if (statusChanged) {
                 actionType = 'status_change';
             }
 
@@ -363,7 +555,7 @@ const updateTask = async (req, res) => {
             console.error("Lỗi gửi email cập nhật task:", emailErr);
         }
 
-        res.status(200).json({ success: true, message: "Task updated", data: updatedTask });
+        res.status(200).json({ success: true, message: "Task updated", data: populatedTask });
     } catch (error) {
         console.error("Error updating task:", error);
         res.status(500).json({ success: false, message: "Server Error", error: error.message });
