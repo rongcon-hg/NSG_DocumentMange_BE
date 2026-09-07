@@ -285,7 +285,7 @@ const getTasks = async (req, res) => {
             .populate("relatedDocument", "docCode shortDescription files")
             .populate("subtasks.assignee", "name email")
             .populate("subtasks.createdBy", "name email")
-            .sort({ startDate: 1 });
+            .sort({ updatedAt: -1, completedAt: -1, startDate: -1 });
 
         res.status(200).json({ success: true, data: tasks });
     } catch (error) {
