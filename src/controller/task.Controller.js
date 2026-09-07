@@ -119,6 +119,26 @@ async function getOrCreateMonthFolder(drive) {
   return createResponse.data.id;
 }
 
+// Tự động đồng bộ người thực hiện công việc con vào danh sách người phối hợp (collaborators)
+function syncCollaboratorsWithSubtasks(assignees = [], collaborators = [], subtasks = []) {
+    const assigneeIds = new Set((assignees || []).map(a => (a._id || a).toString()));
+    const collabIds = new Set((collaborators || []).map(c => (c._id || c).toString()));
+    const newCollaborators = [...(collaborators || [])];
+
+    if (Array.isArray(subtasks)) {
+        subtasks.forEach(s => {
+            if (s && s.assignee) {
+                const subAssigneeId = (s.assignee._id || s.assignee).toString();
+                if (!assigneeIds.has(subAssigneeId) && !collabIds.has(subAssigneeId)) {
+                    newCollaborators.push(s.assignee._id || s.assignee);
+                    collabIds.add(subAssigneeId);
+                }
+            }
+        });
+    }
+    return newCollaborators;
+}
+
 const createTask = async (req, res) => {
     try {
         const { title, description, notes, startDate, endDate, relatedDocument, priority } = req.body;
@@ -136,7 +156,7 @@ const createTask = async (req, res) => {
         const assignees = (Array.isArray(parsedAssignees) && parsedAssignees.length > 0)
             ? parsedAssignees
             : (createdBy ? [createdBy] : []);
-        const collaborators = parseJSON(req.body.collaborators);
+        let collaborators = parseJSON(req.body.collaborators);
 
         let uploadedFiles = [];
         if (req.body.uploadedFiles) {
@@ -192,6 +212,9 @@ const createTask = async (req, res) => {
                 })).filter(s => s.title);
             }
         }
+
+        // Đồng bộ người thực hiện công việc con vào danh sách người phối hợp nếu chưa có
+        collaborators = syncCollaboratorsWithSubtasks(assignees, collaborators, subtasks);
 
         const newTask = new Task({
             title,
@@ -271,7 +294,8 @@ const getTasks = async (req, res) => {
                 $or: [
                     { createdBy: userId },
                     { assignees: userId },
-                    { collaborators: userId }
+                    { collaborators: userId },
+                    { "subtasks.assignee": userId }
                 ]
             };
         }
@@ -513,6 +537,12 @@ const updateTask = async (req, res) => {
                 changes.push(`Cập nhật người thực hiện (${aParts.join('; ') || 'Thay đổi danh sách'})`);
             }
         }
+
+        // Tự động đồng bộ người thực hiện việc con vào danh sách người phối hợp
+        const effectiveAssignees = updates.assignees || existingTask.assignees || [];
+        const baseCollaborators = updates.collaborators !== undefined ? updates.collaborators : (existingTask.collaborators || []);
+        const effectiveSubtasks = updates.subtasks !== undefined ? updates.subtasks : (existingTask.subtasks || []);
+        updates.collaborators = syncCollaboratorsWithSubtasks(effectiveAssignees, baseCollaborators, effectiveSubtasks);
 
         // Thay đổi người phối hợp
         let collaboratorsChanged = false;
@@ -782,7 +812,8 @@ const getKpiStats = async (req, res) => {
                 $or: [
                     { assignees: { $in: userIds } },
                     { collaborators: { $in: userIds } },
-                    { createdBy: { $in: userIds } }
+                    { createdBy: { $in: userIds } },
+                    { "subtasks.assignee": { $in: userIds } }
                 ]
             };
             if (taskQuery.$or) {
@@ -802,6 +833,7 @@ const getKpiStats = async (req, res) => {
             .populate("collaborators", "name email department")
             .populate("createdBy", "name email department")
             .populate("evaluation.evaluatedBy", "name email")
+            .populate("subtasks.assignee", "name email department")
             .lean();
 
         const priorityWeights = {
@@ -887,16 +919,61 @@ const getKpiStats = async (req, res) => {
                 ? task.evaluation.score 
                 : (isDone ? 80 : 50);
 
-            // Combined task score out of 100
-            const combinedTaskScore = Math.round((progressScore * 0.5) + (qualityScore * 0.5));
-
             // Helper to accumulate for user
-            const accumulateForUser = (uId, roleType) => {
+            const accumulateForUser = (uId, roleType, subtaskInfo = null) => {
                 const stat = userStatsMap[uId];
                 if (!stat) return;
 
+                // Tìm công việc con được giao cho user này trong task (nếu có)
+                let userSubtask = subtaskInfo;
+                if (!userSubtask && Array.isArray(task.subtasks)) {
+                    userSubtask = task.subtasks.find(st => st.assignee && (st.assignee._id || st.assignee).toString() === uId);
+                }
+
+                // Nếu là người thực hiện việc con, tính tiến độ và điểm dựa trên việc con của mình
+                let effectiveIsDone = isDone;
+                let effectiveIsOnTime = isOnTime;
+                let effectiveIsLate = isLate;
+                let effectiveIsOverdue = isOverdue;
+                let effectiveDaysLate = daysLate;
+                let effectiveProgressScore = progressScore;
+
+                if (userSubtask) {
+                    const subDone = userSubtask.status === 'DONE';
+                    const subDeadline = userSubtask.endDate ? new Date(userSubtask.endDate) : endOfDayDeadline;
+                    subDeadline.setHours(23, 59, 59, 999);
+                    const subDeadlineTime = subDeadline.getTime();
+                    const subCompTime = userSubtask.completedAt ? new Date(userSubtask.completedAt).getTime() : subDeadlineTime;
+
+                    if (subDone) {
+                        effectiveIsDone = true;
+                        if (subCompTime <= subDeadlineTime) {
+                            effectiveIsOnTime = true;
+                            effectiveIsLate = false;
+                            effectiveIsOverdue = false;
+                            effectiveProgressScore = 100;
+                        } else {
+                            effectiveIsOnTime = false;
+                            effectiveIsLate = true;
+                            effectiveIsOverdue = false;
+                            effectiveDaysLate = Math.max(1, Math.ceil((subCompTime - subDeadlineTime) / (1000 * 60 * 60 * 24)));
+                            effectiveProgressScore = Math.max(50, 100 - effectiveDaysLate * 5);
+                        }
+                    } else {
+                        effectiveIsDone = false;
+                        if (now.getTime() > subDeadlineTime) {
+                            effectiveIsOverdue = true;
+                            effectiveDaysLate = Math.max(1, Math.ceil((now.getTime() - subDeadlineTime) / (1000 * 60 * 60 * 24)));
+                            effectiveProgressScore = 0;
+                        } else {
+                            effectiveProgressScore = 70;
+                        }
+                    }
+                }
+
                 const roleWeight = roleType === 'assignee' ? 1.0 : 0.5;
                 const taskEffectiveWeight = priorityWeight * roleWeight;
+                const effectiveCombinedScore = Math.round((effectiveProgressScore * 0.5) + (qualityScore * 0.5));
 
                 if (roleType === 'assignee') {
                     stat.totalAssignedTasks += 1;
@@ -905,12 +982,12 @@ const getKpiStats = async (req, res) => {
                 }
                 stat.totalTasks += 1;
 
-                if (isDone) {
+                if (effectiveIsDone) {
                     stat.completedTasks += 1;
-                    if (isOnTime) stat.onTimeTasks += 1;
-                    if (isLate) stat.lateTasks += 1;
+                    if (effectiveIsOnTime) stat.onTimeTasks += 1;
+                    if (effectiveIsLate) stat.lateTasks += 1;
                 } else {
-                    if (isOverdue) stat.overdueTasks += 1;
+                    if (effectiveIsOverdue) stat.overdueTasks += 1;
                     else stat.inProgressTasks += 1;
                 }
 
@@ -919,7 +996,7 @@ const getKpiStats = async (req, res) => {
                     stat.totalEvaluationScore += task.evaluation.score;
                 }
 
-                stat.totalWeightedScore += combinedTaskScore * taskEffectiveWeight;
+                stat.totalWeightedScore += effectiveCombinedScore * taskEffectiveWeight;
                 stat.totalMaxPossibleScore += 100 * taskEffectiveWeight;
 
                 stat.details.push({
@@ -932,14 +1009,20 @@ const getKpiStats = async (req, res) => {
                     startDate: task.startDate,
                     endDate: task.endDate,
                     completedAt: task.completedAt,
-                    isOnTime,
-                    isLate,
-                    isOverdue,
-                    daysLate,
-                    progressScore,
+                    isOnTime: effectiveIsOnTime,
+                    isLate: effectiveIsLate,
+                    isOverdue: effectiveIsOverdue,
+                    daysLate: effectiveDaysLate,
+                    progressScore: effectiveProgressScore,
                     qualityScore,
-                    combinedTaskScore,
-                    evaluation: task.evaluation || null
+                    combinedTaskScore: effectiveCombinedScore,
+                    evaluation: task.evaluation || null,
+                    subtaskInfo: userSubtask ? {
+                        title: userSubtask.title,
+                        status: userSubtask.status,
+                        endDate: userSubtask.endDate,
+                        completedAt: userSubtask.completedAt
+                    } : null
                 });
             };
 
@@ -964,6 +1047,19 @@ const getKpiStats = async (req, res) => {
                     if (!processedUserIds.has(id)) {
                         accumulateForUser(id, 'collaborator');
                         processedUserIds.add(id);
+                    }
+                });
+            }
+
+            // Người được phân công việc con
+            if (Array.isArray(task.subtasks)) {
+                task.subtasks.forEach(s => {
+                    if (s && s.assignee) {
+                        const subAssigneeId = (s.assignee._id || s.assignee).toString();
+                        if (!processedUserIds.has(subAssigneeId)) {
+                            accumulateForUser(subAssigneeId, 'collaborator', s);
+                            processedUserIds.add(subAssigneeId);
+                        }
                     }
                 });
             }
@@ -1137,6 +1233,7 @@ const addSubtask = async (req, res) => {
         };
 
         existingTask.subtasks.push(newSubtask);
+        existingTask.collaborators = syncCollaboratorsWithSubtasks(existingTask.assignees, existingTask.collaborators, existingTask.subtasks);
         existingTask.history.push(historyEntry);
         await existingTask.save();
 
@@ -1225,6 +1322,7 @@ const updateSubtask = async (req, res) => {
             });
         }
 
+        existingTask.collaborators = syncCollaboratorsWithSubtasks(existingTask.assignees, existingTask.collaborators, existingTask.subtasks);
         await existingTask.save();
 
         const populatedTask = await Task.findById(existingTask._id)
