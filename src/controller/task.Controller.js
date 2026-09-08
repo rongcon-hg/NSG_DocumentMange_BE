@@ -851,27 +851,45 @@ const getKpiStats = async (req, res) => {
         const currentUser = req.user;
         const currentRole = currentUser?.role;
 
-        // Lấy thông tin phòng ban của user hiện tại
+        // Lấy thông tin phòng ban & chức vụ của user hiện tại để xác định vai trò
         let userDeptCode = null;
+        let isBGH = currentRole === 'admin' || currentRole === 'manager';
         if (currentUser && currentUser.department) {
-            const userDept = await Department.findById(currentUser.department).select("departmentCode").lean();
-            if (userDept) userDeptCode = userDept.departmentCode;
+            const userDept = await Department.findById(currentUser.department).select("departmentCode departmentName").lean();
+            if (userDept) {
+                userDeptCode = userDept.departmentCode;
+                if (userDeptCode === 'BGH' || (userDept.departmentName && userDept.departmentName.toLowerCase().includes('ban giám hiệu'))) {
+                    isBGH = true;
+                }
+            }
+        }
+        if (!isBGH && currentUser?.position) {
+            const userPos = await Position.findById(currentUser.position).select("positionName abbreviation code").lean();
+            if (userPos) {
+                const pName = (userPos.positionName || '').toLowerCase();
+                const pCode = (userPos.abbreviation || userPos.code || '').toUpperCase();
+                if (['HT', 'PHT', 'NHT'].includes(pCode) || pName.includes('hiệu trưởng') || pName.includes('phó hiệu trưởng')) {
+                    isBGH = true;
+                }
+            }
         }
 
-        // Kiểm tra đặc quyền nhóm BGH (admin, manager, hoặc phòng ban BGH)
-        const isBGH = currentRole === 'admin' || currentRole === 'manager' || userDeptCode === 'BGH';
-        const isChuyenVien = currentRole === 'chuyenvien';
+        const isCapTruong = !isBGH && (currentRole === 'staff' || currentRole === 'captruong');
+        const isCapPhoOrChuyenVien = !isBGH && !isCapTruong;
 
         let { month, year, departmentId, userId, quarter } = req.query;
 
-        // Cho phép lọc linh hoạt theo departmentId và userId được truyền từ frontend
-        if (!departmentId && !userId) {
-            if (isChuyenVien) {
-                userId = currentUser?._id ? currentUser._id.toString() : null;
-            } else if (!isBGH && currentUser?.department) {
-                departmentId = currentUser.department.toString();
-            }
+        // Phân quyền dữ liệu theo vai trò:
+        // 1. Cấp phó và chuyên viên: CHỈ THẤY THÔNG TIN CÁ NHÂN MÌNH
+        if (isCapPhoOrChuyenVien) {
+            userId = currentUser?._id ? currentUser._id.toString() : null;
+            departmentId = currentUser?.department ? currentUser.department.toString() : null;
+        } 
+        // 2. Cấp trưởng: CHỈ THẤY THÔNG TIN TRONG ĐƠN VỊ MÌNH
+        else if (isCapTruong) {
+            departmentId = currentUser?.department ? currentUser.department.toString() : null;
         }
+        // 3. BGH / Admin / Manager: Được xem toàn bộ đơn vị và nhân sự
 
         // Filter khoảng thời gian (Quý, Tháng, Năm theo Phụ lục 3 & 4)
         let dateFilter = {};
@@ -913,10 +931,20 @@ const getKpiStats = async (req, res) => {
             role: { $nin: [null, ""] },
             email: { $not: /^qlvb@nsgpc\.edu\.vn$/i }
         };
-        if (userId && userId !== 'ALL') {
-            userFilter._id = userId;
-        } else if (departmentId) {
-            userFilter.department = departmentId;
+        if (isCapPhoOrChuyenVien) {
+            userFilter._id = currentUser._id;
+        } else if (isCapTruong) {
+            userFilter.department = currentUser.department;
+            if (userId && userId !== 'ALL') {
+                userFilter._id = userId;
+            }
+        } else {
+            // BGH / Admin / Manager
+            if (userId && userId !== 'ALL') {
+                userFilter._id = userId;
+            } else if (departmentId) {
+                userFilter.department = departmentId;
+            }
         }
 
         const users = await User.find(userFilter)
