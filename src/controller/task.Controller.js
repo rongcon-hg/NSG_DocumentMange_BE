@@ -1170,9 +1170,9 @@ const getKpiStats = async (req, res) => {
                     } else if (evalSource.score !== undefined) {
                         effectiveQualityRate = Number(evalSource.score);
                     } else if (!effectiveIsDone) {
-                        effectiveQualityRate = 50;
+                        effectiveQualityRate = 60; // Mặc định chưa hoàn thành nhưng quá hạn: 60%
                     } else {
-                        effectiveQualityRate = 80;
+                        effectiveQualityRate = 100; // Mặc định hoàn thành: 100% (Đạt đầy đủ yêu cầu)
                     }
 
                     // Cột 8: Điểm thực hiện = Cột 3 * (30% * Cột 6 + 70% * Cột 7)
