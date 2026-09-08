@@ -128,7 +128,9 @@ const taskSchema = new mongoose.Schema(
         createdAt: { type: Date, default: Date.now },
         evaluation: {
           qualityRate: { type: Number, min: 0, max: 100 },
-          progressRate: { type: Number, min: 0, max: 100 }
+          progressRate: { type: Number, min: 0, max: 100 },
+          evaluatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+          evaluatedAt: { type: Date }
         }
       },
     ],

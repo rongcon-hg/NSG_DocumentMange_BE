@@ -806,10 +806,12 @@ const evaluateTask = async (req, res) => {
             effectiveQualityRate = Number(rating) * 20;
         }
 
+        let subtaskTitle = '';
         // Nếu đánh giá cho công việc con (subtask)
         if (subtaskId && Array.isArray(existingTask.subtasks)) {
             const subtask = existingTask.subtasks.id(subtaskId);
             if (subtask) {
+                subtaskTitle = subtask.title;
                 if (!subtask.evaluation) subtask.evaluation = {};
                 if (qualityRate !== undefined && qualityRate !== null) {
                     subtask.evaluation.qualityRate = Number(qualityRate);
@@ -817,6 +819,8 @@ const evaluateTask = async (req, res) => {
                 if (progressRate !== undefined && progressRate !== null) {
                     subtask.evaluation.progressRate = Number(progressRate);
                 }
+                subtask.evaluation.evaluatedBy = currentUserId;
+                subtask.evaluation.evaluatedAt = new Date();
             }
         }
 
@@ -847,14 +851,17 @@ const evaluateTask = async (req, res) => {
             evaluatedAt: new Date()
         };
 
+        const targetName = subtaskTitle ? `việc con "${subtaskTitle}"` : `công việc "${existingTask.title}"`;
         const historyEntry = {
             action: 'Đánh giá KPI',
             user: currentUserId,
-            details: `Đánh giá KPI Phụ lục 4: Kết quả ${effectiveQualityRate}%, Tiến độ ${effectiveProgressRate}% (Quy đổi: ${calculatedScore}/100đ)${effectiveIsExceeded ? ' [Vượt yêu cầu (X)]' : ''}${effectiveBonusScore > 0 ? ` [Thưởng: +${effectiveBonusScore}đ]` : ''}. ${feedback ? `Nhận xét: "${feedback}"` : ''}`,
+            details: `Đánh giá KPI cho ${targetName}: Kết quả ${effectiveQualityRate}%, Tiến độ ${effectiveProgressRate}% (Quy đổi: ${calculatedScore}/100đ)${effectiveIsExceeded ? ' [Vượt yêu cầu (X)]' : ''}${effectiveBonusScore > 0 ? ` [Thưởng: +${effectiveBonusScore}đ]` : ''}.${feedback ? ` Nhận xét: "${feedback}"` : ''}`,
             timestamp: new Date()
         };
 
-        existingTask.evaluation = evaluationData;
+        if (!subtaskId) {
+            existingTask.evaluation = evaluationData;
+        }
         existingTask.history.push(historyEntry);
         await existingTask.save();
 
@@ -1012,6 +1019,8 @@ const getKpiStats = async (req, res) => {
             .populate("createdBy", "name email department")
             .populate("evaluation.evaluatedBy", "name email")
             .populate("subtasks.assignee", "name email department")
+            .populate("subtasks.evaluation.evaluatedBy", "name email")
+            .populate("history.user", "name email")
             .lean();
 
         // Khởi tạo bảng thống kê người dùng theo Phụ lục 4
@@ -1146,6 +1155,10 @@ const getKpiStats = async (req, res) => {
                 // Xác định công việc chưa làm hoặc đang làm mà chưa đến hết hạn xử lý (trong hạn)
                 const isPendingWithinDeadline = !effectiveIsDone && !effectiveIsOverdue;
 
+                const evalSource = (userSubtask && userSubtask.evaluation && (userSubtask.evaluation.qualityRate !== undefined || userSubtask.evaluation.evaluatedBy))
+                    ? userSubtask.evaluation
+                    : (task.evaluation || {});
+
                 let effectiveProgressRate = null;
                 let effectiveQualityRate = null;
                 let executionScore = null;
@@ -1153,10 +1166,6 @@ const getKpiStats = async (req, res) => {
                 let isExceeded = false;
 
                 if (!isPendingWithinDeadline) {
-                    const evalSource = (userSubtask && userSubtask.evaluation && userSubtask.evaluation.qualityRate !== undefined)
-                        ? userSubtask.evaluation
-                        : (task.evaluation || {});
-
                     // Cột 6: Tiến độ % (100%, 80%, 60%, 0%)
                     if (evalSource.progressRate !== undefined && evalSource.progressRate !== null) {
                         effectiveProgressRate = Number(evalSource.progressRate);
@@ -1257,7 +1266,8 @@ const getKpiStats = async (req, res) => {
                     progressScore: effectiveProgressRate,
                     qualityScore: effectiveQualityRate,
                     combinedTaskScore: isPendingWithinDeadline ? null : Math.round((0.3 * (effectiveProgressRate || 0)) + (0.7 * (effectiveQualityRate || 0))),
-                    evaluation: task.evaluation || null,
+                    evaluation: evalSource || task.evaluation || null,
+                    history: Array.isArray(task.history) ? task.history : [],
                     subtaskInfo: userSubtask ? {
                         _id: userSubtask._id,
                         title: userSubtask.title,
