@@ -864,15 +864,13 @@ const getKpiStats = async (req, res) => {
 
         let { month, year, departmentId, userId, quarter } = req.query;
 
-        // Phân quyền phạm vi dữ liệu:
-        // - chuyenvien: BẮT BUỘC chỉ xem thông tin cá nhân của chính mình
-        // - cappho: chỉ xem được thông tin của thành viên trong đơn vị mình
-        // - BGH: xem được toàn bộ các đơn vị và nhân sự
-        if (isChuyenVien) {
-            departmentId = currentUser && currentUser.department ? currentUser.department.toString() : null;
-            userId = currentUser._id ? currentUser._id.toString() : null;
-        } else if (!isBGH) {
-            departmentId = currentUser && currentUser.department ? currentUser.department.toString() : null;
+        // Cho phép lọc linh hoạt theo departmentId và userId được truyền từ frontend
+        if (!departmentId && !userId) {
+            if (isChuyenVien) {
+                userId = currentUser?._id ? currentUser._id.toString() : null;
+            } else if (!isBGH && currentUser?.department) {
+                departmentId = currentUser.department.toString();
+            }
         }
 
         // Filter khoảng thời gian (Quý, Tháng, Năm theo Phụ lục 3 & 4)
@@ -915,19 +913,10 @@ const getKpiStats = async (req, res) => {
             role: { $nin: [null, ""] },
             email: { $not: /^qlvb@nsgpc\.edu\.vn$/i }
         };
-        if (isChuyenVien) {
-            userFilter._id = currentUser._id;
-        } else if (!isBGH) {
-            userFilter.department = currentUser && currentUser.department ? currentUser.department : null;
-            if (userId) {
-                userFilter._id = userId;
-            }
-        } else {
-            if (userId) {
-                userFilter._id = userId;
-            } else if (departmentId) {
-                userFilter.department = departmentId;
-            }
+        if (userId && userId !== 'ALL') {
+            userFilter._id = userId;
+        } else if (departmentId) {
+            userFilter.department = departmentId;
         }
 
         const users = await User.find(userFilter)
