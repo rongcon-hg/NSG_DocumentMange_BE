@@ -11,6 +11,11 @@ const backupConfigSchema = new mongoose.Schema({
     enum: ['none', 'daily', 'weekly', 'monthly'],
     default: 'none'
   },
+  maxBackups: {
+    type: Number,
+    default: 10,
+    min: 1
+  },
   lastBackupAt: {
     type: Date,
   }

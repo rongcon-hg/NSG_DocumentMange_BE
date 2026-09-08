@@ -1,7 +1,7 @@
 const BackupConfig = require('../models/backupConfig.model');
 const BackupHistory = require('../models/backupHistory.model');
 const User = require('../models/user.model');
-const { performBackup, restoreDatabaseFromDrive } = require('../service/backup.service');
+const { performBackup, restoreDatabaseFromDrive, cleanOldBackups } = require('../service/backup.service');
 const { sendRestoreOtpEmail } = require('../service/NodeMailer.service/email');
 const crypto = require('crypto');
 
@@ -13,7 +13,9 @@ const getConfig = async (req, res) => {
             config = new BackupConfig();
             await config.save();
         }
-        res.status(200).json({ success: true, data: config });
+        const data = config.toObject();
+        if (!data.maxBackups) data.maxBackups = 10;
+        res.status(200).json({ success: true, data });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
@@ -22,15 +24,22 @@ const getConfig = async (req, res) => {
 // Cập nhật cấu hình
 const updateConfig = async (req, res) => {
     try {
-        const { folderId, schedule } = req.body;
+        const { folderId, schedule, maxBackups } = req.body;
         let config = await BackupConfig.findOne();
         if (!config) {
             config = new BackupConfig();
         }
         config.folderId = folderId || config.folderId;
         config.schedule = schedule || config.schedule;
+        if (maxBackups !== undefined) {
+            config.maxBackups = Math.max(1, Number(maxBackups) || 10);
+        }
         
         await config.save();
+
+        // Tự động dọn dẹp các bản backup cũ nếu vượt quá giới hạn mới
+        cleanOldBackups(config.maxBackups || 10).catch(err => console.error(err));
+
         res.status(200).json({ success: true, message: 'Cập nhật cấu hình sao lưu thành công', data: config });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });

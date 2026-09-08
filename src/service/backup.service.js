@@ -129,6 +129,38 @@ async function restoreDatabaseFromDrive(fileId) {
   }
 }
 
+async function cleanOldBackups(maxBackups) {
+    if (!maxBackups || maxBackups <= 0) return;
+    try {
+        const successfulBackups = await BackupHistory.find({ status: 'SUCCESS' }).sort({ createdAt: -1 });
+        if (successfulBackups.length > maxBackups) {
+            const toDelete = successfulBackups.slice(maxBackups);
+            let auth = null;
+            try {
+                auth = await authorize();
+            } catch (authErr) {
+                console.warn('[Backup Cleanup] Could not authorize Google Drive for cleanup:', authErr.message);
+            }
+
+            const drive = auth ? google.drive({ version: 'v3', auth }) : null;
+
+            for (const item of toDelete) {
+                if (drive && item.fileId && item.fileId !== 'N/A') {
+                    try {
+                        await drive.files.delete({ fileId: item.fileId, supportsAllDrives: true });
+                        console.log(`[Backup Cleanup] Deleted old backup from Google Drive: ${item.fileName} (${item.fileId})`);
+                    } catch (driveErr) {
+                        console.warn(`[Backup Cleanup] Failed to delete file ${item.fileId} from Drive:`, driveErr.message);
+                    }
+                }
+                await BackupHistory.findByIdAndDelete(item._id);
+            }
+        }
+    } catch (err) {
+        console.error('[Backup Cleanup] Error during old backups cleanup:', err);
+    }
+}
+
 async function performBackup(userId = null) {
     let backupConfig = await BackupConfig.findOne();
     if (!backupConfig || !backupConfig.folderId) {
@@ -156,6 +188,9 @@ async function performBackup(userId = null) {
         backupConfig.lastBackupAt = new Date();
         await backupConfig.save();
 
+        // Tự động dọn dẹp các bản backup cũ vượt quá giới hạn maxBackups
+        await cleanOldBackups(backupConfig.maxBackups || 10);
+
         if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
         return history;
     } catch (error) {
@@ -176,5 +211,7 @@ async function performBackup(userId = null) {
 
 module.exports = {
   performBackup,
-  restoreDatabaseFromDrive
+  restoreDatabaseFromDrive,
+  cleanOldBackups,
+  authorize
 };
