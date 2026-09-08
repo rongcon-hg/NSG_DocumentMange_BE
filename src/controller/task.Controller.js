@@ -179,7 +179,7 @@ function calculateProgressRate(isDone, workingDaysLate, isOverdue) {
             if (workingDaysLate <= 5) return 40;
             return 0;
         }
-        return 70; // Đang thực hiện trong hạn
+        return null; // Chưa làm hoặc đang làm mà chưa đến hết hạn xử lý: để trống
     }
 }
 
@@ -733,29 +733,48 @@ const updateTask = async (req, res) => {
 const evaluateTask = async (req, res) => {
     try {
         const { taskId } = req.params;
-        const { score, rating, feedback, qualityRate, progressRate, isExceeded, bonusScore } = req.body;
+        const { score, rating, feedback, qualityRate, progressRate, isExceeded, bonusScore, subtaskId } = req.body;
 
         const existingTask = await Task.findById(taskId);
         if (!existingTask) {
             return res.status(404).json({ success: false, message: "Task not found" });
         }
 
-        if (existingTask.status !== 'DONE') {
-            return res.status(400).json({ success: false, message: "Chỉ có thể đánh giá công việc đã hoàn thành." });
-        }
-
         const currentUserId = req.user ? req.user._id : null;
         const currentUserRole = req.user ? req.user.role : null;
 
-        if (currentUserRole === 'chuyenvien') {
-            return res.status(403).json({ success: false, message: "Chuyên viên không có quyền đánh giá KPI công việc." });
+        // Xác định phân quyền: BGH / Admin / Manager / Cấp trưởng (staff, captruong) / Cấp phó (cappho)
+        let isBGH = ['admin', 'manager'].includes(currentUserRole);
+        if (req.user && req.user.department) {
+            const userDept = await Department.findById(req.user.department).select("departmentCode departmentName").lean();
+            if (userDept) {
+                if (userDept.departmentCode === 'BGH' || (userDept.departmentName && userDept.departmentName.toLowerCase().includes('ban giám hiệu'))) {
+                    isBGH = true;
+                }
+            }
+        }
+        if (!isBGH && req.user && req.user.position) {
+            const userPos = await Position.findById(req.user.position).select("positionName abbreviation code").lean();
+            if (userPos) {
+                const pName = (userPos.positionName || '').toLowerCase();
+                const pCode = (userPos.abbreviation || userPos.code || '').toUpperCase();
+                if (['HT', 'PHT', 'NHT'].includes(pCode) || pName.includes('hiệu trưởng') || pName.includes('phó hiệu trưởng')) {
+                    isBGH = true;
+                }
+            }
         }
 
-        const isCreator = currentUserId && existingTask.createdBy.toString() === currentUserId.toString();
-        const isManagerOrAdmin = ['admin', 'manager', 'cappho'].includes(currentUserRole);
+        const isCapTruong = (currentUserRole === 'staff' || currentUserRole === 'captruong');
+        const isCapPho = currentUserRole === 'cappho';
+        const isCreator = currentUserId && existingTask.createdBy && existingTask.createdBy.toString() === currentUserId.toString();
 
-        if (!isCreator && !isManagerOrAdmin) {
+        if (!isBGH && !isCapTruong && !isCapPho && !isCreator) {
             return res.status(403).json({ success: false, message: "Bạn không có quyền đánh giá công việc này." });
+        }
+
+        // Cho phép chỉnh sửa tỷ lệ kết quả % ngay cả khi chưa chuyển trạng thái DONE
+        if (existingTask.status !== 'DONE' && qualityRate === undefined) {
+            return res.status(400).json({ success: false, message: "Chỉ có thể đánh giá công việc đã hoàn thành hoặc điều chỉnh tỷ lệ kết quả." });
         }
 
         // 1. Xác định thời điểm hoàn thành
@@ -772,19 +791,33 @@ const evaluateTask = async (req, res) => {
 
         // 2. Tính Tiến độ % (Phụ lục 4)
         const workingDaysLate = getWorkingDaysLate(completedTime, existingTask.endDate);
-        const autoProgressRate = calculateProgressRate(true, workingDaysLate, false);
+        const autoProgressRate = calculateProgressRate(existingTask.status === 'DONE', workingDaysLate, false);
         const effectiveProgressRate = progressRate !== undefined && progressRate !== null 
             ? Number(progressRate) 
-            : autoProgressRate;
+            : (autoProgressRate !== null ? autoProgressRate : 100);
 
         // 3. Tính Chất lượng / Kết quả % (Phụ lục 4: 100%, 80%, 60%, 0%)
-        let effectiveQualityRate = 100;
+        let effectiveQualityRate = existingTask.evaluation?.qualityRate !== undefined ? existingTask.evaluation.qualityRate : 100;
         if (qualityRate !== undefined && qualityRate !== null) {
             effectiveQualityRate = Number(qualityRate);
         } else if (score !== undefined && score !== null) {
             effectiveQualityRate = Number(score);
         } else if (rating !== undefined && rating !== null) {
             effectiveQualityRate = Number(rating) * 20;
+        }
+
+        // Nếu đánh giá cho công việc con (subtask)
+        if (subtaskId && Array.isArray(existingTask.subtasks)) {
+            const subtask = existingTask.subtasks.id(subtaskId);
+            if (subtask) {
+                if (!subtask.evaluation) subtask.evaluation = {};
+                if (qualityRate !== undefined && qualityRate !== null) {
+                    subtask.evaluation.qualityRate = Number(qualityRate);
+                }
+                if (progressRate !== undefined && progressRate !== null) {
+                    subtask.evaluation.progressRate = Number(progressRate);
+                }
+            }
         }
 
         // 4. Vượt yêu cầu về tiến độ và chất lượng (Cột 10 Phụ lục 4)
@@ -796,7 +829,7 @@ const evaluateTask = async (req, res) => {
             : (isCompletedBeforeDeadline && effectiveQualityRate === 100);
 
         // 5. Điểm thưởng đề xuất (Cột 11 Phụ lục 4)
-        const effectiveBonusScore = bonusScore !== undefined ? Math.max(0, Number(bonusScore)) : 0;
+        const effectiveBonusScore = bonusScore !== undefined ? Math.max(0, Number(bonusScore)) : (existingTask.evaluation?.bonusScore || 0);
 
         // Điểm quy đổi thang 100: 30% tiến độ + 70% kết quả
         const calculatedScore = Math.round((0.3 * effectiveProgressRate) + (0.7 * effectiveQualityRate));
@@ -809,7 +842,7 @@ const evaluateTask = async (req, res) => {
             progressRate: effectiveProgressRate,
             isExceeded: effectiveIsExceeded,
             bonusScore: effectiveBonusScore,
-            feedback: feedback || '',
+            feedback: feedback || existingTask.evaluation?.feedback || '',
             evaluatedBy: currentUserId,
             evaluatedAt: new Date()
         };
@@ -821,13 +854,9 @@ const evaluateTask = async (req, res) => {
             timestamp: new Date()
         };
 
-        await Task.findByIdAndUpdate(
-            taskId,
-            { 
-                $set: { evaluation: evaluationData },
-                $push: { history: historyEntry }
-            }
-        );
+        existingTask.evaluation = evaluationData;
+        existingTask.history.push(historyEntry);
+        await existingTask.save();
 
         const populatedTask = await Task.findById(taskId)
             .populate("assignees", "name email emailNotifications")
@@ -1114,41 +1143,53 @@ const getKpiStats = async (req, res) => {
                 // Cột 5: Điểm quy đổi tối đa = Cột 3 * Cột 4
                 const maxPossibleScore = Number((baseScore * difficultyRate).toFixed(2));
 
-                // Cột 6: Tiến độ % (100%, 80%, 60%, 0%)
-                let effectiveProgressRate = 100;
-                if (task.evaluation && task.evaluation.progressRate !== undefined && task.evaluation.progressRate !== null) {
-                    effectiveProgressRate = Number(task.evaluation.progressRate);
-                } else {
-                    effectiveProgressRate = calculateProgressRate(effectiveIsDone, effectiveDaysLate, effectiveIsOverdue);
-                }
+                // Xác định công việc chưa làm hoặc đang làm mà chưa đến hết hạn xử lý (trong hạn)
+                const isPendingWithinDeadline = !effectiveIsDone && !effectiveIsOverdue;
 
-                // Cột 7: Kết quả % (100%, 80%, 60%, 0%)
-                let effectiveQualityRate = 100;
-                if (task.evaluation && task.evaluation.qualityRate !== undefined && task.evaluation.qualityRate !== null) {
-                    effectiveQualityRate = Number(task.evaluation.qualityRate);
-                } else if (task.evaluation && task.evaluation.score !== undefined) {
-                    effectiveQualityRate = Number(task.evaluation.score);
-                } else if (!effectiveIsDone) {
-                    effectiveQualityRate = 50;
-                } else {
-                    effectiveQualityRate = 80;
-                }
-
-                // Cột 8: Điểm thực hiện = Cột 3 * (30% * Cột 6 + 70% * Cột 7)
-                const executionScore = Number((baseScore * (0.3 * (effectiveProgressRate / 100) + 0.7 * (effectiveQualityRate / 100))).toFixed(2));
-
-                // Cột 9: Điểm quy đổi thực tế = Cột 8 * Cột 4
-                const actualScore = Number((executionScore * difficultyRate).toFixed(2));
-
-                // Cột 10: Vượt yêu cầu về tiến độ/chất lượng ("X")
+                let effectiveProgressRate = null;
+                let effectiveQualityRate = null;
+                let executionScore = null;
+                let actualScore = null;
                 let isExceeded = false;
-                if (task.evaluation && task.evaluation.isExceeded !== undefined) {
-                    isExceeded = Boolean(task.evaluation.isExceeded);
-                } else if (effectiveIsDone && effectiveDaysLate <= 0 && effectiveQualityRate === 100) {
-                    const deadlineCheck = userSubtask?.endDate ? new Date(userSubtask.endDate) : endOfDayDeadline;
-                    const compCheck = userSubtask ? (userSubtask.completedAt ? new Date(userSubtask.completedAt) : null) : (completedTime ? new Date(completedTime) : null);
-                    if (compCheck && (compCheck.getTime() < deadlineCheck.getTime() - 1000 * 60 * 60 * 6)) {
-                        isExceeded = true;
+
+                if (!isPendingWithinDeadline) {
+                    const evalSource = (userSubtask && userSubtask.evaluation && userSubtask.evaluation.qualityRate !== undefined)
+                        ? userSubtask.evaluation
+                        : (task.evaluation || {});
+
+                    // Cột 6: Tiến độ % (100%, 80%, 60%, 0%)
+                    if (evalSource.progressRate !== undefined && evalSource.progressRate !== null) {
+                        effectiveProgressRate = Number(evalSource.progressRate);
+                    } else {
+                        effectiveProgressRate = calculateProgressRate(effectiveIsDone, effectiveDaysLate, effectiveIsOverdue);
+                    }
+
+                    // Cột 7: Kết quả % (100%, 80%, 60%, 0%)
+                    if (evalSource.qualityRate !== undefined && evalSource.qualityRate !== null) {
+                        effectiveQualityRate = Number(evalSource.qualityRate);
+                    } else if (evalSource.score !== undefined) {
+                        effectiveQualityRate = Number(evalSource.score);
+                    } else if (!effectiveIsDone) {
+                        effectiveQualityRate = 50;
+                    } else {
+                        effectiveQualityRate = 80;
+                    }
+
+                    // Cột 8: Điểm thực hiện = Cột 3 * (30% * Cột 6 + 70% * Cột 7)
+                    executionScore = Number((baseScore * (0.3 * ((effectiveProgressRate || 0) / 100) + 0.7 * ((effectiveQualityRate || 0) / 100))).toFixed(2));
+
+                    // Cột 9: Điểm quy đổi thực tế = Cột 8 * Cột 4
+                    actualScore = Number((executionScore * difficultyRate).toFixed(2));
+
+                    // Cột 10: Vượt yêu cầu về tiến độ/chất lượng ("X")
+                    if (task.evaluation && task.evaluation.isExceeded !== undefined) {
+                        isExceeded = Boolean(task.evaluation.isExceeded);
+                    } else if (effectiveIsDone && effectiveDaysLate <= 0 && effectiveQualityRate === 100) {
+                        const deadlineCheck = userSubtask?.endDate ? new Date(userSubtask.endDate) : endOfDayDeadline;
+                        const compCheck = userSubtask ? (userSubtask.completedAt ? new Date(userSubtask.completedAt) : null) : (completedTime ? new Date(completedTime) : null);
+                        if (compCheck && (compCheck.getTime() < deadlineCheck.getTime() - 1000 * 60 * 60 * 6)) {
+                            isExceeded = true;
+                        }
                     }
                 }
 
@@ -1176,8 +1217,11 @@ const getKpiStats = async (req, res) => {
                     stat.totalEvaluationScore += task.evaluation.score;
                 }
 
-                stat.totalMaxPossibleScore += maxPossibleScore;
-                stat.totalActualScore += actualScore;
+                // Không tính điểm quy đổi vào tổng A và B đối với công việc chưa làm/đang làm còn trong hạn
+                if (!isPendingWithinDeadline) {
+                    stat.totalMaxPossibleScore += maxPossibleScore;
+                    stat.totalActualScore += actualScore;
+                }
                 if (isExceeded) stat.totalExceededTasks += 1;
                 if (bonusScore > 0) stat.totalBonusScore += bonusScore;
 
@@ -1195,6 +1239,7 @@ const getKpiStats = async (req, res) => {
                     isLate: effectiveIsLate,
                     isOverdue: effectiveIsOverdue,
                     daysLate: effectiveDaysLate,
+                    isPendingWithinDeadline,
                     // Các trường Phụ lục 3 & 4
                     taskType,
                     taskTypeName,
@@ -1211,13 +1256,15 @@ const getKpiStats = async (req, res) => {
                     // Tương thích ngược với UI cũ
                     progressScore: effectiveProgressRate,
                     qualityScore: effectiveQualityRate,
-                    combinedTaskScore: Math.round((0.3 * effectiveProgressRate) + (0.7 * effectiveQualityRate)),
+                    combinedTaskScore: isPendingWithinDeadline ? null : Math.round((0.3 * (effectiveProgressRate || 0)) + (0.7 * (effectiveQualityRate || 0))),
                     evaluation: task.evaluation || null,
                     subtaskInfo: userSubtask ? {
+                        _id: userSubtask._id,
                         title: userSubtask.title,
                         status: userSubtask.status,
                         endDate: userSubtask.endDate,
-                        completedAt: userSubtask.completedAt
+                        completedAt: userSubtask.completedAt,
+                        evaluation: userSubtask.evaluation || null
                     } : null
                 });
             };
