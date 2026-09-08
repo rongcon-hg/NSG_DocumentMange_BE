@@ -446,7 +446,29 @@ const updateTask = async (req, res) => {
         // 1. Kiểm tra quyền thay đổi thời gian: Chỉ người tạo, người chủ trì (assignees) hoặc admin/manager
         const isCreator = existingTask.createdBy && (existingTask.createdBy._id || existingTask.createdBy).toString() === updater.toString();
         const isAssignee = Array.isArray(existingTask.assignees) && existingTask.assignees.some(a => (a._id || a).toString() === updater.toString());
-        const isAdminOrManager = ['admin', 'manager'].includes(currentUserRole);
+        const isAdminOrManager = ['admin', 'manager', 'cappho'].includes(currentUserRole);
+
+        // Kiểm tra validation người thực hiện
+        if (updates.assignees !== undefined && Array.isArray(updates.assignees) && updates.assignees.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Công việc phải có ít nhất một người thực hiện."
+            });
+        }
+
+        // Kiểm tra quyền thay đổi người thực hiện: Chỉ người tạo công việc, người thực hiện hoặc quản lý
+        if (updates.assignees && Array.isArray(updates.assignees)) {
+            const oldIds = (existingTask.assignees || []).map(a => (a._id || a).toString()).sort();
+            const newIds = updates.assignees.map(a => (a._id || a).toString()).sort();
+            if (JSON.stringify(oldIds) !== JSON.stringify(newIds)) {
+                if (!isCreator && !isAssignee && !isAdminOrManager) {
+                    return res.status(403).json({
+                        success: false,
+                        message: "Chỉ người tạo công việc và người thực hiện mới có quyền thay đổi người thực hiện."
+                    });
+                }
+            }
+        }
 
         const oldStart = existingTask.startDate ? new Date(existingTask.startDate).getTime() : 0;
         const newStart = updates.startDate ? new Date(updates.startDate).getTime() : oldStart;
@@ -581,12 +603,12 @@ const updateTask = async (req, res) => {
                 const removedIds = oldIds.filter(id => !newIds.includes(id));
                 const aParts = [];
                 if (addedIds.length > 0) {
-                    const addedUsers = await User.find({ _id: { $in: addedIds } }).select('name');
-                    aParts.push(`Thêm: ${addedUsers.map(u => u.name).join(', ')}`);
+                    const addedUsers = await User.find({ _id: { $in: addedIds } }).select('name email');
+                    aParts.push(`Thêm: ${addedUsers.map(u => u.email ? `${u.name} (${u.email})` : u.name).join(', ')}`);
                 }
                 if (removedIds.length > 0) {
-                    const removedUsers = await User.find({ _id: { $in: removedIds } }).select('name');
-                    aParts.push(`Bớt: ${removedUsers.map(u => u.name).join(', ')}`);
+                    const removedUsers = await User.find({ _id: { $in: removedIds } }).select('name email');
+                    aParts.push(`Bớt: ${removedUsers.map(u => u.email ? `${u.name} (${u.email})` : u.name).join(', ')}`);
                 }
                 changes.push(`Cập nhật người thực hiện (${aParts.join('; ') || 'Thay đổi danh sách'})`);
             }
@@ -609,12 +631,12 @@ const updateTask = async (req, res) => {
                 const removedIds = oldIds.filter(id => !newIds.includes(id));
                 const cParts = [];
                 if (addedIds.length > 0) {
-                    const addedUsers = await User.find({ _id: { $in: addedIds } }).select('name');
-                    cParts.push(`Thêm: ${addedUsers.map(u => u.name).join(', ')}`);
+                    const addedUsers = await User.find({ _id: { $in: addedIds } }).select('name email');
+                    cParts.push(`Thêm: ${addedUsers.map(u => u.email ? `${u.name} (${u.email})` : u.name).join(', ')}`);
                 }
                 if (removedIds.length > 0) {
-                    const removedUsers = await User.find({ _id: { $in: removedIds } }).select('name');
-                    cParts.push(`Bớt: ${removedUsers.map(u => u.name).join(', ')}`);
+                    const removedUsers = await User.find({ _id: { $in: removedIds } }).select('name email');
+                    cParts.push(`Bớt: ${removedUsers.map(u => u.email ? `${u.name} (${u.email})` : u.name).join(', ')}`);
                 }
                 changes.push(`Cập nhật người phối hợp (${cParts.join('; ') || 'Thay đổi danh sách'})`);
             }
@@ -673,7 +695,9 @@ const updateTask = async (req, res) => {
             else if (descChanged) action = 'Cập nhật mô tả';
             details = changes[0];
         } else if (changes.length > 1) {
-            if (statusChanged && timeChanged) action = 'Cập nhật trạng thái & thời gian';
+            if (assigneesChanged && collaboratorsChanged && changes.length === 2) action = 'Thay đổi người thực hiện & phối hợp';
+            else if (assigneesChanged) action = 'Thay đổi người thực hiện & thông tin';
+            else if (statusChanged && timeChanged) action = 'Cập nhật trạng thái & thời gian';
             else if (statusChanged) action = 'Cập nhật trạng thái & thông tin';
             else if (timeChanged) action = 'Cập nhật thời gian & thông tin';
             else if (addedFiles.length > 0 || removedFiles.length > 0) action = 'Cập nhật tệp & thông tin';
