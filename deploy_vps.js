@@ -15,8 +15,8 @@ conn.on('ready', () => {
     });
   });
 }).connect({
-  host: '157.10.53.48',
+  host: '160.25.166.176',
   port: 22,
   username: 'root',
-  password: 'Nsg@2025'
+  password: 'Nsg@2026'
 });
