@@ -1470,8 +1470,13 @@ const deleteTask = async (req, res) => {
         }
         
         const requestUserId = req.user ? req.user._id.toString() : null;
-        if (requestUserId && existingTask.createdBy.toString() !== requestUserId) {
-            return res.status(403).json({ success: false, message: "Bạn không có quyền xóa công việc này." });
+        const taskCreatorId = (existingTask.createdBy?._id || existingTask.createdBy).toString();
+        if (requestUserId && taskCreatorId !== requestUserId) {
+            return res.status(403).json({ success: false, message: "Chỉ người tạo công việc mới có quyền xóa công việc này." });
+        }
+
+        if (existingTask.status === 'DONE') {
+            return res.status(400).json({ success: false, message: "Công việc đã hoàn thành, không thể xóa." });
         }
 
         await Task.findByIdAndDelete(taskId);
