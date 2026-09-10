@@ -142,7 +142,7 @@ const uploadEmulationFile = async (req, res) => {
 // Lấy danh sách đăng ký thi đua (kèm phân quyền)
 const getAllRegistrations = async (req, res) => {
   try {
-    const { schoolYear, department, title, status, search, page = 1, limit = 50 } = req.query;
+    const { schoolYear, department, title, status, search, startDate, endDate, page = 1, limit = 50 } = req.query;
     const currentUser = await User.findById(req.user._id)
       .populate("department")
       .populate("position");
@@ -190,6 +190,11 @@ const getAllRegistrations = async (req, res) => {
     }
     if (search) {
       filter.name = { $regex: search.trim(), $options: "i" };
+    }
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate);
+      if (endDate) filter.createdAt.$lte = new Date(endDate);
     }
 
     const skip = (Number(page) - 1) * Number(limit);
@@ -829,10 +834,15 @@ const reviewRegistration = async (req, res) => {
 // Thống kê số liệu đăng ký thi đua
 const getEmulationStats = async (req, res) => {
   try {
-    const { schoolYear } = req.query;
+    const { schoolYear, startDate, endDate } = req.query;
     const filter = {};
     if (schoolYear && schoolYear !== "ALL" && schoolYear !== "Tất cả") {
       filter.schoolYear = schoolYear;
+    }
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate);
+      if (endDate) filter.createdAt.$lte = new Date(endDate);
     }
 
     const allRegs = await EmulationRegistration.find(filter)
