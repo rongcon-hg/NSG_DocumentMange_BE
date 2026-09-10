@@ -327,7 +327,7 @@ const createTask = async (req, res) => {
             .populate("collaborators", "name email emailNotifications")
             .populate("createdBy", "name email")
             .populate("history.user", "name email")
-            .populate("relatedDocument", "docCode shortDescription files")
+            .populate("relatedDocument", "docCode docNum shortDescription title files docVariant sentBy")
             .populate("subtasks.assignee", "name email")
             .populate("subtasks.createdBy", "name email");
 
@@ -360,7 +360,7 @@ const getTasks = async (req, res) => {
             .populate("createdBy", "name email")
             .populate("history.user", "name email")
             .populate("evaluation.evaluatedBy", "name email")
-            .populate("relatedDocument", "docCode shortDescription files")
+            .populate("relatedDocument", "docCode docNum shortDescription title files docVariant sentBy")
             .populate("subtasks.assignee", "name email")
             .populate("subtasks.createdBy", "name email")
             .sort({ updatedAt: -1, completedAt: -1, startDate: -1 });
@@ -723,7 +723,7 @@ const updateTask = async (req, res) => {
             .populate("createdBy", "name email")
             .populate("history.user", "name email")
             .populate("evaluation.evaluatedBy", "name email")
-            .populate("relatedDocument", "docCode shortDescription files")
+            .populate("relatedDocument", "docCode docNum shortDescription title files docVariant sentBy")
             .populate("subtasks.assignee", "name email")
             .populate("subtasks.createdBy", "name email");
 
@@ -895,7 +895,7 @@ const evaluateTask = async (req, res) => {
             .populate("createdBy", "name email")
             .populate("history.user", "name email")
             .populate("evaluation.evaluatedBy", "name email")
-            .populate("relatedDocument", "docCode shortDescription files")
+            .populate("relatedDocument", "docCode docNum shortDescription title files docVariant sentBy")
             .populate("subtasks.assignee", "name email")
             .populate("subtasks.createdBy", "name email");
 
@@ -1542,7 +1542,7 @@ const addSubtask = async (req, res) => {
             .populate("createdBy", "name email")
             .populate("history.user", "name email")
             .populate("evaluation.evaluatedBy", "name email")
-            .populate("relatedDocument", "docCode shortDescription files")
+            .populate("relatedDocument", "docCode docNum shortDescription title files docVariant sentBy")
             .populate("subtasks.assignee", "name email")
             .populate("subtasks.createdBy", "name email");
 
@@ -1630,7 +1630,7 @@ const updateSubtask = async (req, res) => {
             .populate("createdBy", "name email")
             .populate("history.user", "name email")
             .populate("evaluation.evaluatedBy", "name email")
-            .populate("relatedDocument", "docCode shortDescription files")
+            .populate("relatedDocument", "docCode docNum shortDescription title files docVariant sentBy")
             .populate("subtasks.assignee", "name email")
             .populate("subtasks.createdBy", "name email");
 
@@ -1678,7 +1678,7 @@ const deleteSubtask = async (req, res) => {
             .populate("createdBy", "name email")
             .populate("history.user", "name email")
             .populate("evaluation.evaluatedBy", "name email")
-            .populate("relatedDocument", "docCode shortDescription files")
+            .populate("relatedDocument", "docCode docNum shortDescription title files docVariant sentBy")
             .populate("subtasks.assignee", "name email")
             .populate("subtasks.createdBy", "name email");
 
