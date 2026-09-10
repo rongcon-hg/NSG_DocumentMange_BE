@@ -77,6 +77,7 @@ const googleLoginConfigRoutes = require("./src/routes/googleLoginConfig.routes")
 const emulationTitleRoutes = require("./src/routes/emulationTitle.routes");
 const emulationDocumentTypeRoutes = require("./src/routes/emulationDocumentType.routes");
 const emulationRegistrationRoutes = require("./src/routes/emulationRegistration.routes");
+const emulationAchievementRoutes = require("./src/routes/emulationAchievement.routes");
 
 // Ensure DB connection is established before handling requests in Vercel Serverless
 app.use(async (req, res, next) => {
@@ -111,6 +112,7 @@ app.use('/api/google-login-config', googleLoginConfigRoutes);
 app.use('/api/emulation/titles', emulationTitleRoutes);
 app.use('/api/emulation/document-types', emulationDocumentTypeRoutes);
 app.use('/api/emulation/registrations', emulationRegistrationRoutes);
+app.use('/api/emulation/achievements', emulationAchievementRoutes);
 
 // Cron endpoint for Vercel
 const cronRoutes = require('./src/routes/cronRoutes');
