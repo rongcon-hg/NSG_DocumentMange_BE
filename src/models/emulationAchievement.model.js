@@ -52,6 +52,12 @@ const emulationAchievementSchema = new mongoose.Schema(
       required: [true, "Đơn vị công tác là bắt buộc"],
       trim: true,
     },
+    // Loại thành tích: Cá nhân hoặc Tập thể
+    targetType: {
+      type: String,
+      enum: ["CA_NHAN", "TAP_THE"],
+      default: "CA_NHAN",
+    },
     // Danh hiệu thi đua (tham chiếu từ Danh mục danh hiệu)
     title: {
       type: mongoose.Schema.Types.ObjectId,

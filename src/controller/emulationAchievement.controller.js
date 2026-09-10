@@ -149,6 +149,7 @@ const createAchievement = async (req, res) => {
       attachedFiles,
       driveLink,
       notes,
+      targetType,
     } = req.body;
 
     if (!fullName || !fullName.trim()) {
@@ -205,6 +206,7 @@ const createAchievement = async (req, res) => {
       user: finalUserId,
       department: finalDeptId,
       departmentName: departmentName.trim(),
+      targetType: targetType === "TAP_THE" ? "TAP_THE" : "CA_NHAN",
       title: finalTitleId,
       titleName: finalTitleName ? finalTitleName.trim() : "",
       achievementContent: achievementContent.trim(),
@@ -287,6 +289,8 @@ const batchImportAchievements = async (req, res) => {
       const rawDriveLink = item.driveLink || item["Link minh chứng Google Drive"] || item["Link minh chứng"] || item["Minh chứng"] || "";
       const rawSchoolYear = item.schoolYear || item["Năm học"] || "";
       const rawNotes = item.notes || item["Ghi chú"] || "";
+      const rawTargetType = item.targetType || item["Loại thành tích"] || item["Loại đối tượng"] || "";
+      const cleanTargetType = String(rawTargetType).toLowerCase().includes("tập thể") || String(rawTargetType).toUpperCase() === "TAP_THE" ? "TAP_THE" : "CA_NHAN";
 
       if (!rawFullName || !rawFullName.trim()) {
         errors.push(`Dòng ${rowNum}: Thiếu Họ và tên.`);
@@ -365,6 +369,7 @@ const batchImportAchievements = async (req, res) => {
         user: matchedUserId,
         department: matchedDeptId,
         departmentName: cleanDeptName,
+        targetType: cleanTargetType,
         title: matchedTitleId,
         titleName: cleanTitleName,
         achievementContent: cleanContent,
@@ -413,6 +418,7 @@ const getAchievements = async (req, res) => {
       department,
       schoolYear,
       title,
+      targetType,
       decisionAgency,
       fromDate,
       toDate,
@@ -492,6 +498,10 @@ const getAchievements = async (req, res) => {
       } else {
         filter.$or = titleFilter;
       }
+    }
+
+    if (targetType) {
+      filter.targetType = targetType;
     }
 
     if (decisionAgency) {
@@ -598,12 +608,14 @@ const updateAchievement = async (req, res) => {
       attachedFiles,
       driveLink,
       notes,
+      targetType,
     } = req.body;
 
     if (fullName) achievement.fullName = fullName.trim();
     if (userId !== undefined) achievement.user = userId || null;
     if (departmentId !== undefined) achievement.department = departmentId || null;
     if (departmentName) achievement.departmentName = departmentName.trim();
+    if (targetType) achievement.targetType = targetType;
     if (titleId !== undefined) achievement.title = titleId || null;
     if (titleName !== undefined) achievement.titleName = titleName.trim();
     if (achievementContent) achievement.achievementContent = achievementContent.trim();
