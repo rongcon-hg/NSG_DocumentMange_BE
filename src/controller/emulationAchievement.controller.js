@@ -31,6 +31,26 @@ const isUserBGH = (user) => {
   );
 };
 
+// Helper: Lấy nhãn vai trò hiển thị thân thiện
+const getRoleLabel = (role) => {
+  switch (role) {
+    case "admin":
+      return "Quản trị viên";
+    case "bgh":
+      return "Ban Giám hiệu";
+    case "manager":
+      return "Quản lý";
+    case "truong_don_vi":
+      return "Cấp trưởng";
+    case "pho_don_vi":
+      return "Cấp phó";
+    case "chuyen_vien":
+      return "Chuyên viên";
+    default:
+      return role || "Cán bộ";
+  }
+};
+
 // Helper: Authorize Google Drive
 async function authorizeDrive() {
   const config = await DriveConfig.findOne();
@@ -221,6 +241,16 @@ const createAchievement = async (req, res) => {
       source: "MANUAL",
       createdBy: req.user._id,
       createdByName: req.user.name,
+      history: [
+        {
+          action: "CREATED",
+          actor: req.user._id,
+          actorName: req.user.name,
+          actorRole: getRoleLabel(req.user.role),
+          details: `Thêm mới thành tích khen thưởng ${targetType === "TAP_THE" ? "tập thể" : "cá nhân"} cho ${fullName.trim()}`,
+          timestamp: new Date(),
+        },
+      ],
     });
 
     await newAchievement.save();
@@ -228,7 +258,9 @@ const createAchievement = async (req, res) => {
     const populated = await EmulationAchievement.findById(newAchievement._id)
       .populate("user", "name email mobile avatar")
       .populate("department", "departmentName departmentCode")
-      .populate("title", "code name level");
+      .populate("title", "code name level")
+      .populate("createdBy", "name role")
+      .populate("history.actor", "name role avatar");
 
     res.status(201).json({
       success: true,
@@ -384,6 +416,16 @@ const batchImportAchievements = async (req, res) => {
         source: "IMPORT_EXCEL",
         createdBy: req.user._id,
         createdByName: req.user.name,
+        history: [
+          {
+            action: "IMPORTED",
+            actor: req.user._id,
+            actorName: req.user.name,
+            actorRole: getRoleLabel(req.user.role),
+            details: "Nhập thành tích từ file Excel",
+            timestamp: new Date(),
+          },
+        ],
       });
     }
 
@@ -538,6 +580,7 @@ const getAchievements = async (req, res) => {
         .populate("department", "departmentName departmentCode")
         .populate("title", "code name level")
         .populate("createdBy", "name role")
+        .populate("history.actor", "name role avatar")
         .sort({ decisionDate: -1, createdAt: -1 })
         .skip(skip)
         .limit(Number(limit)),
@@ -573,7 +616,8 @@ const getAchievementById = async (req, res) => {
       .populate("user", "name email mobile avatar")
       .populate("department", "departmentName departmentCode")
       .populate("title", "code name level")
-      .populate("createdBy", "name role");
+      .populate("createdBy", "name role")
+      .populate("history.actor", "name role avatar");
 
     if (!achievement) {
       return res.status(404).json({ success: false, message: "Không tìm thấy thành tích" });
@@ -621,6 +665,46 @@ const updateAchievement = async (req, res) => {
       targetType,
     } = req.body;
 
+    // So sánh thay đổi để ghi vết lịch sử
+    const changes = [];
+    if (fullName && fullName.trim() !== achievement.fullName) {
+      changes.push(`Họ tên: "${achievement.fullName}" ➔ "${fullName.trim()}"`);
+    }
+    if (targetType && targetType !== achievement.targetType) {
+      changes.push(`Loại thành tích: ${achievement.targetType === "TAP_THE" ? "Tập thể" : "Cá nhân"} ➔ ${targetType === "TAP_THE" ? "Tập thể" : "Cá nhân"}`);
+    }
+    if (departmentName && departmentName.trim() !== achievement.departmentName) {
+      changes.push(`Đơn vị: "${achievement.departmentName}" ➔ "${departmentName.trim()}"`);
+    }
+    if (titleName !== undefined && titleName.trim() !== (achievement.titleName || "")) {
+      changes.push(`Danh hiệu: "${achievement.titleName || "Chưa có"}" ➔ "${titleName.trim() || "Chưa có"}"`);
+    }
+    if (achievementContent && achievementContent.trim() !== achievement.achievementContent) {
+      changes.push(`Nội dung thành tích`);
+    }
+    if (decisionNumber !== undefined && decisionNumber.trim() !== (achievement.decisionNumber || "")) {
+      changes.push(`Số QĐ: "${achievement.decisionNumber || "Chưa có"}" ➔ "${decisionNumber.trim() || "Chưa có"}"`);
+    }
+    if (decisionAgency !== undefined && decisionAgency.trim() !== (achievement.decisionAgency || "")) {
+      changes.push(`Cơ quan ban hành: "${achievement.decisionAgency || "Chưa có"}" ➔ "${decisionAgency.trim() || "Chưa có"}"`);
+    }
+    if (decisionDate !== undefined) {
+      const oldD = achievement.decisionDate ? new Date(achievement.decisionDate).toISOString().slice(0, 10) : "";
+      const newD = decisionDate ? new Date(decisionDate).toISOString().slice(0, 10) : "";
+      if (oldD !== newD) {
+        changes.push(`Ngày ban hành QĐ`);
+      }
+    }
+    if (schoolYear !== undefined && schoolYear.trim() !== (achievement.schoolYear || "")) {
+      changes.push(`Năm học: "${achievement.schoolYear || ""}" ➔ "${schoolYear.trim()}"`);
+    }
+    if (driveLink !== undefined && driveLink.trim() !== (achievement.driveLink || "")) {
+      changes.push(`Link Google Drive`);
+    }
+    if (notes !== undefined && notes.trim() !== (achievement.notes || "")) {
+      changes.push(`Ghi chú`);
+    }
+
     if (fullName) achievement.fullName = fullName.trim();
     if (userId !== undefined) achievement.user = userId || null;
     if (departmentId !== undefined) {
@@ -639,12 +723,43 @@ const updateAchievement = async (req, res) => {
     if (driveLink !== undefined) achievement.driveLink = driveLink.trim();
     if (notes !== undefined) achievement.notes = notes.trim();
 
+    if (!Array.isArray(achievement.history)) {
+      achievement.history = [];
+    }
+
+    // Nếu dữ liệu cũ chưa có lịch sử thì bổ sung bản ghi khởi tạo trước
+    if (achievement.history.length === 0 && achievement.createdAt) {
+      achievement.history.push({
+        action: achievement.source === "IMPORT_EXCEL" ? "IMPORTED" : "CREATED",
+        actor: achievement.createdBy || null,
+        actorName: achievement.createdByName || "Cán bộ",
+        actorRole: "Khởi tạo",
+        details: achievement.source === "IMPORT_EXCEL" ? "Nhập thành tích từ file Excel" : "Tạo mới thành tích khen thưởng",
+        timestamp: achievement.createdAt,
+      });
+    }
+
+    const detailText = changes.length > 0
+      ? `Cập nhật: ${changes.join("; ")}`
+      : "Cập nhật thông tin thành tích";
+
+    achievement.history.push({
+      action: "UPDATED",
+      actor: req.user._id,
+      actorName: req.user.name,
+      actorRole: getRoleLabel(req.user.role),
+      details: detailText,
+      timestamp: new Date(),
+    });
+
     await achievement.save();
 
     const updated = await EmulationAchievement.findById(id)
       .populate("user", "name email mobile avatar")
       .populate("department", "departmentName departmentCode")
-      .populate("title", "code name level");
+      .populate("title", "code name level")
+      .populate("createdBy", "name role")
+      .populate("history.actor", "name role avatar");
 
     res.status(200).json({ success: true, message: "Cập nhật thành tích thành công", data: updated });
   } catch (error) {

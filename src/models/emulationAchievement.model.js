@@ -30,6 +30,36 @@ const attachedFileSchema = new mongoose.Schema(
   { _id: true }
 );
 
+const historySchema = new mongoose.Schema(
+  {
+    action: {
+      type: String,
+      default: "CREATED",
+    },
+    actor: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    actorName: {
+      type: String,
+      default: "",
+    },
+    actorRole: {
+      type: String,
+      default: "",
+    },
+    details: {
+      type: String,
+      default: "",
+    },
+    timestamp: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: true }
+);
+
 const emulationAchievementSchema = new mongoose.Schema(
   {
     fullName: {
@@ -119,6 +149,7 @@ const emulationAchievementSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    history: [historySchema],
   },
   {
     timestamps: true,
