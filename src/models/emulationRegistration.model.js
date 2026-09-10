@@ -68,12 +68,42 @@ const historySchema = new mongoose.Schema(
   { _id: true }
 );
 
+const memberSchema = new mongoose.Schema(
+  {
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    positionName: {
+      type: String,
+      default: "",
+    },
+    departmentName: {
+      type: String,
+      default: "",
+    },
+    titles: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "EmulationTitle",
+      },
+    ],
+    titleNames: [{ type: String }],
+  },
+  { _id: true }
+);
+
 const emulationRegistrationSchema = new mongoose.Schema(
   {
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
+    },
+    createdByUser: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
     },
     name: {
       type: String,
@@ -100,6 +130,7 @@ const emulationRegistrationSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    members: [memberSchema],
     titles: [
       {
         type: mongoose.Schema.Types.ObjectId,

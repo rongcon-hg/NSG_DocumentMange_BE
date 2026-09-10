@@ -177,6 +177,7 @@ const getAllRegistrations = async (req, res) => {
         .populate("department", "departmentName departmentCode")
         .populate("position", "positionName positionCode")
         .populate("titles", "code name level targetType")
+        .populate("members.titles", "code name level targetType")
         .populate("attachedFiles.documentType", "code name isRequired")
         .populate("managerReview.reviewedBy", "name")
         .populate("bghReview.reviewedBy", "name")
@@ -206,21 +207,37 @@ const getAllRegistrations = async (req, res) => {
   }
 };
 
-// Lấy thông tin đơn đăng ký của user trong năm học cụ thể
+// Lấy thông tin đơn đăng ký của user hoặc theo department trong năm học cụ thể
 const getMyRegistration = async (req, res) => {
   try {
-    const { schoolYear } = req.query;
+    const { schoolYear, departmentId, targetUserId } = req.query;
     if (!schoolYear) {
       return res.status(400).json({ success: false, message: "Cần cung cấp năm học" });
     }
 
-    const reg = await EmulationRegistration.findOne({
-      user: req.user._id,
-      schoolYear: schoolYear.trim(),
-    })
+    const currentUser = await User.findById(req.user._id).populate("department");
+    const isManagerOrAdmin = currentUser.role === "manager" || currentUser.role === "admin";
+
+    let filter = { schoolYear: schoolYear.trim() };
+
+    if (isManagerOrAdmin && departmentId) {
+      filter.department = departmentId;
+    } else if (isManagerOrAdmin && targetUserId) {
+      filter.user = targetUserId;
+    } else if (currentUser.department) {
+      filter.$or = [
+        { user: currentUser._id },
+        { department: currentUser.department._id || currentUser.department },
+      ];
+    } else {
+      filter.user = currentUser._id;
+    }
+
+    const reg = await EmulationRegistration.findOne(filter)
       .populate("department", "departmentName departmentCode")
       .populate("position", "positionName positionCode")
       .populate("titles")
+      .populate("members.titles")
       .populate("attachedFiles.documentType");
 
     res.status(200).json({ success: true, data: reg });
@@ -239,6 +256,7 @@ const getRegistrationById = async (req, res) => {
       .populate("department", "departmentName departmentCode")
       .populate("position", "positionName positionCode")
       .populate("titles")
+      .populate("members.titles")
       .populate("attachedFiles.documentType")
       .populate("managerReview.reviewedBy", "name")
       .populate("bghReview.reviewedBy", "name")
@@ -258,53 +276,121 @@ const getRegistrationById = async (req, res) => {
 // Tạo mới hồ sơ đăng ký thi đua
 const createRegistration = async (req, res) => {
   try {
-    const { schoolYear, titles, attachedFiles, notes } = req.body;
+    const {
+      schoolYear,
+      titles,
+      members,
+      attachedFiles,
+      notes,
+      targetUserId,
+      targetDepartmentId,
+    } = req.body;
 
     if (!schoolYear) {
       return res.status(400).json({ success: false, message: "Năm học là bắt buộc" });
     }
-    if (!titles || !Array.isArray(titles) || titles.length === 0) {
-      return res.status(400).json({ success: false, message: "Vui lòng chọn ít nhất một danh hiệu thi đua" });
-    }
 
-    // Lấy thông tin user hiện tại
-    const user = await User.findById(req.user._id)
+    // Lấy thông tin user đăng nhập
+    const currentUser = await User.findById(req.user._id)
       .populate("department")
       .populate("position");
 
-    // Kiểm tra xem user đã có đơn đăng ký trong năm học này chưa
+    const isManagerOrAdmin = currentUser.role === "manager" || currentUser.role === "admin";
+    const isCapTruong = currentUser.role === "staff" || currentUser.role === "captruong";
+
+    // Phân quyền tạo đơn: chỉ cho Cấp trưởng hoặc Manager/Admin
+    if (!isManagerOrAdmin && !isCapTruong) {
+      return res.status(403).json({
+        success: false,
+        message: "Chức năng lập hồ sơ đề nghị chỉ dành cho Cấp trưởng đơn vị hoặc Quản trị viên/Manager.",
+      });
+    }
+
+    // Xác định đối tượng đại diện và đơn vị của hồ sơ
+    let regUser = currentUser;
+    let regDepartment = currentUser.department?._id || currentUser.department;
+    let regDepartmentName = currentUser.department?.departmentName || "";
+    let regPosition = currentUser.position?._id || currentUser.position;
+    let regPositionName = currentUser.position?.positionName || "";
+
+    if (isManagerOrAdmin && targetUserId) {
+      const targetUser = await User.findById(targetUserId)
+        .populate("department")
+        .populate("position");
+      if (targetUser) {
+        regUser = targetUser;
+        regDepartment = targetUser.department?._id || targetUser.department;
+        regDepartmentName = targetUser.department?.departmentName || "";
+        regPosition = targetUser.position?._id || targetUser.position;
+        regPositionName = targetUser.position?.positionName || "";
+      }
+    } else if (isManagerOrAdmin && targetDepartmentId) {
+      const targetDept = await Department.findById(targetDepartmentId);
+      if (targetDept) {
+        regDepartment = targetDept._id;
+        regDepartmentName = targetDept.departmentName;
+      }
+    }
+
+    // Kiểm tra xem đơn vị hoặc user này đã có đơn đăng ký trong năm học này chưa
     const existing = await EmulationRegistration.findOne({
-      user: req.user._id,
-      schoolYear: schoolYear.trim(),
+      $or: [
+        { user: regUser._id, schoolYear: schoolYear.trim() },
+        ...(regDepartment ? [{ department: regDepartment, schoolYear: schoolYear.trim() }] : []),
+      ],
     });
 
     if (existing) {
       return res.status(400).json({
         success: false,
-        message: `Bạn đã có đơn đăng ký thi đua cho năm học ${schoolYear}. Vui lòng cập nhật đơn hiện có thay vì tạo mới.`,
+        message: `Đơn vị hoặc cán bộ (${regDepartmentName || regUser.name}) đã có hồ sơ đề nghị cho năm học ${schoolYear}. Vui lòng cập nhật hồ sơ hiện có thay vì tạo mới.`,
         data: existing,
       });
     }
 
+    // Tổng hợp danh sách danh hiệu từ members nếu có
+    let finalTitles = Array.isArray(titles) ? [...titles] : [];
+    if (Array.isArray(members) && members.length > 0) {
+      members.forEach((m) => {
+        if (Array.isArray(m.titles)) {
+          m.titles.forEach((t) => {
+            const id = typeof t === "object" ? t._id || t : t;
+            if (id && !finalTitles.includes(String(id))) {
+              finalTitles.push(String(id));
+            }
+          });
+        }
+      });
+    }
+
+    if (finalTitles.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Vui lòng chọn danh hiệu thi đua hoặc thêm thành viên đề nghị danh hiệu",
+      });
+    }
+
     const reg = await EmulationRegistration.create({
-      user: user._id,
-      name: user.name,
-      department: user.department?._id || user.department,
-      departmentName: user.department?.departmentName || "",
-      position: user.position?._id || user.position,
-      positionName: user.position?.positionName || "",
+      user: regUser._id,
+      createdByUser: currentUser._id,
+      name: regUser.name,
+      department: regDepartment,
+      departmentName: regDepartmentName,
+      position: regPosition,
+      positionName: regPositionName,
       schoolYear: schoolYear.trim(),
-      titles: titles,
+      members: Array.isArray(members) ? members : [],
+      titles: finalTitles,
       attachedFiles: Array.isArray(attachedFiles) ? attachedFiles : [],
       notes: notes || "",
       status: "PENDING",
       history: [
         {
           action: "CREATED",
-          actor: user._id,
-          actorName: user.name,
-          actorRole: user.role,
-          details: `Đăng ký danh hiệu cho năm học ${schoolYear.trim()}`,
+          actor: currentUser._id,
+          actorName: currentUser.name,
+          actorRole: currentUser.role,
+          details: `Lập hồ sơ đề nghị thi đua năm học ${schoolYear.trim()} cho ${regDepartmentName || regUser.name}`,
           timestamp: new Date(),
         },
       ],
@@ -312,11 +398,12 @@ const createRegistration = async (req, res) => {
 
     const populated = await EmulationRegistration.findById(reg._id)
       .populate("titles")
+      .populate("members.titles")
       .populate("attachedFiles.documentType");
 
     res.status(201).json({
       success: true,
-      message: "Gửi đơn đăng ký thi đua thành công",
+      message: "Gửi hồ sơ đề nghị thi đua thành công",
       data: populated,
     });
   } catch (error) {
@@ -329,18 +416,19 @@ const createRegistration = async (req, res) => {
 const updateRegistration = async (req, res) => {
   try {
     const { id } = req.params;
-    const { titles, attachedFiles, notes, schoolYear } = req.body;
+    const { titles, members, attachedFiles, notes, schoolYear } = req.body;
 
     const reg = await EmulationRegistration.findById(id);
     if (!reg) {
       return res.status(404).json({ success: false, message: "Không tìm thấy hồ sơ đăng ký" });
     }
 
-    const isOwner = String(reg.user) === String(req.user._id);
+    const isOwner = String(reg.user) === String(req.user._id) || String(reg.createdByUser) === String(req.user._id);
     const isBGH = isUserBGH(req.user);
+    const isManagerOrAdmin = req.user.role === "manager" || req.user.role === "admin";
 
-    // Chỉ cho phép sửa khi chưa được BGH công nhận hoặc người có thẩm quyền
-    if (!isOwner && !isBGH) {
+    // Chỉ cho phép sửa khi là người tạo, Manager/Admin hoặc BGH
+    if (!isOwner && !isBGH && !isManagerOrAdmin) {
       return res.status(403).json({ success: false, message: "Bạn không có quyền sửa hồ sơ này" });
     }
 
@@ -351,13 +439,32 @@ const updateRegistration = async (req, res) => {
       });
     }
 
-    if (titles && Array.isArray(titles)) reg.titles = titles;
+    if (members && Array.isArray(members)) {
+      reg.members = members;
+      let finalTitles = Array.isArray(titles) && titles.length > 0 ? [...titles] : [];
+      members.forEach((m) => {
+        if (Array.isArray(m.titles)) {
+          m.titles.forEach((t) => {
+            const id = typeof t === "object" ? t._id || t : t;
+            if (id && !finalTitles.includes(String(id))) {
+              finalTitles.push(String(id));
+            }
+          });
+        }
+      });
+      if (finalTitles.length > 0) {
+        reg.titles = finalTitles;
+      }
+    } else if (titles && Array.isArray(titles)) {
+      reg.titles = titles;
+    }
+
     if (attachedFiles && Array.isArray(attachedFiles)) reg.attachedFiles = attachedFiles;
     if (notes !== undefined) reg.notes = notes;
     if (schoolYear) reg.schoolYear = schoolYear.trim();
 
     // Nếu hồ sơ trước đó bị REJECTED thì khi người dùng sửa và gửi lại, chuyển về PENDING
-    if (reg.status === "REJECTED" && isOwner) {
+    if (reg.status === "REJECTED") {
       reg.status = "PENDING";
       reg.managerReview.status = "PENDING";
       reg.bghReview.status = "PENDING";
@@ -368,7 +475,7 @@ const updateRegistration = async (req, res) => {
       actor: req.user._id,
       actorName: req.user.name,
       actorRole: req.user.role,
-      details: "Cập nhật lại thông tin hồ sơ đăng ký",
+      details: "Cập nhật lại thông tin hồ sơ đề nghị",
       timestamp: new Date(),
     });
 
@@ -376,6 +483,7 @@ const updateRegistration = async (req, res) => {
 
     const populated = await EmulationRegistration.findById(reg._id)
       .populate("titles")
+      .populate("members.titles")
       .populate("attachedFiles.documentType");
 
     res.status(200).json({
