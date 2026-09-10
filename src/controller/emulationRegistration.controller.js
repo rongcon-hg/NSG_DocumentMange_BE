@@ -248,14 +248,41 @@ const getMyRegistration = async (req, res) => {
       filter.user = currentUser._id;
     }
 
-    const reg = await EmulationRegistration.findOne(filter)
+    // Ưu tiên tìm hồ sơ PENDING đang chờ Quản lý duyệt để người dùng có thể tiếp tục chỉnh sửa
+    let reg = await EmulationRegistration.findOne({ ...filter, status: "PENDING" })
+      .sort({ createdAt: -1 })
       .populate("department", "departmentName departmentCode")
       .populate("position", "positionName positionCode")
       .populate("titles")
       .populate("members.titles")
       .populate("attachedFiles.documentType");
 
-    res.status(200).json({ success: true, data: reg });
+    let previousApprovedReg = null;
+    // Nếu không còn hồ sơ PENDING, kiểm tra xem có hồ sơ đợt trước nào trong năm học đã được duyệt hay không
+    if (!reg) {
+      const latestReg = await EmulationRegistration.findOne(filter)
+        .sort({ createdAt: -1 })
+        .populate("department", "departmentName departmentCode")
+        .populate("position", "positionName positionCode")
+        .populate("titles")
+        .populate("members.titles")
+        .populate("attachedFiles.documentType");
+
+      if (latestReg) {
+        if (latestReg.status === "REJECTED") {
+          reg = latestReg; // Hồ sơ bị từ chối thì nạp lại để sửa
+        } else {
+          // Hồ sơ đã được duyệt / chuyển BGH -> để làm rỗng form cho đợt đề nghị mới
+          previousApprovedReg = latestReg;
+        }
+      }
+    }
+
+    res.status(200).json({ 
+      success: true, 
+      data: reg, 
+      previousApprovedReg,
+    });
   } catch (error) {
     console.error("Lỗi getMyRegistration:", error);
     res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });
@@ -367,19 +394,20 @@ const createRegistration = async (req, res) => {
       }
     }
 
-    // Kiểm tra xem đơn vị hoặc user này đã có đơn đăng ký trong năm học này chưa
-    const existing = await EmulationRegistration.findOne({
+    // Kiểm tra xem đơn vị hoặc user này đang có đơn đăng ký ở trạng thái PENDING (chờ duyệt) trong năm học này hay không
+    const pendingExisting = await EmulationRegistration.findOne({
       $or: [
         { user: regUser._id, schoolYear: schoolYear.trim() },
         ...(regDepartment ? [{ department: regDepartment, schoolYear: schoolYear.trim() }] : []),
       ],
+      status: "PENDING",
     });
 
-    if (existing) {
+    if (pendingExisting) {
       return res.status(400).json({
         success: false,
-        message: `Đơn vị hoặc cán bộ (${regDepartmentName || regUser.name}) đã có hồ sơ đề nghị cho năm học ${schoolYear}. Vui lòng cập nhật hồ sơ hiện có thay vì tạo mới.`,
-        data: existing,
+        message: `Đơn vị hoặc cán bộ (${regDepartmentName || regUser.name}) đang có 1 hồ sơ đề nghị đang chờ Quản lý duyệt trong năm học ${schoolYear}. Vui lòng cập nhật hồ sơ đó hoặc chờ duyệt trước khi tạo đợt đề nghị mới.`,
+        data: pendingExisting,
       });
     }
 
@@ -467,6 +495,14 @@ const updateRegistration = async (req, res) => {
       return res.status(403).json({ success: false, message: "Bạn không có quyền sửa hồ sơ này" });
     }
 
+    const isManagerAccepted = reg.managerReview?.status === "APPROVED" || reg.status === "SUBMITTED_TO_BGH" || reg.status === "SCHOOL_APPROVED";
+    if (isManagerAccepted && !isManagerOrAdmin && !isBGH) {
+      return res.status(400).json({
+        success: false,
+        message: "Hồ sơ đã được Quản lý/Manager chấp nhận và chuyển BGH, không thể chỉnh sửa.",
+      });
+    }
+
     if (reg.status === "SCHOOL_APPROVED" && !isBGH) {
       return res.status(400).json({
         success: false,
@@ -543,9 +579,18 @@ const deleteRegistration = async (req, res) => {
 
     const isOwner = String(reg.user) === String(req.user._id);
     const isBGH = isUserBGH(req.user);
+    const isManagerOrAdmin = req.user.role === "manager" || req.user.role === "admin";
 
-    if (!isOwner && !isBGH) {
+    if (!isOwner && !isBGH && !isManagerOrAdmin) {
       return res.status(403).json({ success: false, message: "Bạn không có quyền xóa hồ sơ này" });
+    }
+
+    const isManagerAccepted = reg.managerReview?.status === "APPROVED" || reg.status === "SUBMITTED_TO_BGH" || reg.status === "SCHOOL_APPROVED";
+    if (isManagerAccepted && !isBGH) {
+      return res.status(400).json({
+        success: false,
+        message: "Hồ sơ đã được Quản lý chấp nhận, không thể xóa.",
+      });
     }
 
     if (reg.status === "SCHOOL_APPROVED" && !isBGH) {
@@ -649,7 +694,7 @@ const reviewRegistration = async (req, res) => {
         reviewedBy: currentUser._id,
         reviewedByName: currentUser.name,
         reviewedAt: new Date(),
-        note: note || "Ban Giám hiệu công nhận đạt danh hiệu thi đua",
+        note: note || "Ban Giám hiệu phê duyệt công nhận danh hiệu",
       };
 
       reg.history.push({
@@ -657,14 +702,14 @@ const reviewRegistration = async (req, res) => {
         actor: currentUser._id,
         actorName: currentUser.name,
         actorRole: currentUser.role,
-        details: `Ban Giám hiệu công nhận phê duyệt${note ? `: ${note}` : ""}`,
+        details: `Ban Giám hiệu phê duyệt công nhận: ${note || "Đồng ý"}`,
         timestamp: new Date(),
       });
     } else if (action === "BGH_REJECT") {
       if (!isBGH) {
         return res.status(403).json({
           success: false,
-          message: "Chỉ Ban Giám hiệu / Quản trị viên mới có quyền từ chối hồ sơ này",
+          message: "Chỉ Ban Giám hiệu / Quản trị viên mới có quyền từ chối công nhận",
         });
       }
 
@@ -682,7 +727,7 @@ const reviewRegistration = async (req, res) => {
         actor: currentUser._id,
         actorName: currentUser.name,
         actorRole: currentUser.role,
-        details: `Ban Giám hiệu từ chối: ${note || "Không đạt tiêu chuẩn"}`,
+        details: `Ban Giám hiệu từ chối công nhận: ${note || "Không đạt yêu cầu"}`,
         timestamp: new Date(),
       });
     } else {
@@ -692,10 +737,14 @@ const reviewRegistration = async (req, res) => {
     await reg.save();
 
     const updated = await EmulationRegistration.findById(reg._id)
+      .populate("user", "name email mobile")
+      .populate("department", "departmentName departmentCode")
+      .populate("position", "positionName positionCode")
       .populate("titles")
-      .populate("attachedFiles.documentType")
+      .populate("members.titles")
       .populate("managerReview.reviewedBy", "name")
-      .populate("bghReview.reviewedBy", "name");
+      .populate("bghReview.reviewedBy", "name")
+      .populate("history.actor", "name role");
 
     res.status(200).json({
       success: true,
@@ -713,15 +762,17 @@ const getEmulationStats = async (req, res) => {
   try {
     const { schoolYear } = req.query;
     const filter = {};
-    if (schoolYear) {
+    if (schoolYear && schoolYear !== "ALL" && schoolYear !== "Tất cả") {
       filter.schoolYear = schoolYear;
     }
 
     const allRegs = await EmulationRegistration.find(filter)
       .populate("titles", "code name level targetType")
+      .populate("members.titles", "code name level targetType")
       .populate("department", "departmentName departmentCode");
 
     const total = allRegs.length;
+    let totalMembers = 0;
     const byStatus = {
       PENDING: 0,
       SUBMITTED_TO_BGH: 0,
@@ -738,12 +789,25 @@ const getEmulationStats = async (req, res) => {
         byStatus[r.status]++;
       }
 
-      // Titles
-      if (Array.isArray(r.titles)) {
-        r.titles.forEach((t) => {
-          const tName = t.name || "Khác";
-          byTitle[tName] = (byTitle[tName] || 0) + 1;
+      // Count members & titles per member
+      if (Array.isArray(r.members) && r.members.length > 0) {
+        totalMembers += r.members.length;
+        r.members.forEach((m) => {
+          if (Array.isArray(m.titles)) {
+            m.titles.forEach((t) => {
+              const tName = t.name || t.code || "Khác";
+              byTitle[tName] = (byTitle[tName] || 0) + 1;
+            });
+          }
         });
+      } else {
+        totalMembers += 1;
+        if (Array.isArray(r.titles)) {
+          r.titles.forEach((t) => {
+            const tName = t.name || t.code || "Khác";
+            byTitle[tName] = (byTitle[tName] || 0) + 1;
+          });
+        }
       }
 
       // Department
@@ -766,6 +830,7 @@ const getEmulationStats = async (req, res) => {
       success: true,
       data: {
         total,
+        totalMembers,
         byStatus,
         byTitle: titleChartData,
         byDepartment: deptChartData,
