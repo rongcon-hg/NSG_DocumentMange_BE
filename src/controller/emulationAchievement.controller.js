@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const { google } = require("googleapis");
 const { Readable } = require("stream");
 const EmulationAchievement = require("../models/emulationAchievement.model");
