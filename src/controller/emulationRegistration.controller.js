@@ -583,11 +583,11 @@ const reviewRegistration = async (req, res) => {
     const isBGH = isUserBGH(currentUser);
     const isManager = currentUser.role === "manager" || currentUser.role === "admin";
 
-    if (action === "MANAGER_SUBMIT_BGH") {
+    if (action === "MANAGER_SUBMIT_BGH" || action === "MANAGER_APPROVE") {
       if (!isManager && !isBGH) {
         return res.status(403).json({
           success: false,
-          message: "Chỉ Quản trị viên/Manager mới có quyền duyệt và chuyển hồ sơ lên BGH",
+          message: "Chỉ Quản trị viên/Manager mới có quyền duyệt hồ sơ này",
         });
       }
 
@@ -597,15 +597,17 @@ const reviewRegistration = async (req, res) => {
         reviewedBy: currentUser._id,
         reviewedByName: currentUser.name,
         reviewedAt: new Date(),
-        note: note || "Đã duyệt và chuyển hồ sơ lên Ban Giám hiệu",
+        note: note || (action === "MANAGER_APPROVE" ? "Quản lý đã chấp nhận hồ sơ đề nghị" : "Đã duyệt và chuyển hồ sơ lên Ban Giám hiệu"),
       };
 
       reg.history.push({
-        action: "MANAGER_SUBMIT_BGH",
+        action: action,
         actor: currentUser._id,
         actorName: currentUser.name,
         actorRole: currentUser.role,
-        details: `Manager duyệt và gửi lên Ban Giám hiệu${note ? `: ${note}` : ""}`,
+        details: action === "MANAGER_APPROVE"
+          ? `Manager đã chấp nhận hồ sơ${note ? `: ${note}` : ""}`
+          : `Manager duyệt và gửi lên Ban Giám hiệu${note ? `: ${note}` : ""}`,
         timestamp: new Date(),
       });
     } else if (action === "MANAGER_REJECT") {
