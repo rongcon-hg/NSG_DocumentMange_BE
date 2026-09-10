@@ -579,21 +579,27 @@ const deleteRegistration = async (req, res) => {
 
     const isOwner = String(reg.user) === String(req.user._id);
     const isBGH = isUserBGH(req.user);
-    const isManagerOrAdmin = req.user.role === "manager" || req.user.role === "admin";
+    const isAdmin = req.user.role === "admin";
+    const isManagerOrAdmin = req.user.role === "manager" || isAdmin;
 
     if (!isOwner && !isBGH && !isManagerOrAdmin) {
       return res.status(403).json({ success: false, message: "Bạn không có quyền xóa hồ sơ này" });
     }
 
-    const isManagerAccepted = reg.managerReview?.status === "APPROVED" || reg.status === "SUBMITTED_TO_BGH" || reg.status === "SCHOOL_APPROVED";
-    if (isManagerAccepted && !isBGH) {
+    const isManagerAccepted =
+      reg.managerReview?.status === "APPROVED" ||
+      reg.status === "SUBMITTED_TO_BGH" ||
+      reg.status === "SCHOOL_APPROVED";
+
+    // Quản trị viên Admin và BGH có quyền xóa bất kể hồ sơ đang ở trạng thái nào
+    if (isManagerAccepted && !isBGH && !isAdmin) {
       return res.status(400).json({
         success: false,
         message: "Hồ sơ đã được Quản lý chấp nhận, không thể xóa.",
       });
     }
 
-    if (reg.status === "SCHOOL_APPROVED" && !isBGH) {
+    if (reg.status === "SCHOOL_APPROVED" && !isBGH && !isAdmin) {
       return res.status(400).json({
         success: false,
         message: "Hồ sơ đã được phê duyệt công nhận, không thể xóa.",
@@ -604,6 +610,36 @@ const deleteRegistration = async (req, res) => {
     res.status(200).json({ success: true, message: "Xóa hồ sơ đăng ký thành công" });
   } catch (error) {
     console.error("Lỗi deleteRegistration:", error);
+    res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });
+  }
+};
+
+// Xóa hàng loạt danh sách hồ sơ đăng ký (dành cho Admin / BGH)
+const deleteBatchRegistrations = async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ success: false, message: "Vui lòng chọn danh sách hồ sơ cần xóa" });
+    }
+
+    const isBGH = isUserBGH(req.user);
+    const isAdmin = req.user.role === "admin";
+
+    if (!isAdmin && !isBGH) {
+      return res.status(403).json({
+        success: false,
+        message: "Chỉ Quản trị viên Admin mới có quyền xóa danh sách hồ sơ",
+      });
+    }
+
+    const result = await EmulationRegistration.deleteMany({ _id: { $in: ids } });
+    res.status(200).json({
+      success: true,
+      message: `Đã xóa thành công ${result.deletedCount} hồ sơ khỏi danh sách`,
+      deletedCount: result.deletedCount,
+    });
+  } catch (error) {
+    console.error("Lỗi deleteBatchRegistrations:", error);
     res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });
   }
 };
@@ -850,6 +886,7 @@ module.exports = {
   createRegistration,
   updateRegistration,
   deleteRegistration,
+  deleteBatchRegistrations,
   reviewRegistration,
   getEmulationStats,
 };

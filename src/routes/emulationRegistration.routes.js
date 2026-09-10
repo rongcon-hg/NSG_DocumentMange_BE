@@ -25,6 +25,9 @@ router.post("/", verifyToken, controller.createRegistration);
 // Cập nhật đơn đăng ký
 router.put("/:id", verifyToken, controller.updateRegistration);
 
+// Xóa danh sách hàng loạt (Admin)
+router.post("/batch-delete", verifyToken, controller.deleteBatchRegistrations);
+
 // Xóa đơn đăng ký
 router.delete("/:id", verifyToken, controller.deleteRegistration);
 
