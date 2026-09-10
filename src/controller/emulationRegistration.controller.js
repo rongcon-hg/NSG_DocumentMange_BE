@@ -228,7 +228,8 @@ const getAllRegistrations = async (req, res) => {
         isBGH,
         isHieuTruong,
         isManager,
-        isCapTruong: !canViewAll,
+        isCapTruong: !canViewAll && (currentUser.role === "staff" || currentUser.role === "captruong"),
+        isCapPho: currentUser.role === "cappho" || (!isBGH && currentUser.position?.positionName?.toLowerCase().includes("phó")),
         canViewAll,
         departmentId: currentUser.department?._id,
         departmentName: currentUser.department?.departmentName || "",
@@ -377,12 +378,16 @@ const createRegistration = async (req, res) => {
 
     const isManagerOrAdmin = currentUser.role === "manager" || currentUser.role === "admin";
     const isCapTruong = currentUser.role === "staff" || currentUser.role === "captruong";
+    const isCapPho =
+      currentUser.role === "cappho" ||
+      (!isUserBGH(currentUser) && currentUser.position?.positionName?.toLowerCase().includes("phó"));
+    const isDeptLeader = isCapTruong || isCapPho;
 
-    // Phân quyền tạo đơn: chỉ cho Cấp trưởng hoặc Manager/Admin
-    if (!isManagerOrAdmin && !isCapTruong) {
+    // Phân quyền tạo đơn: chỉ cho Cấp trưởng, Cấp phó hoặc Manager/Admin
+    if (!isManagerOrAdmin && !isDeptLeader) {
       return res.status(403).json({
         success: false,
-        message: "Chức năng lập hồ sơ đề nghị chỉ dành cho Cấp trưởng đơn vị hoặc Quản trị viên/Manager.",
+        message: "Chức năng lập hồ sơ đề nghị chỉ dành cho Cấp trưởng, Cấp phó đơn vị hoặc Quản trị viên/Manager.",
       });
     }
 
@@ -505,11 +510,16 @@ const updateRegistration = async (req, res) => {
     }
 
     const isOwner = String(reg.user) === String(req.user._id) || String(reg.createdByUser) === String(req.user._id);
+    const isSameDeptLeader =
+      req.user.department &&
+      reg.department &&
+      String(reg.department._id || reg.department) === String(req.user.department._id || req.user.department) &&
+      (req.user.role === "staff" || req.user.role === "captruong" || req.user.role === "cappho");
     const isBGH = isUserBGH(req.user);
     const isManagerOrAdmin = req.user.role === "manager" || req.user.role === "admin";
 
-    // Chỉ cho phép sửa khi là người tạo, Manager/Admin hoặc BGH
-    if (!isOwner && !isBGH && !isManagerOrAdmin) {
+    // Cho phép sửa khi là người tạo, lãnh đạo cùng đơn vị, Manager/Admin hoặc BGH
+    if (!isOwner && !isSameDeptLeader && !isBGH && !isManagerOrAdmin) {
       return res.status(403).json({ success: false, message: "Bạn không có quyền sửa hồ sơ này" });
     }
 
@@ -606,12 +616,17 @@ const deleteRegistration = async (req, res) => {
       return res.status(404).json({ success: false, message: "Không tìm thấy hồ sơ đăng ký" });
     }
 
-    const isOwner = String(reg.user) === String(req.user._id);
+    const isOwner = String(reg.user) === String(req.user._id) || String(reg.createdByUser) === String(req.user._id);
+    const isSameDeptLeader =
+      req.user.department &&
+      reg.department &&
+      String(reg.department._id || reg.department) === String(req.user.department._id || req.user.department) &&
+      (req.user.role === "staff" || req.user.role === "captruong" || req.user.role === "cappho");
     const isBGH = isUserBGH(req.user);
     const isAdmin = req.user.role === "admin";
     const isManagerOrAdmin = req.user.role === "manager" || isAdmin;
 
-    if (!isOwner && !isBGH && !isManagerOrAdmin) {
+    if (!isOwner && !isSameDeptLeader && !isBGH && !isManagerOrAdmin) {
       return res.status(403).json({ success: false, message: "Bạn không có quyền xóa hồ sơ này" });
     }
 
