@@ -191,8 +191,8 @@ const createAchievement = async (req, res) => {
     }
 
     // Resolve department nếu có
-    let finalDeptId = departmentId || null;
-    if (!finalDeptId && departmentName) {
+    let finalDeptId = (departmentId && mongoose.Types.ObjectId.isValid(departmentId)) ? departmentId : null;
+    if (!finalDeptId && departmentName && departmentName.trim().toLowerCase() !== "trường") {
       const foundDept = await Department.findOne({
         departmentName: { $regex: `^${escapeRegex(departmentName.trim())}$`, $options: "i" },
       });
@@ -317,7 +317,7 @@ const batchImportAchievements = async (req, res) => {
       }
 
       // Match department ID
-      let matchedDeptId = deptMap.get(cleanDeptName.toLowerCase()) || null;
+      let matchedDeptId = cleanDeptName.toLowerCase() === "trường" ? null : (deptMap.get(cleanDeptName.toLowerCase()) || null);
 
       // Match user ID
       let matchedUserId = null;
@@ -442,7 +442,16 @@ const getAchievements = async (req, res) => {
     // - Chuyên viên: Thấy thành tích cá nhân của mình
     if (canViewAll) {
       if (department) {
-        filter.department = department;
+        if (department === "TRUONG" || department.toLowerCase() === "trường") {
+          filter.$or = [
+            { departmentName: new RegExp("Trường", "i") },
+            { department: null, targetType: "TAP_THE" },
+          ];
+        } else if (mongoose.Types.ObjectId.isValid(department)) {
+          filter.department = department;
+        } else {
+          filter.departmentName = new RegExp(`^${escapeRegex(department)}$`, "i");
+        }
       }
     } else if (isCapTruongOrPho) {
       const myDeptId = currentUser.department?._id || currentUser.department;
@@ -613,7 +622,9 @@ const updateAchievement = async (req, res) => {
 
     if (fullName) achievement.fullName = fullName.trim();
     if (userId !== undefined) achievement.user = userId || null;
-    if (departmentId !== undefined) achievement.department = departmentId || null;
+    if (departmentId !== undefined) {
+      achievement.department = (departmentId && mongoose.Types.ObjectId.isValid(departmentId)) ? departmentId : null;
+    }
     if (departmentName) achievement.departmentName = departmentName.trim();
     if (targetType) achievement.targetType = targetType;
     if (titleId !== undefined) achievement.title = titleId || null;
