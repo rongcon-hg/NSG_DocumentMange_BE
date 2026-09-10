@@ -21,7 +21,14 @@ const createDepartment = async (req, res) => {
 
 const getAllDepartment = async (req, res) => { // Fixed signature
     try {
+        const { includeDissolved } = req.query;
+        const matchStage = {};
+        if (includeDissolved !== "true") {
+            matchStage.departmentName = { $not: { $regex: "giải thể", $options: "i" } };
+        }
+
         const alldepartment = await Department.aggregate([
+            ...(Object.keys(matchStage).length > 0 ? [{ $match: matchStage }] : []),
             {
                 $lookup: {
                     from: "users", 

@@ -284,7 +284,7 @@ const batchImportAchievements = async (req, res) => {
     // Lấy cache danh mục danh hiệu và phòng ban để mapping tối ưu
     const [allTitles, allDepartments, allUsers] = await Promise.all([
       EmulationTitle.find({ isActive: true }).lean(),
-      Department.find().lean(),
+      Department.find({ departmentName: { $not: { $regex: "giải thể", $options: "i" } } }).lean(),
       User.find({ isDelete: { $ne: true } }).select("_id name email department").lean(),
     ]);
 
