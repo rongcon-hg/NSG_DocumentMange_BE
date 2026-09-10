@@ -27,6 +27,17 @@ const isUserBGH = (user) => {
   );
 };
 
+// Helper: Kiểm tra User có phải Hiệu trưởng hay không (hoặc Quản trị viên Admin)
+const isUserHieuTruong = (user) => {
+  if (!user) return false;
+  if (user.role === "admin") return true;
+
+  const posCode = (user.position?.positionCode || user.position?.code || user.position?.abbreviation || "").toUpperCase();
+  const posName = (user.position?.positionName || "").toLowerCase();
+
+  return posCode === "HT" || (posName.includes("hiệu trưởng") && !posName.includes("phó"));
+};
+
 // Helper: Authorize Google Drive
 async function authorizeDrive() {
   const config = await DriveConfig.findOne();
@@ -142,6 +153,7 @@ const getAllRegistrations = async (req, res) => {
     // - Manager, Admin, BGH: Xem toàn bộ hồ sơ của các đơn vị gửi lên
     // - Cấp trưởng / Cán bộ khác: CHỈ xem hồ sơ đăng ký của chính đơn vị mình hoặc do mình lập
     const isBGH = isUserBGH(currentUser);
+    const isHieuTruong = isUserHieuTruong(currentUser);
     const isManager = currentUser.role === "manager" || currentUser.role === "admin";
     const canViewAll = isManager || isBGH;
 
@@ -209,6 +221,7 @@ const getAllRegistrations = async (req, res) => {
       },
       userRoleInfo: {
         isBGH,
+        isHieuTruong,
         isManager,
         isCapTruong: !canViewAll,
         canViewAll,
@@ -495,7 +508,13 @@ const updateRegistration = async (req, res) => {
       return res.status(403).json({ success: false, message: "Bạn không có quyền sửa hồ sơ này" });
     }
 
-    const isManagerAccepted = reg.managerReview?.status === "APPROVED" || reg.status === "SUBMITTED_TO_BGH" || reg.status === "SCHOOL_APPROVED";
+    const isRejected = reg.status === "REJECTED";
+    const isManagerAccepted =
+      !isRejected &&
+      (reg.managerReview?.status === "APPROVED" ||
+        reg.status === "SUBMITTED_TO_BGH" ||
+        reg.status === "SCHOOL_APPROVED");
+
     if (isManagerAccepted && !isManagerOrAdmin && !isBGH) {
       return res.status(400).json({
         success: false,
@@ -503,7 +522,7 @@ const updateRegistration = async (req, res) => {
       });
     }
 
-    if (reg.status === "SCHOOL_APPROVED" && !isBGH) {
+    if (reg.status === "SCHOOL_APPROVED" && !isBGH && !isManagerOrAdmin) {
       return res.status(400).json({
         success: false,
         message: "Hồ sơ đã được Ban Giám hiệu phê duyệt công nhận, không thể chỉnh sửa.",
@@ -534,19 +553,24 @@ const updateRegistration = async (req, res) => {
     if (notes !== undefined) reg.notes = notes;
     if (schoolYear) reg.schoolYear = schoolYear.trim();
 
-    // Nếu hồ sơ trước đó bị REJECTED thì khi người dùng sửa và gửi lại, chuyển về PENDING
-    if (reg.status === "REJECTED") {
+    const wasRejected = isRejected;
+    // Nếu hồ sơ trước đó bị REJECTED thì khi người dùng sửa và gửi lại, chuyển về PENDING để Quản lý duyệt lại
+    if (wasRejected) {
       reg.status = "PENDING";
+      if (!reg.managerReview) reg.managerReview = {};
       reg.managerReview.status = "PENDING";
+      if (!reg.bghReview) reg.bghReview = {};
       reg.bghReview.status = "PENDING";
     }
 
     reg.history.push({
-      action: "UPDATED",
+      action: wasRejected ? "RESUBMITTED" : "UPDATED",
       actor: req.user._id,
       actorName: req.user.name,
       actorRole: req.user.role,
-      details: "Cập nhật lại thông tin hồ sơ đề nghị",
+      details: wasRejected
+        ? "Cán bộ đã điều chỉnh lại hồ sơ theo ý kiến của Hội đồng và gửi lại Quản lý xét duyệt"
+        : "Cập nhật lại thông tin hồ sơ đề nghị",
       timestamp: new Date(),
     });
 
@@ -717,10 +741,11 @@ const reviewRegistration = async (req, res) => {
         timestamp: new Date(),
       });
     } else if (action === "BGH_APPROVE") {
-      if (!isBGH) {
+      const isHT = isUserHieuTruong(currentUser);
+      if (!isHT) {
         return res.status(403).json({
           success: false,
-          message: "Chỉ Ban Giám hiệu / Quản trị viên mới có quyền phê duyệt công nhận",
+          message: "Chỉ chức vụ Hiệu trưởng (hoặc Quản trị viên) mới có quyền phê duyệt công nhận",
         });
       }
 
@@ -730,7 +755,7 @@ const reviewRegistration = async (req, res) => {
         reviewedBy: currentUser._id,
         reviewedByName: currentUser.name,
         reviewedAt: new Date(),
-        note: note || "Ban Giám hiệu phê duyệt công nhận danh hiệu",
+        note: note || "Hiệu trưởng phê duyệt công nhận danh hiệu",
       };
 
       reg.history.push({
@@ -738,14 +763,22 @@ const reviewRegistration = async (req, res) => {
         actor: currentUser._id,
         actorName: currentUser.name,
         actorRole: currentUser.role,
-        details: `Ban Giám hiệu phê duyệt công nhận: ${note || "Đồng ý"}`,
+        details: `Hiệu trưởng phê duyệt công nhận: ${note || "Đồng ý"}`,
         timestamp: new Date(),
       });
     } else if (action === "BGH_REJECT") {
-      if (!isBGH) {
+      const isHT = isUserHieuTruong(currentUser);
+      if (!isHT) {
         return res.status(403).json({
           success: false,
-          message: "Chỉ Ban Giám hiệu / Quản trị viên mới có quyền từ chối công nhận",
+          message: "Chỉ chức vụ Hiệu trưởng (hoặc Quản trị viên) mới có quyền từ chối công nhận",
+        });
+      }
+
+      if (!note || !note.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: "Vui lòng ghi rõ lý do từ chối để người nộp hồ sơ biết điều chỉnh theo ý Hội đồng",
         });
       }
 
@@ -755,7 +788,7 @@ const reviewRegistration = async (req, res) => {
         reviewedBy: currentUser._id,
         reviewedByName: currentUser.name,
         reviewedAt: new Date(),
-        note: note || "Ban Giám hiệu không công nhận",
+        note: note.trim(),
       };
 
       reg.history.push({
@@ -763,7 +796,7 @@ const reviewRegistration = async (req, res) => {
         actor: currentUser._id,
         actorName: currentUser.name,
         actorRole: currentUser.role,
-        details: `Ban Giám hiệu từ chối công nhận: ${note || "Không đạt yêu cầu"}`,
+        details: `Hiệu trưởng từ chối công nhận: ${note.trim()}`,
         timestamp: new Date(),
       });
     } else {
