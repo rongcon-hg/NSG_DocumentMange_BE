@@ -849,7 +849,7 @@ const reviewRegistration = async (req, res) => {
 // Thống kê số liệu đăng ký thi đua
 const getEmulationStats = async (req, res) => {
   try {
-    const { schoolYear, startDate, endDate } = req.query;
+    const { schoolYear, startDate, endDate, department } = req.query;
     const filter = {};
     if (schoolYear && schoolYear !== "ALL" && schoolYear !== "Tất cả") {
       filter.schoolYear = schoolYear;
@@ -858,6 +858,37 @@ const getEmulationStats = async (req, res) => {
       filter.createdAt = {};
       if (startDate) filter.createdAt.$gte = new Date(startDate);
       if (endDate) filter.createdAt.$lte = new Date(endDate);
+    }
+
+    // Phân quyền dữ liệu theo nhóm người dùng:
+    // - Manager, Admin, BGH: Thống kê toàn trường (hoặc lọc theo đơn vị nếu có chọn)
+    // - Cấp trưởng, Cấp phó, Chuyên viên: CHỈ thống kê số lượng hồ sơ thuộc đơn vị của mình
+    const currentUser = await User.findById(req.user._id)
+      .populate("department")
+      .populate("position");
+
+    const isBGH = isUserBGH(currentUser);
+    const isManager = currentUser.role === "manager" || currentUser.role === "admin";
+    const canViewAll = isManager || isBGH;
+
+    if (canViewAll) {
+      if (department) {
+        filter.department = department;
+      }
+    } else {
+      const myDeptId = currentUser.department?._id || currentUser.department;
+      if (myDeptId) {
+        filter.$or = [
+          { department: myDeptId },
+          { user: currentUser._id },
+          { createdByUser: currentUser._id },
+        ];
+      } else {
+        filter.$or = [
+          { user: currentUser._id },
+          { createdByUser: currentUser._id },
+        ];
+      }
     }
 
     const allRegs = await EmulationRegistration.find(filter)
@@ -928,6 +959,13 @@ const getEmulationStats = async (req, res) => {
         byStatus,
         byTitle: titleChartData,
         byDepartment: deptChartData,
+      },
+      userRoleInfo: {
+        isBGH,
+        isManager,
+        canViewAll,
+        departmentId: currentUser.department?._id,
+        departmentName: currentUser.department?.departmentName || "",
       },
     });
   } catch (error) {
