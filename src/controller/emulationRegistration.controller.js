@@ -138,21 +138,33 @@ const getAllRegistrations = async (req, res) => {
 
     const filter = {};
 
-    // Phân quyền dữ liệu
+    // Phân quyền dữ liệu:
+    // - Manager, Admin, BGH: Xem toàn bộ hồ sơ của các đơn vị gửi lên
+    // - Cấp trưởng / Cán bộ khác: CHỈ xem hồ sơ đăng ký của chính đơn vị mình hoặc do mình lập
     const isBGH = isUserBGH(currentUser);
-    const isManager = ["manager", "cappho", "staff"].includes(currentUser.role);
+    const isManager = currentUser.role === "manager" || currentUser.role === "admin";
+    const canViewAll = isManager || isBGH;
 
-    if (isBGH) {
-      // BGH và Admin xem toàn trường -> Cho phép lọc tự do theo department nếu có query
+    if (canViewAll) {
+      // Manager/Admin/BGH xem toàn trường -> Cho phép lọc theo department nếu có query
       if (department) {
         filter.department = department;
       }
-    } else if (isManager) {
-      // Trưởng đơn vị / Quản lý -> Xem các hồ sơ trong đơn vị của mình
-      filter.department = currentUser.department?._id || currentUser.department;
     } else {
-      // Chuyên viên / Nhân viên thường -> Chỉ xem đơn của chính mình
-      filter.user = currentUser._id;
+      // Cấp trưởng: chỉ xem hồ sơ của đơn vị mình hoặc do mình lập
+      const myDeptId = currentUser.department?._id || currentUser.department;
+      if (myDeptId) {
+        filter.$or = [
+          { department: myDeptId },
+          { user: currentUser._id },
+          { createdByUser: currentUser._id },
+        ];
+      } else {
+        filter.$or = [
+          { user: currentUser._id },
+          { createdByUser: currentUser._id },
+        ];
+      }
     }
 
     if (schoolYear) {
@@ -198,7 +210,10 @@ const getAllRegistrations = async (req, res) => {
       userRoleInfo: {
         isBGH,
         isManager,
+        isCapTruong: !canViewAll,
+        canViewAll,
         departmentId: currentUser.department?._id,
+        departmentName: currentUser.department?.departmentName || "",
       },
     });
   } catch (error) {
@@ -264,6 +279,26 @@ const getRegistrationById = async (req, res) => {
 
     if (!reg) {
       return res.status(404).json({ success: false, message: "Không tìm thấy hồ sơ đăng ký" });
+    }
+
+    // Kiểm tra quyền xem chi tiết hồ sơ:
+    // Manager, Admin, BGH được xem toàn bộ; Cấp trưởng chỉ xem hồ sơ của đơn vị mình hoặc do mình lập
+    const currentUser = await User.findById(req.user._id).populate("department");
+    const isBGH = isUserBGH(currentUser);
+    const isManager = currentUser.role === "manager" || currentUser.role === "admin";
+    if (!isManager && !isBGH) {
+      const myDeptId = String(currentUser.department?._id || currentUser.department || "");
+      const regDeptId = String(reg.department?._id || reg.department || "");
+      const isOwner =
+        String(reg.user?._id || reg.user || "") === String(currentUser._id) ||
+        String(reg.createdByUser?._id || reg.createdByUser || "") === String(currentUser._id);
+
+      if (myDeptId !== regDeptId && !isOwner) {
+        return res.status(403).json({
+          success: false,
+          message: "Bạn chỉ có quyền xem hồ sơ đăng ký của đơn vị mình",
+        });
+      }
     }
 
     res.status(200).json({ success: true, data: reg });
@@ -546,15 +581,13 @@ const reviewRegistration = async (req, res) => {
       .populate("position");
 
     const isBGH = isUserBGH(currentUser);
-    const isManager =
-      ["manager", "cappho", "staff"].includes(currentUser.role) &&
-      String(currentUser.department?._id || currentUser.department) === String(reg.department);
+    const isManager = currentUser.role === "manager" || currentUser.role === "admin";
 
     if (action === "MANAGER_SUBMIT_BGH") {
       if (!isManager && !isBGH) {
         return res.status(403).json({
           success: false,
-          message: "Chỉ Cấp trưởng/Quản lý đơn vị mới có quyền duyệt và chuyển hồ sơ lên BGH",
+          message: "Chỉ Quản trị viên/Manager mới có quyền duyệt và chuyển hồ sơ lên BGH",
         });
       }
 
@@ -572,14 +605,14 @@ const reviewRegistration = async (req, res) => {
         actor: currentUser._id,
         actorName: currentUser.name,
         actorRole: currentUser.role,
-        details: `Quản lý đơn vị duyệt và gửi lên Ban Giám hiệu${note ? `: ${note}` : ""}`,
+        details: `Manager duyệt và gửi lên Ban Giám hiệu${note ? `: ${note}` : ""}`,
         timestamp: new Date(),
       });
     } else if (action === "MANAGER_REJECT") {
       if (!isManager && !isBGH) {
         return res.status(403).json({
           success: false,
-          message: "Chỉ Cấp trưởng/Quản lý đơn vị mới có quyền từ chối hồ sơ này",
+          message: "Chỉ Quản trị viên/Manager mới có quyền từ chối hồ sơ này",
         });
       }
 
