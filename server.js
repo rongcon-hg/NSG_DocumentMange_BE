@@ -14,8 +14,19 @@ const cookieParser = require("cookie-parser");
 const cors = require("cors");
 const compression = require("compression");
 
-// Security Headers
-app.use(helmet({ crossOriginResourcePolicy: false }));
+// Ẩn thông tin nền tảng Express
+app.disable('x-powered-by');
+
+// Security Headers bảo vệ chống tấn công web
+app.use(
+  helmet({
+    crossOriginResourcePolicy: false,
+    hidePoweredBy: true,
+    xssFilter: true,
+    noSniff: true,
+    frameguard: { action: 'sameorigin' },
+  })
+);
 
 // Compress API responses
 app.use(compression());
