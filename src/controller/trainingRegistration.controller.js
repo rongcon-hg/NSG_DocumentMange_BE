@@ -369,6 +369,8 @@ const getRegistrations = async (req, res) => {
       trainingForm,
       reportStatus,
       attended,
+      fromDate,
+      toDate,
       search,
       page = 1,
       limit = 20,
@@ -403,6 +405,22 @@ const getRegistrations = async (req, res) => {
     if (reportStatus) query["reportResult.status"] = reportStatus;
     if (attended !== undefined && attended !== "") {
       query["reportResult.attended"] = attended === "true";
+    }
+
+    // Lọc theo khoảng thời gian đăng ký (createdAt)
+    if (fromDate || toDate) {
+      const dateCond = {};
+      if (fromDate) {
+        const start = new Date(fromDate);
+        start.setHours(0, 0, 0, 0);
+        dateCond.$gte = start;
+      }
+      if (toDate) {
+        const end = new Date(toDate);
+        end.setHours(23, 59, 59, 999);
+        dateCond.$lte = end;
+      }
+      query.createdAt = dateCond;
     }
 
     // 3. Tìm kiếm từ khóa
@@ -1170,7 +1188,17 @@ const exportExcel = async (req, res) => {
     const { isBGH, isAdminOrManager, isCapTruong, isCapPho, isChuyenVien, userDeptId } =
       getUserRoleInfo(currentUser);
 
-    const { year, department, status, trainingForm, reportStatus, attended } = req.query;
+    const {
+      year,
+      department,
+      status,
+      trainingForm,
+      reportStatus,
+      attended,
+      fromDate,
+      toDate,
+      search,
+    } = req.query;
     const query = {};
 
     if (isChuyenVien) {
@@ -1193,12 +1221,45 @@ const exportExcel = async (req, res) => {
       query["reportResult.attended"] = attended === "true";
     }
 
+    // Lọc theo khoảng thời gian đăng ký (createdAt)
+    if (fromDate || toDate) {
+      const dateCond = {};
+      if (fromDate) {
+        const start = new Date(fromDate);
+        start.setHours(0, 0, 0, 0);
+        dateCond.$gte = start;
+      }
+      if (toDate) {
+        const end = new Date(toDate);
+        end.setHours(23, 59, 59, 999);
+        dateCond.$lte = end;
+      }
+      query.createdAt = dateCond;
+    }
+
+    // Tìm kiếm từ khóa
+    if (search && search.trim() !== "") {
+      const keyword = search.trim();
+      const regex = new RegExp(keyword, "i");
+      query.$and = query.$and || [];
+      query.$and.push({
+        $or: [
+          { userName: regex },
+          { trainingContent: regex },
+          { trainingLocation: regex },
+          { departmentName: regex },
+        ],
+      });
+    }
+
     const records = await TrainingRegistration.find(query)
       .populate("user", "name email")
       .populate("department", "departmentName")
       .populate("position", "positionName")
+      .populate("createdByUser", "name email")
       .populate("managerReview.reviewedBy", "name")
       .populate("reportResult.reportedBy", "name")
+      .populate("reportResult.confirmedBy", "name")
       .sort({ createdAt: -1 })
       .lean();
 
@@ -1217,17 +1278,25 @@ const exportExcel = async (req, res) => {
       { header: "Hình thức", key: "trainingForm", width: 16 },
       { header: "Nơi đào tạo", key: "trainingLocation", width: 28 },
       { header: "Thời gian đào tạo", key: "trainingDuration", width: 20 },
+      { header: "Từ ngày", key: "startDate", width: 14 },
+      { header: "Đến ngày", key: "endDate", width: 14 },
       { header: "Kinh phí dự kiến (VNĐ)", key: "estimatedCost", width: 22 },
+      { header: "Người lập hồ sơ", key: "createdByName", width: 22 },
+      { header: "Ngày đăng ký", key: "createdAt", width: 15 },
       { header: "Trạng thái duyệt", key: "status", width: 18 },
+      { header: "Người duyệt", key: "reviewedBy", width: 20 },
+      { header: "Ý kiến duyệt", key: "reviewNote", width: 25 },
       { header: "Tình trạng học", key: "attendedStatus", width: 18 },
       { header: "Kết quả bồi dưỡng", key: "resultDetails", width: 25 },
-      { header: "Hỗ trợ kinh phí", key: "fundingSupport", width: 20 },
+      { header: "Hỗ trợ kinh phí", key: "fundingSupport", width: 18 },
       { header: "Kinh phí hỗ trợ thực tế (VNĐ)", key: "actualFundAmount", width: 25 },
+      { header: "Xác nhận kết quả", key: "managerConfirmed", width: 18 },
+      { header: "Người xác nhận", key: "confirmedByName", width: 20 },
       { header: "Lý do không học (nếu có)", key: "notAttendedReason", width: 28 },
       { header: "Ghi chú", key: "notes", width: 20 },
     ];
 
-    worksheet.getRow(1).height = 28;
+    worksheet.getRow(1).height = 30;
     worksheet.getRow(1).eachCell((cell) => {
       cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
       cell.fill = {
@@ -1250,6 +1319,16 @@ const exportExcel = async (req, res) => {
       REJECTED: "Đã từ chối",
     };
 
+    const formatDateVi = (d) => {
+      if (!d) return "";
+      const dt = new Date(d);
+      if (isNaN(dt.getTime())) return "";
+      const day = String(dt.getDate()).padStart(2, "0");
+      const month = String(dt.getMonth() + 1).padStart(2, "0");
+      const yr = dt.getFullYear();
+      return `${day}/${month}/${yr}`;
+    };
+
     records.forEach((r, idx) => {
       let attendedText = "Chưa báo cáo";
       if (r.reportResult?.status === "REPORTED") {
@@ -1259,6 +1338,11 @@ const exportExcel = async (req, res) => {
       let fundingText = "Không";
       if (r.reportResult?.hasFundingSupport) {
         fundingText = "Có hỗ trợ";
+      }
+
+      let confirmedText = "Chưa xác nhận";
+      if (r.reportResult?.managerConfirmed) {
+        confirmedText = "Đã xác nhận";
       }
 
       const row = worksheet.addRow({
@@ -1271,12 +1355,20 @@ const exportExcel = async (req, res) => {
         trainingForm: r.trainingForm || "",
         trainingLocation: r.trainingLocation || "",
         trainingDuration: r.trainingDuration || "",
+        startDate: formatDateVi(r.startDate),
+        endDate: formatDateVi(r.endDate),
         estimatedCost: r.estimatedCost || 0,
+        createdByName: r.createdByUserName || r.createdByUser?.name || "",
+        createdAt: formatDateVi(r.createdAt),
         status: statusLabels[r.status] || r.status,
+        reviewedBy: r.managerReview?.reviewedByName || r.managerReview?.reviewedBy?.name || "",
+        reviewNote: r.managerReview?.note || "",
         attendedStatus: attendedText,
         resultDetails: r.reportResult?.resultDetails || "",
         fundingSupport: fundingText,
         actualFundAmount: r.reportResult?.actualFundAmount || 0,
+        managerConfirmed: confirmedText,
+        confirmedByName: r.reportResult?.confirmedByName || r.reportResult?.confirmedBy?.name || "",
         notAttendedReason: r.reportResult?.notAttendedReason || "",
         notes: r.notes || "",
       });
@@ -1288,10 +1380,14 @@ const exportExcel = async (req, res) => {
           bottom: { style: "thin", color: { argb: "FFE2E8F0" } },
           right: { style: "thin", color: { argb: "FFE2E8F0" } },
         };
-        if (colNumber === 10 || colNumber === 15) {
+        // Số tiền
+        if (colNumber === 12 || colNumber === 21) {
           cell.numFmt = "#,##0";
           cell.alignment = { horizontal: "right", vertical: "middle" };
-        } else if (colNumber === 1 || colNumber === 5) {
+        } else if (
+          // Căn giữa: STT, Năm, Từ ngày, Đến ngày, Ngày đăng ký, Trạng thái, Xác nhận
+          [1, 5, 10, 11, 14, 15, 22].includes(colNumber)
+        ) {
           cell.alignment = { horizontal: "center", vertical: "middle" };
         } else {
           cell.alignment = { vertical: "middle" };
@@ -1305,7 +1401,7 @@ const exportExcel = async (req, res) => {
     );
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename=Bao_Cao_Boi_Duong_${year || "All"}.xlsx`
+      `attachment; filename=Danh_Sach_Dang_Ky_Boi_Duong_${year || "All"}.xlsx`
     );
 
     await workbook.xlsx.write(res);
