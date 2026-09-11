@@ -1,3 +1,6 @@
+// Thiết lập múi giờ Việt Nam (UTC+7) cho toàn bộ hệ thống
+process.env.TZ = 'Asia/Ho_Chi_Minh';
+
 const express = require('express');
 require('dotenv').config();
 const path = require('path');

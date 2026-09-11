@@ -47,6 +47,43 @@ const getTransporterAndSender = async () => {
     return { transporter, sender };
 };
 
+/**
+ * Định dạng ngày giờ chuẩn Múi giờ Việt Nam (Asia/Ho_Chi_Minh - UTC+7)
+ */
+const formatVietnamDateTime = (date = new Date()) => {
+    try {
+        const d = date ? new Date(date) : new Date();
+        if (isNaN(d.getTime())) return "--";
+        return d.toLocaleString("vi-VN", {
+            timeZone: "Asia/Ho_Chi_Minh",
+            hour12: false,
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+        });
+    } catch (e) {
+        return new Date(date || Date.now()).toLocaleString("vi-VN");
+    }
+};
+
+const formatVietnamDate = (date = new Date()) => {
+    try {
+        const d = date ? new Date(date) : new Date();
+        if (isNaN(d.getTime())) return "--";
+        return d.toLocaleDateString("vi-VN", {
+            timeZone: "Asia/Ho_Chi_Minh",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+        });
+    } catch (e) {
+        return new Date(date || Date.now()).toLocaleDateString("vi-VN");
+    }
+};
+
 const sentTempPassword = async (email,tempPass) => {
     try {
         const { transporter, sender } = await getTransporterAndSender();
@@ -105,11 +142,11 @@ const sendNewDocumentEmail = async (uniqueUsers, docData, senderName = "Hệ th�
         }
 
         const dateValue = docData.receivedAt ? 
-            new Date(docData.receivedAt).toLocaleDateString('vi-VN') : 
-            (docData.createAt ? new Date(docData.createAt).toLocaleDateString('vi-VN') : "N/A");
+            formatVietnamDate(docData.receivedAt) : 
+            (docData.createAt ? formatVietnamDate(docData.createAt) : "N/A");
             
         const deadlineValue = docData.deadlineDay ? 
-            new Date(docData.deadlineDay).toLocaleDateString('vi-VN') : "Không có";
+            formatVietnamDate(docData.deadlineDay) : "Không có";
 
         const fullDocCode = (docData.docNum && docData.docCode) 
             ? `${docData.docNum}/${docData.docCode}` 
@@ -173,7 +210,7 @@ const sendTaskReminderEmail = async (emails, taskData, reminderType) => {
             color = "#c0392b"; // Dark Red
         }
 
-        const endDateStr = new Date(taskData.endDate).toLocaleDateString('vi-VN');
+        const endDateStr = formatVietnamDate(taskData.endDate);
 
         const htmlContent = `
         <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 8px;">
@@ -222,7 +259,7 @@ const sendTaskNotificationEmail = async (uniqueUsers, taskData, actionType) => {
         }
 
         const dateValue = taskData.startDate && taskData.endDate ? 
-            `${new Date(taskData.startDate).toLocaleDateString('vi-VN')} - ${new Date(taskData.endDate).toLocaleDateString('vi-VN')}` : "N/A";
+            `${formatVietnamDate(taskData.startDate)} - ${formatVietnamDate(taskData.endDate)}` : "N/A";
 
         let priorityLabel = "Bình thường";
         let priorityHighlightBlock = "";
@@ -469,7 +506,7 @@ const sendEmulationRegistrationEmail = async (uniqueUsers, regData, creatorName 
         const targetName = regData.name || regData.departmentName || "Đơn vị";
         const schoolYear = regData.schoolYear || "N/A";
         const subject = `[Đề nghị thi đua] ${targetName} - Năm học ${schoolYear}`;
-        const createdAtStr = new Date(regData.createdAt || Date.now()).toLocaleString('vi-VN');
+        const createdAtStr = formatVietnamDateTime(regData.createdAt || Date.now());
 
         let htmlContent = EMULATION_REGISTRATION_EMAIL_TEMPLATE
             .replace(/{schoolYear}/g, schoolYear)
@@ -552,7 +589,7 @@ const sendEmulationStatusEmail = async (uniqueUsers, regData, actionType, note =
 
         const targetName = regData.name || regData.departmentName || "Đơn vị";
         const schoolYear = regData.schoolYear || "N/A";
-        const actionTimeStr = new Date().toLocaleString('vi-VN');
+        const actionTimeStr = formatVietnamDateTime();
         const subject = `[${actionName}] ${targetName} - Năm học ${schoolYear}`;
 
         let htmlContent = EMULATION_STATUS_EMAIL_TEMPLATE
@@ -595,7 +632,7 @@ const sendTrainingRegistrationEmail = async (uniqueUsers, records, creatorName =
         const { transporter, sender } = await getTransporterAndSender();
 
         const year = records[0]?.year || new Date().getFullYear().toString();
-        const createdAtStr = new Date().toLocaleString('vi-VN');
+        const createdAtStr = formatVietnamDateTime();
 
         const rows = records.map((r, idx) => {
             const costFormatted = (Number(r.estimatedCost) || 0).toLocaleString('vi-VN') + ' đ';
@@ -721,7 +758,7 @@ const sendTrainingStatusEmail = async (uniqueUsers, record, actionType, note = "
         }
 
         const subject = `[Bồi dưỡng - ${actionName}] ${record.userName} - ${record.trainingContent}`;
-        const actionTime = new Date().toLocaleString('vi-VN');
+        const actionTime = formatVietnamDateTime();
 
         let htmlContent = TRAINING_STATUS_EMAIL_TEMPLATE
             .replace(/{actionName}/g, actionName)

@@ -89,7 +89,7 @@ const testSmtpConfig = async (req, res) => {
           <p>Đây là email thử nghiệm được gửi từ hệ thống <strong>Quản lý Văn bản NSG</strong>.</p>
           <p>Các thông số SMTP hiện tại đã kết nối thành công với máy chủ gửi thư.</p>
           <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
-          <p style="font-size: 12px; color: #888;">Thời gian kiểm tra: ${new Date().toLocaleString('vi-VN')}</p>
+          <p style="font-size: 12px; color: #888;">Thời gian kiểm tra: ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour12: false })}</p>
         </div>
       `,
     });

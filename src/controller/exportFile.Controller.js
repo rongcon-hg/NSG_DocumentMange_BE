@@ -825,8 +825,8 @@ async function exportRepliedDocsToExcel(req, res) {
     // --- Hàm format thời gian (GMT+7) ---
     const formatVNTime = (date) => {
       if (!date) return "";
-      const vnDate = new Date(date.getTime() + 7 * 60 * 60 * 1000);
-      return vnDate.toLocaleString("vi-VN", {
+      return new Date(date).toLocaleString("vi-VN", {
+        timeZone: "Asia/Ho_Chi_Minh",
         hour12: false,
         day: "2-digit",
         month: "2-digit",

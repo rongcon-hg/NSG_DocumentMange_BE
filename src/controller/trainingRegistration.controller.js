@@ -1355,10 +1355,12 @@ const exportExcel = async (req, res) => {
       if (!d) return "";
       const dt = new Date(d);
       if (isNaN(dt.getTime())) return "";
-      const day = String(dt.getDate()).padStart(2, "0");
-      const month = String(dt.getMonth() + 1).padStart(2, "0");
-      const yr = dt.getFullYear();
-      return `${day}/${month}/${yr}`;
+      return dt.toLocaleDateString("vi-VN", {
+        timeZone: "Asia/Ho_Chi_Minh",
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+      });
     };
 
     records.forEach((r, idx) => {
