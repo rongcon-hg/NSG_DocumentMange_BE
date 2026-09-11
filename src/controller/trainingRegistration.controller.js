@@ -165,8 +165,19 @@ const createRegistrations = async (req, res) => {
             .populate("position");
         }
         finalUserName = targetUser ? targetUser.name : (item.userName || "").trim();
-        finalDeptId = targetUser?.department?._id || item.department || null;
-        finalDeptName = targetUser?.department?.departmentName || item.departmentName || "";
+        finalDeptId = item.department || targetUser?.department?._id || null;
+        finalDeptName = item.departmentName || targetUser?.department?.departmentName || "";
+
+        if (finalDeptId && !finalDeptName) {
+          const dObj = await Department.findById(finalDeptId).lean();
+          if (dObj) finalDeptName = dObj.departmentName;
+        } else if (!finalDeptId && finalDeptName) {
+          const dObj = await Department.findOne({
+            departmentName: { $regex: new RegExp(`^${finalDeptName.trim()}$`, "i") },
+          }).lean();
+          if (dObj) finalDeptId = dObj._id;
+        }
+
         finalPositionId = targetUser?.position?._id || item.position || null;
         finalPositionName = targetUser?.position?.positionName || item.positionName || "Cán bộ";
       }
