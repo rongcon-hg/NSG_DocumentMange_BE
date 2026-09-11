@@ -69,13 +69,33 @@ const isUserBGH = (user) => {
   return false;
 };
 
+// === Helper: Get Detailed User Role & Department Info ===
+const getUserRoleInfo = (user) => {
+  if (!user) return {};
+  const isBGH = isUserBGH(user);
+  const isAdminOrManager = ["admin", "manager"].includes(user?.role);
+  const posName = (user?.position?.positionName || "").toLowerCase();
+  const isCapTruong =
+    !isBGH &&
+    !isAdminOrManager &&
+    (user?.role === "staff" || user?.role === "captruong" || posName.includes("trưởng"));
+  const isCapPho =
+    !isBGH &&
+    !isAdminOrManager &&
+    !isCapTruong &&
+    (user?.role === "cappho" || posName.includes("phó"));
+  const isChuyenVien = !isBGH && !isAdminOrManager && !isCapTruong && !isCapPho;
+  const userDeptId = user?.department?._id || user?.department;
+  const userDeptName = user?.department?.departmentName || user?.departmentName || "";
+  return { isBGH, isAdminOrManager, isCapTruong, isCapPho, isChuyenVien, userDeptId, userDeptName };
+};
+
 /**
  * 1. TẠO MỚI HỒ SƠ ĐĂNG KÝ BỒI DƯỠNG (Hỗ trợ 1 hoặc nhiều người)
  */
 const createRegistrations = async (req, res) => {
   try {
     const creatorId = req.user._id;
-    const creatorName = req.user.name || "Cấp trưởng";
     const payload = req.body;
 
     const items = Array.isArray(payload.items) ? payload.items : [payload];
@@ -83,48 +103,84 @@ const createRegistrations = async (req, res) => {
       return res.status(400).json({ success: false, message: "Danh sách đăng ký trống." });
     }
 
-    // Kiểm tra vai trò của người lập
-    const isManagerOrAdmin = ["admin", "manager"].includes(req.user.role);
-    const creatorUser = await User.findById(creatorId).populate("department");
-    const creatorDeptId = creatorUser?.department?._id || creatorUser?.department;
-    const creatorDeptName = creatorUser?.department?.departmentName || "";
+    const creatorUser = await User.findById(creatorId)
+      .populate("department")
+      .populate("position");
+    const { isBGH, isAdminOrManager, isCapTruong, isCapPho, isChuyenVien, userDeptId, userDeptName } =
+      getUserRoleInfo(creatorUser);
+    const creatorName = creatorUser?.name || req.user.name || "Người lập";
+
+    const createdRecords = [];
 
     for (const item of items) {
-      const rawName = (item.userName || "").trim();
-      const targetUserId = item.userId || item.user;
-
       let targetUser = null;
-      if (targetUserId) {
-        targetUser = await User.findById(targetUserId)
-          .populate("department")
-          .populate("position");
+      let finalUserName = "";
+      let finalDeptId = null;
+      let finalDeptName = "";
+      let finalPositionId = null;
+      let finalPositionName = "Cán bộ";
+
+      if (isChuyenVien) {
+        // Chuyên viên: CHỈ ĐƯỢC ĐĂNG KÝ CHO CÁ NHÂN MÌNH
+        targetUser = creatorUser;
+        finalUserName = creatorUser.name;
+        finalDeptId = userDeptId;
+        finalDeptName = userDeptName;
+        finalPositionId = creatorUser.position?._id || null;
+        finalPositionName = creatorUser.position?.positionName || "Chuyên viên";
+      } else if (isCapTruong || isCapPho) {
+        // Cấp trưởng & Cấp phó: Đăng ký cho các thành viên trong đơn vị mình (hoặc người chưa có TK)
+        finalDeptId = userDeptId;
+        finalDeptName = userDeptName;
+        const targetUserId = item.userId || item.user;
+
+        if (targetUserId) {
+          targetUser = await User.findById(targetUserId)
+            .populate("department")
+            .populate("position");
+
+          if (targetUser) {
+            const tDeptId = targetUser.department?._id || targetUser.department;
+            if (tDeptId && userDeptId && tDeptId.toString() !== userDeptId.toString()) {
+              return res.status(403).json({
+                success: false,
+                message: `Cấp trưởng/phó chỉ được đăng ký cho nhân sự thuộc đơn vị mình. Nhân sự "${targetUser.name}" thuộc đơn vị khác.`,
+              });
+            }
+            finalUserName = targetUser.name;
+            finalPositionId = targetUser.position?._id || null;
+            finalPositionName = targetUser.position?.positionName || item.positionName || "Cán bộ";
+          }
+        } else {
+          // Chưa có tài khoản hệ thống (nhập tay)
+          finalUserName = (item.userName || "").trim();
+          finalPositionName = item.positionName || "Cán bộ";
+        }
+      } else {
+        // Manager / Admin / BGH: Được đăng ký cho bất kỳ ai và tất cả các đơn vị
+        const targetUserId = item.userId || item.user;
+        if (targetUserId) {
+          targetUser = await User.findById(targetUserId)
+            .populate("department")
+            .populate("position");
+        }
+        finalUserName = targetUser ? targetUser.name : (item.userName || "").trim();
+        finalDeptId = targetUser?.department?._id || item.department || null;
+        finalDeptName = targetUser?.department?.departmentName || item.departmentName || "";
+        finalPositionId = targetUser?.position?._id || item.position || null;
+        finalPositionName = targetUser?.position?.positionName || item.positionName || "Cán bộ";
       }
 
-      const finalUserName = targetUser ? targetUser.name : rawName;
       if (!finalUserName) {
         continue;
       }
-
-      // Xác định đơn vị: Cấp trưởng chỉ được đăng ký cho đơn vị mình
-      let finalDeptId = item.department || null;
-      let finalDeptName = item.departmentName || "";
-
-      if (!isManagerOrAdmin) {
-        finalDeptId = creatorDeptId || finalDeptId;
-        finalDeptName = creatorDeptName || finalDeptName;
-      } else if (targetUser?.department) {
-        finalDeptId = targetUser.department._id || finalDeptId;
-        finalDeptName = targetUser.department.departmentName || finalDeptName;
-      }
-
-      const finalPositionName = targetUser?.position?.positionName || item.positionName || "Cán bộ";
 
       const newReg = new TrainingRegistration({
         user: targetUser ? targetUser._id : null,
         userName: finalUserName,
         department: finalDeptId,
         departmentName: finalDeptName,
-        position: targetUser?.position?._id || item.position || null,
+        position: finalPositionId,
         positionName: finalPositionName,
         year: item.year || new Date().getFullYear().toString(),
         trainingContent: item.trainingContent || "",
@@ -198,12 +254,9 @@ const getRegistrations = async (req, res) => {
       .populate("department")
       .populate("position");
 
-    const isBGH = isUserBGH(currentUser);
-    const isAdmin = currentUser.role === "admin";
-    const isManager = currentUser.role === "manager";
-    const isAdminOrManagerOrBGH = isAdmin || isManager || isBGH;
-    const isCapTruong = currentUser.role === "captruong" || currentUser.role === "staff";
-    const isCapPho = currentUser.role === "cappho";
+    const { isBGH, isAdminOrManager, isCapTruong, isCapPho, isChuyenVien, userDeptId } =
+      getUserRoleInfo(currentUser);
+    const isAdminOrManagerOrBGH = isAdminOrManager || isBGH;
 
     const {
       year,
@@ -220,23 +273,25 @@ const getRegistrations = async (req, res) => {
 
     const query = {};
 
-    // 1. Phân quyền xem
-    if (!isAdminOrManagerOrBGH) {
-      if (isCapTruong || isCapPho) {
-        // Cấp trưởng / phó: xem của đơn vị mình HOẶC do mình lập HOẶC của chính mình
-        const userDeptId = currentUser.department?._id || currentUser.department;
-        query.$or = [
-          { department: userDeptId },
-          { createdByUser: currentUser._id },
-          { user: currentUser._id },
-        ];
-      } else {
-        // Chuyên viên / Nhân sự: chỉ xem của bản thân
-        query.user = currentUser._id;
+    // 1. Phân quyền xem dữ liệu
+    if (isChuyenVien) {
+      // Chuyên viên: CHỈ THẤY THÔNG TIN CỦA CÁ NHÂN MÌNH
+      query.user = currentUser._id;
+    } else if (isCapTruong || isCapPho) {
+      // Cấp trưởng, cấp phó: CHỈ THẤY DANH SÁCH TRONG ĐƠN VỊ MÌNH (hoặc do mình lập)
+      query.$or = [
+        { department: userDeptId },
+        { createdByUser: currentUser._id },
+        { user: currentUser._id },
+      ];
+    } else {
+      // Manager / BGH / Admin: Thấy tất cả, có thể lọc theo department nếu chọn
+      if (department) {
+        query.department = department;
       }
     }
 
-    // 2. Bộ lọc
+    // 2. Bộ lọc khác
     if (year) query.year = year;
     if (department) query.department = department;
     if (status) query.status = status;
@@ -514,12 +569,37 @@ const reportResult = async (req, res) => {
       return res.status(400).json({ success: false, message: "Hồ sơ phải được phê duyệt trước khi báo cáo kết quả." });
     }
 
-    const isTargetUser = record.user?.toString() === req.user._id.toString();
-    const isCreator = record.createdByUser?.toString() === req.user._id.toString();
-    const isAdminOrManager = ["admin", "manager"].includes(req.user.role);
+    const currentUser = await User.findById(req.user._id)
+      .populate("department")
+      .populate("position");
+    const { isBGH, isAdminOrManager, isCapTruong, isCapPho, isChuyenVien, userDeptId } =
+      getUserRoleInfo(currentUser);
 
-    if (!isTargetUser && !isCreator && !isAdminOrManager) {
-      return res.status(403).json({ success: false, message: "Bạn không có quyền báo cáo kết quả cho hồ sơ này." });
+    const isTargetUser = record.user?.toString() === currentUser._id.toString();
+    const isRecordInDept = record.department?.toString() === userDeptId?.toString();
+    const isCreator = record.createdByUser?.toString() === currentUser._id.toString();
+
+    if (isChuyenVien) {
+      // Chuyên viên: CHỈ ĐƯỢC BÁO CÁO KẾT QUẢ CHO CÁ NHÂN MÌNH
+      if (!isTargetUser) {
+        return res.status(403).json({
+          success: false,
+          message: "Chuyên viên chỉ có quyền báo cáo kết quả bồi dưỡng cho bản thân.",
+        });
+      }
+    } else if (isCapTruong || isCapPho) {
+      // Cấp trưởng & Cấp phó: Báo cáo cho các hồ sơ trong đơn vị mình hoặc do mình tạo/thuộc về mình
+      if (!isRecordInDept && !isCreator && !isTargetUser) {
+        return res.status(403).json({
+          success: false,
+          message: "Cấp trưởng/phó chỉ có quyền báo cáo kết quả cho nhân sự trong đơn vị mình.",
+        });
+      }
+    } else if (!isAdminOrManager && !isBGH) {
+      return res.status(403).json({
+        success: false,
+        message: "Bạn không có quyền báo cáo kết quả cho hồ sơ này.",
+      });
     }
 
     const isAttended = attended === true || attended === "true";
@@ -640,10 +720,30 @@ const uploadProofFiles = async (req, res) => {
  */
 const getStats = async (req, res) => {
   try {
+    const currentUser = await User.findById(req.user._id)
+      .populate("department")
+      .populate("position");
+    const { isBGH, isAdminOrManager, isCapTruong, isCapPho, isChuyenVien, userDeptId } =
+      getUserRoleInfo(currentUser);
+
     const { year, department } = req.query;
     const match = {};
     if (year) match.year = year;
-    if (department) match.department = new (require("mongoose").Types.ObjectId)(department);
+
+    if (isChuyenVien) {
+      // Chuyên viên: chỉ thống kê của cá nhân mình
+      match.user = currentUser._id;
+    } else if (isCapTruong || isCapPho) {
+      // Cấp trưởng & cấp phó: chỉ thống kê của đơn vị mình
+      if (userDeptId) {
+        match.department = new (require("mongoose").Types.ObjectId)(userDeptId);
+      }
+    } else {
+      // Manager / BGH / Admin: thống kê toàn trường hoặc theo department nếu có chọn
+      if (department) {
+        match.department = new (require("mongoose").Types.ObjectId)(department);
+      }
+    }
 
     const [allRecords, deptList] = await Promise.all([
       TrainingRegistration.find(match).lean(),
@@ -878,10 +978,28 @@ const getTemplateExcel = async (req, res) => {
  */
 const exportExcel = async (req, res) => {
   try {
+    const currentUser = await User.findById(req.user._id)
+      .populate("department")
+      .populate("position");
+    const { isBGH, isAdminOrManager, isCapTruong, isCapPho, isChuyenVien, userDeptId } =
+      getUserRoleInfo(currentUser);
+
     const { year, department, status, trainingForm, reportStatus, attended } = req.query;
     const query = {};
+
+    if (isChuyenVien) {
+      query.user = currentUser._id;
+    } else if (isCapTruong || isCapPho) {
+      query.$or = [
+        { department: userDeptId },
+        { createdByUser: currentUser._id },
+        { user: currentUser._id },
+      ];
+    } else {
+      if (department) query.department = department;
+    }
+
     if (year) query.year = year;
-    if (department) query.department = department;
     if (status) query.status = status;
     if (trainingForm) query.trainingForm = trainingForm;
     if (reportStatus) query["reportResult.status"] = reportStatus;
@@ -984,7 +1102,6 @@ const exportExcel = async (req, res) => {
           bottom: { style: "thin", color: { argb: "FFE2E8F0" } },
           right: { style: "thin", color: { argb: "FFE2E8F0" } },
         };
-        // Định dạng tiền tệ
         if (colNumber === 10 || colNumber === 15) {
           cell.numFmt = "#,##0";
           cell.alignment = { horizontal: "right", vertical: "middle" };
@@ -1020,6 +1137,20 @@ const importExcel = async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, message: "Vui lòng chọn file Excel để tải lên." });
+    }
+
+    const currentUser = await User.findById(req.user._id)
+      .populate("department")
+      .populate("position");
+    const { isBGH, isAdminOrManager, isCapTruong, isCapPho, isChuyenVien, userDeptId, userDeptName } =
+      getUserRoleInfo(currentUser);
+
+    if (isChuyenVien) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "Chuyên viên không được quyền import Excel danh sách bồi dưỡng. Vui lòng đăng ký trực tiếp trên giao diện cá nhân.",
+      });
     }
 
     const workbook = new ExcelJS.Workbook();
@@ -1085,13 +1216,21 @@ const importExcel = async (req, res) => {
         matchedUser = usersByName.get(rawUserName.toLowerCase());
       }
 
-      if (!matchedUser) {
-        errors.push(`Dòng ${rowNumber}: Không tìm thấy nhân sự "${userIdentifier || rawUserName}" trong hệ thống.`);
-        return;
+      // Nếu là Cấp trưởng/phó: kiểm tra nhân sự có thuộc đơn vị không
+      if (isCapTruong || isCapPho) {
+        if (matchedUser) {
+          const mDeptId = matchedUser.department?._id || matchedUser.department;
+          if (mDeptId && userDeptId && mDeptId.toString() !== userDeptId.toString()) {
+            errors.push(
+              `Dòng ${rowNumber}: Nhân sự "${matchedUser.name}" thuộc đơn vị khác. Cấp trưởng/phó chỉ được nạp nhân sự trong đơn vị mình.`
+            );
+            return;
+          }
+        }
       }
 
-      const matchedDept = rawDept ? deptsByName.get(rawDept.toLowerCase()) : matchedUser.department;
-      const matchedPos = rawPos ? positionsByName.get(rawPos.toLowerCase()) : matchedUser.position;
+      const matchedDept = rawDept ? deptsByName.get(rawDept.toLowerCase()) : matchedUser?.department;
+      const matchedPos = rawPos ? positionsByName.get(rawPos.toLowerCase()) : matchedUser?.position;
 
       const validForms = ["Chứng chỉ", "Chứng nhận", "Văn bằng", "Khác"];
       const finalForm = validForms.includes(rawForm) ? rawForm : "Chứng chỉ";
@@ -1100,13 +1239,21 @@ const importExcel = async (req, res) => {
       if (typeof rawCost === "number") costNum = rawCost;
       else if (rawCost) costNum = Number(String(rawCost).replace(/[^0-9.-]+/g, "")) || 0;
 
+      // Xác định đơn vị theo vai trò
+      const finalDeptId = (isCapTruong || isCapPho)
+        ? userDeptId
+        : (matchedDept?._id || matchedUser?.department?._id || null);
+      const finalDeptName = (isCapTruong || isCapPho)
+        ? userDeptName
+        : (matchedDept?.departmentName || matchedUser?.department?.departmentName || rawDept);
+
       validRows.push({
-        user: matchedUser._id,
-        userName: matchedUser.name,
-        department: matchedDept?._id || matchedUser.department?._id || null,
-        departmentName: matchedDept?.departmentName || matchedUser.department?.departmentName || rawDept,
-        position: matchedPos?._id || matchedUser.position?._id || null,
-        positionName: matchedPos?.positionName || matchedUser.position?.positionName || rawPos,
+        user: matchedUser ? matchedUser._id : null,
+        userName: matchedUser ? matchedUser.name : (rawUserName || userIdentifier),
+        department: finalDeptId,
+        departmentName: finalDeptName,
+        position: matchedPos?._id || matchedUser?.position?._id || null,
+        positionName: matchedPos?.positionName || matchedUser?.position?.positionName || rawPos || "Cán bộ",
         year: rawYear || new Date().getFullYear().toString(),
         trainingContent: rawContent,
         estimatedCost: costNum,
@@ -1137,6 +1284,8 @@ const importExcel = async (req, res) => {
         errors,
       });
     }
+
+    const inserted = await TrainingRegistration.insertMany(validRows);
 
     res.status(200).json({
       success: true,
