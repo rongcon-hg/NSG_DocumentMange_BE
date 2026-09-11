@@ -1694,6 +1694,178 @@ const confirmReportResult = async (req, res) => {
   }
 };
 
+/**
+ * 7.2. XÁC NHẬN KẾT QUẢ BỒI DƯỠNG NHIỀU HỒ SƠ CÙNG LÚC (BATCH)
+ */
+const batchConfirmReportResults = async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ success: false, message: "Vui lòng chọn ít nhất một hồ sơ để xác nhận." });
+    }
+
+    const { isAdminOrManager, isMaiAnhThy } = getUserRoleInfo(req.user);
+    if (!isAdminOrManager && !isMaiAnhThy) {
+      return res.status(403).json({ success: false, message: "Chỉ Manager/Admin/Mai Anh Thy mới có quyền xác nhận kết quả bồi dưỡng." });
+    }
+
+    const records = await TrainingRegistration.find({
+      _id: { $in: ids },
+      "reportResult.status": "REPORTED",
+      "reportResult.managerConfirmed": { $ne: true },
+    });
+
+    if (records.length === 0) {
+      return res.status(400).json({ success: false, message: "Không tìm thấy hồ sơ nào hợp lệ (đã nộp báo cáo chờ duyệt KQ) để xác nhận." });
+    }
+
+    const now = new Date();
+    const recipientIds = new Set();
+
+    for (const record of records) {
+      record.reportResult.managerConfirmed = true;
+      record.reportResult.confirmedBy = req.user._id;
+      record.reportResult.confirmedByName = req.user.name;
+      record.reportResult.confirmedAt = now;
+
+      record.history.push({
+        action: "Xác nhận kết quả bồi dưỡng",
+        actor: req.user._id,
+        actorName: req.user.name,
+        actorRole: req.user.role,
+        details: `${req.user.name} đã xác nhận kết quả báo cáo bồi dưỡng (Xác nhận hàng loạt).`,
+        timestamp: now,
+      });
+
+      await record.save();
+
+      if (record.user) recipientIds.add(record.user.toString());
+      if (record.reportResult?.reportedBy) recipientIds.add(record.reportResult.reportedBy.toString());
+      if (record.createdByUser) recipientIds.add(record.createdByUser.toString());
+    }
+
+    (async () => {
+      try {
+        recipientIds.delete(req.user._id.toString());
+        const notifs = Array.from(recipientIds).map((recId) => ({
+          recipient: recId,
+          sender: req.user._id,
+          type: "GENERAL",
+          title: "Xác nhận kết quả bồi dưỡng",
+          message: `Quản lý ${req.user.name} đã xác nhận kết quả báo cáo bồi dưỡng cho ${records.length} hồ sơ.`,
+          link: "/training/result-report",
+          isRead: false,
+          isPopupShown: false,
+        }));
+
+        if (notifs.length > 0) {
+          await Notification.insertMany(notifs);
+        }
+      } catch (notifyErr) {
+        console.error("Lỗi gửi thông báo batch confirm:", notifyErr);
+      }
+    })();
+
+    return res.status(200).json({
+      success: true,
+      message: `Đã xác nhận kết quả thành công cho ${records.length} hồ sơ.`,
+      count: records.length,
+    });
+  } catch (error) {
+    console.error("Lỗi batchConfirmReportResults:", error);
+    return res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });
+  }
+};
+
+/**
+ * 6.1. MANAGER PHÊ DUYỆT / TỪ CHỐI NHIỀU HỒ SƠ CÙNG LÚC (BATCH)
+ */
+const batchReviewRegistrations = async (req, res) => {
+  try {
+    const { ids, status, note } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ success: false, message: "Vui lòng chọn ít nhất một hồ sơ để xét duyệt." });
+    }
+
+    if (!["APPROVED", "REJECTED"].includes(status)) {
+      return res.status(400).json({ success: false, message: "Trạng thái phê duyệt không hợp lệ." });
+    }
+
+    const { isAdminOrManager, isMaiAnhThy } = getUserRoleInfo(req.user);
+    if (!isAdminOrManager && !isMaiAnhThy) {
+      return res.status(403).json({ success: false, message: "Chỉ Manager/Admin/Mai Anh Thy mới có quyền xét duyệt hồ sơ." });
+    }
+
+    const records = await TrainingRegistration.find({
+      _id: { $in: ids },
+      status: "PENDING",
+    });
+
+    if (records.length === 0) {
+      return res.status(400).json({ success: false, message: "Không tìm thấy hồ sơ nào đang chờ duyệt trong danh sách chọn." });
+    }
+
+    const now = new Date();
+    const recipientIds = new Set();
+
+    for (const record of records) {
+      record.status = status;
+      record.managerReview = {
+        status,
+        reviewedBy: req.user._id,
+        reviewedByName: req.user.name,
+        reviewedAt: now,
+        note: note || "",
+      };
+
+      record.history.push({
+        action: status === "APPROVED" ? "Phê duyệt" : "Từ chối",
+        actor: req.user._id,
+        actorName: req.user.name,
+        actorRole: isMaiAnhThy ? "Xét duyệt (Mai Anh Thy)" : req.user.role,
+        details: `${status === "APPROVED" ? "Phê duyệt" : "Từ chối"} hồ sơ đăng ký bồi dưỡng (Duyệt hàng loạt). ${note ? `Lý do: ${note}` : ""}`,
+        timestamp: now,
+      });
+
+      await record.save();
+
+      if (record.user) recipientIds.add(record.user.toString());
+      if (record.createdByUser) recipientIds.add(record.createdByUser.toString());
+    }
+
+    (async () => {
+      try {
+        recipientIds.delete(req.user._id.toString());
+        const notifs = Array.from(recipientIds).map((recId) => ({
+          recipient: recId,
+          sender: req.user._id,
+          type: "GENERAL",
+          title: status === "APPROVED" ? "Hồ sơ bồi dưỡng được duyệt" : "Hồ sơ bồi dưỡng bị từ chối",
+          message: `Hồ sơ đăng ký bồi dưỡng đã được ${req.user.name} ${status === "APPROVED" ? "phê duyệt" : "từ chối"}.`,
+          link: "/training/list",
+          isRead: false,
+          isPopupShown: false,
+        }));
+
+        if (notifs.length > 0) {
+          await Notification.insertMany(notifs);
+        }
+      } catch (notifyErr) {
+        console.error("Lỗi gửi thông báo batch review:", notifyErr);
+      }
+    })();
+
+    return res.status(200).json({
+      success: true,
+      message: `Đã ${status === "APPROVED" ? "phê duyệt" : "từ chối"} thành công ${records.length} hồ sơ.`,
+      count: records.length,
+    });
+  } catch (error) {
+    console.error("Lỗi batchReviewRegistrations:", error);
+    return res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });
+  }
+};
+
 module.exports = {
   createRegistrations,
   getRegistrations,
@@ -1701,8 +1873,10 @@ module.exports = {
   updateRegistration,
   deleteRegistration,
   reviewRegistration,
+  batchReviewRegistrations,
   reportResult,
   confirmReportResult,
+  batchConfirmReportResults,
   uploadProofFiles,
   getStats,
   getTemplateExcel,

@@ -22,10 +22,12 @@ router.get("/:id", verifyToken, controller.getRegistrationById);
 router.put("/:id", verifyToken, controller.updateRegistration);
 router.delete("/:id", verifyToken, controller.deleteRegistration);
 
-// 5. Manager xét duyệt
+// 5. Manager xét duyệt (đơn lẻ và hàng loạt)
+router.patch("/batch-review", verifyToken, controller.batchReviewRegistrations);
 router.patch("/:id/review", verifyToken, controller.reviewRegistration);
 
 // 6. Báo cáo kết quả bồi dưỡng sau khi học xong
+router.patch("/batch-confirm-results", verifyToken, controller.batchConfirmReportResults);
 router.patch("/:id/report", verifyToken, controller.reportResult);
 router.patch("/:id/confirm-result", verifyToken, controller.confirmReportResult);
 
