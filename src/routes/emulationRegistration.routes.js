@@ -10,6 +10,9 @@ router.post("/upload", verifyToken, upload.array("files", 10), controller.upload
 // Thống kê số liệu
 router.get("/stats", verifyToken, controller.getEmulationStats);
 
+// Số lượng hồ sơ chờ xử lý (cho chuông thông báo)
+router.get("/pending-count", verifyToken, controller.getEmulationPendingCount);
+
 // Lấy đơn của user hiện tại theo năm học
 router.get("/my-active", verifyToken, controller.getMyRegistration);
 

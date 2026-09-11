@@ -7,6 +7,10 @@ const User = require("../models/user.model");
 const Department = require("../models/department.model");
 const Position = require("../models/position.model");
 const DriveConfig = require("../models/driveConfig.model");
+const {
+  sendEmulationRegistrationEmail,
+  sendEmulationStatusEmail,
+} = require("../service/NodeMailer.service/email");
 
 // Helper: Kiểm tra User có phải BGH hay không
 const isUserBGH = (user) => {
@@ -487,6 +491,34 @@ const createRegistration = async (req, res) => {
       .populate("members.titles")
       .populate("attachedFiles.documentType");
 
+    // Gửi email thông báo cho Manager và người nộp hồ sơ (không chặn response)
+    (async () => {
+      try {
+        const managers = await User.find({
+          role: { $in: ["manager", "admin"] },
+        }).select("name email emailNotifications role");
+
+        const submitterUser = await User.findById(currentUser._id).select(
+          "name email emailNotifications role"
+        );
+
+        const recipientMap = new Map();
+        if (submitterUser && submitterUser.email) {
+          recipientMap.set(String(submitterUser._id), submitterUser);
+        }
+        managers.forEach((m) => {
+          if (m.email) {
+            recipientMap.set(String(m._id), m);
+          }
+        });
+
+        const recipients = Array.from(recipientMap.values());
+        await sendEmulationRegistrationEmail(recipients, populated, currentUser.name);
+      } catch (mailErr) {
+        console.error("Lỗi gửi email đăng ký thi đua:", mailErr);
+      }
+    })();
+
     res.status(201).json({
       success: true,
       message: "Gửi hồ sơ đề nghị thi đua thành công",
@@ -835,6 +867,65 @@ const reviewRegistration = async (req, res) => {
       .populate("bghReview.reviewedBy", "name")
       .populate("history.actor", "name role");
 
+    // Gửi email thông báo cập nhật trạng thái hồ sơ (không chặn response)
+    (async () => {
+      try {
+        const recipientMap = new Map();
+
+        // 1. Người nộp hồ sơ & Đại diện hồ sơ
+        const submitterIds = [reg.user, reg.createdByUser].filter(Boolean);
+        if (submitterIds.length > 0) {
+          const submitters = await User.find({ _id: { $in: submitterIds } }).select(
+            "name email emailNotifications role"
+          );
+          submitters.forEach((u) => {
+            if (u.email) recipientMap.set(String(u._id), u);
+          });
+        }
+
+        // 2. Nếu Manager duyệt chuyển BGH: Gửi thêm cho Ban Giám hiệu (HT, PHT, Admin)
+        if (action === "MANAGER_SUBMIT_BGH" || action === "MANAGER_APPROVE") {
+          const bghUsers = await User.find({
+            $or: [
+              { role: "admin" },
+              { "position.positionCode": { $in: ["HT", "PHT", "NHT"] } },
+            ],
+          })
+            .populate("position")
+            .populate("department")
+            .select("name email emailNotifications role position department");
+
+          bghUsers.forEach((u) => {
+            if (u.email && isUserBGH(u)) {
+              recipientMap.set(String(u._id), u);
+            }
+          });
+        }
+
+        // 3. Nếu Hiệu trưởng duyệt/từ chối hoặc Manager từ chối: Gửi cho Manager để nắm kết quả
+        if (action === "BGH_APPROVE" || action === "BGH_REJECT" || action === "MANAGER_REJECT") {
+          const managers = await User.find({
+            role: { $in: ["manager", "admin"] },
+          }).select("name email emailNotifications role");
+          managers.forEach((m) => {
+            if (m.email) recipientMap.set(String(m._id), m);
+          });
+        }
+
+        const recipients = Array.from(recipientMap.values());
+        await sendEmulationStatusEmail(
+          recipients,
+          updated,
+          action,
+          note,
+          currentUser.name,
+          currentUser.role === "admin" ? "Ban Lãnh đạo" : currentUser.position?.positionName || "Quản lý"
+        );
+      } catch (mailErr) {
+        console.error("Lỗi gửi email cập nhật trạng thái thi đua:", mailErr);
+      }
+    })();
+
     res.status(200).json({
       success: true,
       message: "Cập nhật trạng thái xét duyệt thành công",
@@ -974,6 +1065,82 @@ const getEmulationStats = async (req, res) => {
   }
 };
 
+// Lấy số lượng hồ sơ đề nghị thi đua đang chờ xử lý theo vai trò người dùng (cho chuông thông báo)
+const getEmulationPendingCount = async (req, res) => {
+  try {
+    const currentUser = await User.findById(req.user._id)
+      .populate("department")
+      .populate("position");
+
+    if (!currentUser) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    const isBGH = isUserBGH(currentUser);
+    const isManager = currentUser.role === "manager";
+    const isAdmin = currentUser.role === "admin";
+    const isManagerOrAdmin = isManager || isAdmin;
+
+    let pendingForManager = 0;
+    let pendingForBGH = 0;
+    let rejectedForUser = 0;
+
+    // 1. Đếm hồ sơ PENDING cho Manager và Admin
+    if (isManagerOrAdmin) {
+      pendingForManager = await EmulationRegistration.countDocuments({
+        status: "PENDING",
+      });
+    }
+
+    // 2. Đếm hồ sơ SUBMITTED_TO_BGH cho Ban Giám hiệu và Admin
+    if (isBGH || isAdmin) {
+      pendingForBGH = await EmulationRegistration.countDocuments({
+        status: "SUBMITTED_TO_BGH",
+      });
+    }
+
+    // 3. Đếm hồ sơ bị REJECTED của user hoặc đơn vị mình (cần chỉnh sửa nộp lại)
+    const userConditions = [
+      { user: currentUser._id },
+      { createdByUser: currentUser._id },
+    ];
+    if (currentUser.department?._id || currentUser.department) {
+      userConditions.push({
+        department: currentUser.department?._id || currentUser.department,
+      });
+    }
+
+    rejectedForUser = await EmulationRegistration.countDocuments({
+      status: "REJECTED",
+      $or: userConditions,
+    });
+
+    let totalActionableCount = 0;
+    if (isAdmin) {
+      totalActionableCount = pendingForManager + pendingForBGH;
+    } else if (isManager) {
+      totalActionableCount = pendingForManager;
+    } else if (isBGH) {
+      totalActionableCount = pendingForBGH;
+    } else {
+      totalActionableCount = rejectedForUser;
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        pendingForManager,
+        pendingForBGH,
+        rejectedForUser,
+        totalActionableCount,
+      },
+    });
+  } catch (error) {
+    console.error("Lỗi getEmulationPendingCount:", error);
+    res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });
+  }
+};
+
 module.exports = {
   uploadEmulationFile,
   getAllRegistrations,
@@ -985,4 +1152,5 @@ module.exports = {
   deleteBatchRegistrations,
   reviewRegistration,
   getEmulationStats,
+  getEmulationPendingCount,
 };

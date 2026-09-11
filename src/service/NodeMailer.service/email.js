@@ -1,4 +1,11 @@
-const { TEMPPASSWORD_EMAIL_TEMPLATE, NEW_DOCUMENT_EMAIL_TEMPLATE, TASK_NOTIFICATION_EMAIL_TEMPLATE, REVIEW_NOTIFICATION_EMAIL_TEMPLATE } = require("./emailTemplate");
+const {
+    TEMPPASSWORD_EMAIL_TEMPLATE,
+    NEW_DOCUMENT_EMAIL_TEMPLATE,
+    TASK_NOTIFICATION_EMAIL_TEMPLATE,
+    REVIEW_NOTIFICATION_EMAIL_TEMPLATE,
+    EMULATION_REGISTRATION_EMAIL_TEMPLATE,
+    EMULATION_STATUS_EMAIL_TEMPLATE
+} = require("./emailTemplate");
 const nodemailer = require("nodemailer");
 const dotenv = require("dotenv");
 const SmtpConfig = require("../../models/smtpConfig.model");
@@ -386,11 +393,203 @@ const sendReviewNotificationEmail = async (uniqueUsers, docData, actionType, not
     }
 }
 
+const sendEmulationRegistrationEmail = async (uniqueUsers, regData, creatorName = "Cán bộ") => {
+    try {
+        if (!uniqueUsers || uniqueUsers.length === 0) return;
+        const allowedUsers = uniqueUsers.filter(u => !u.emailNotifications || u.emailNotifications.emulationRegister !== false);
+        const bccList = allowedUsers.map(u => u.email).filter(e => !!e);
+        if (bccList.length === 0) return;
+
+        const { transporter, sender } = await getTransporterAndSender();
+
+        // Danh hiệu HTML
+        let titlesHtml = "";
+        if (regData.titles && regData.titles.length > 0) {
+            titlesHtml = regData.titles.map(t => {
+                const name = typeof t === "object" ? t.name : t;
+                return `<div style="margin: 3px 0; color: #b78103; font-weight: 600;">🏆 ${name}</div>`;
+            }).join('');
+        } else {
+            titlesHtml = "<i>Chưa chọn danh hiệu</i>";
+        }
+
+        // Thành viên HTML (nếu có)
+        let membersBlockHtml = "";
+        if (regData.members && regData.members.length > 0) {
+            const rows = regData.members.map((m, idx) => {
+                const memTitles = (m.titles || []).map(t => typeof t === "object" ? t.name : t).join(', ') || "--";
+                return `
+                    <tr style="border-bottom: 1px solid #eee;">
+                        <td style="padding: 6px 8px; text-align: center;">${idx + 1}</td>
+                        <td style="padding: 6px 8px; font-weight: 600;">${m.name}</td>
+                        <td style="padding: 6px 8px;">${m.positionName || "--"}</td>
+                        <td style="padding: 6px 8px;">${m.departmentName || "--"}</td>
+                        <td style="padding: 6px 8px; color: #b78103;">${memTitles}</td>
+                    </tr>
+                `;
+            }).join('');
+
+            membersBlockHtml = `
+                <div style="margin-top: 14px; padding-top: 12px; border-top: 1px dashed #e1e8ed;">
+                    <p style="margin: 6px 0;"><strong>Danh sách cá nhân đề nghị (${regData.members.length} người):</strong></p>
+                    <div style="overflow-x: auto;">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 6px;">
+                            <thead>
+                                <tr style="background-color: #f0f4f8; text-align: left;">
+                                    <th style="padding: 6px 8px; text-align: center;">STT</th>
+                                    <th style="padding: 6px 8px;">Họ và tên</th>
+                                    <th style="padding: 6px 8px;">Chức vụ</th>
+                                    <th style="padding: 6px 8px;">Đơn vị</th>
+                                    <th style="padding: 6px 8px;">Danh hiệu</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${rows}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Files đính kèm HTML
+        let linksHtml = "";
+        if (regData.attachedFiles && regData.attachedFiles.length > 0) {
+            linksHtml = regData.attachedFiles.map(f => {
+                const url = f.fileUrl || `https://drive.google.com/file/d/${f.fileId}/view`;
+                const typeName = f.documentTypeName || "Tài liệu minh chứng";
+                return `<li><a href="${url}" target="_blank" style="color: #1890ff; text-decoration: none;">📄 ${typeName}: ${f.fileName || 'Xem file'}</a></li>`;
+            }).join('');
+        } else {
+            linksHtml = "<li>Không có tệp đính kèm</li>";
+        }
+
+        const targetName = regData.name || regData.departmentName || "Đơn vị";
+        const schoolYear = regData.schoolYear || "N/A";
+        const subject = `[Đề nghị thi đua] ${targetName} - Năm học ${schoolYear}`;
+        const createdAtStr = new Date(regData.createdAt || Date.now()).toLocaleString('vi-VN');
+
+        let htmlContent = EMULATION_REGISTRATION_EMAIL_TEMPLATE
+            .replace(/{schoolYear}/g, schoolYear)
+            .replace(/{departmentName}/g, regData.departmentName || "Ban Giám hiệu / Nhà trường")
+            .replace(/{targetName}/g, targetName)
+            .replace(/{positionName}/g, regData.positionName || "Cán bộ")
+            .replace(/{creatorName}/g, creatorName)
+            .replace(/{createdAt}/g, createdAtStr)
+            .replace(/{titlesHtml}/g, titlesHtml)
+            .replace(/{membersBlockHtml}/g, membersBlockHtml)
+            .replace(/{notes}/g, regData.notes || "Không có")
+            .replace(/{linksHtml}/g, linksHtml);
+
+        const mailOptions = {
+            from: sender,
+            to: sender,
+            bcc: bccList.join(','),
+            subject: subject,
+            html: htmlContent,
+        };
+
+        await transporter.sendMail(mailOptions).catch(err => console.error(`Error sending emulation email:`, err));
+        return true;
+    } catch (error) {
+        console.error("Error in sendEmulationRegistrationEmail:", error);
+    }
+};
+
+const sendEmulationStatusEmail = async (uniqueUsers, regData, actionType, note = "", actorName = "Quản lý", actorRole = "Manager") => {
+    try {
+        if (!uniqueUsers || uniqueUsers.length === 0) return;
+        const allowedUsers = uniqueUsers.filter(u => !u.emailNotifications || u.emailNotifications.emulationRegister !== false);
+        const bccList = allowedUsers.map(u => u.email).filter(e => !!e);
+        if (bccList.length === 0) return;
+
+        const { transporter, sender } = await getTransporterAndSender();
+
+        let actionName = "Cập nhật xét duyệt";
+        let statusLabel = '<span style="color: #1890ff; font-weight: bold;">Đang xử lý</span>';
+        let headerColorStart = "#1890ff";
+        let headerColorEnd = "#096dd9";
+        let headerBorderColor = "#1890ff";
+
+        if (actionType === 'MANAGER_SUBMIT_BGH' || actionType === 'MANAGER_APPROVE') {
+            actionName = "Quản lý đã duyệt hồ sơ và chuyển Ban Giám hiệu";
+            statusLabel = '<span style="color: #fa8c16; font-weight: bold;">Đã chuyển Ban Giám hiệu phê duyệt</span>';
+            headerColorStart = "#fa8c16";
+            headerColorEnd = "#d46b08";
+            headerBorderColor = "#fa8c16";
+        } else if (actionType === 'MANAGER_REJECT') {
+            actionName = "Quản lý từ chối hồ sơ đề nghị thi đua";
+            statusLabel = '<span style="color: #f5222d; font-weight: bold;">Quản lý Từ chối / Cần chỉnh sửa</span>';
+            headerColorStart = "#f5222d";
+            headerColorEnd = "#cf1322";
+            headerBorderColor = "#f5222d";
+        } else if (actionType === 'BGH_APPROVE') {
+            actionName = "Hiệu trưởng đã phê duyệt công nhận danh hiệu thi đua";
+            statusLabel = '<span style="color: #52c41a; font-weight: bold;">Hiệu trưởng Phê duyệt Đạt</span>';
+            headerColorStart = "#52c41a";
+            headerColorEnd = "#389e0d";
+            headerBorderColor = "#52c41a";
+        } else if (actionType === 'BGH_REJECT') {
+            actionName = "Hiệu trưởng từ chối công nhận danh hiệu thi đua";
+            statusLabel = '<span style="color: #f5222d; font-weight: bold;">Hiệu trưởng Từ chối công nhận</span>';
+            headerColorStart = "#f5222d";
+            headerColorEnd = "#cf1322";
+            headerBorderColor = "#f5222d";
+        }
+
+        // Danh hiệu HTML
+        let titlesHtml = "";
+        if (regData.titles && regData.titles.length > 0) {
+            titlesHtml = regData.titles.map(t => {
+                const name = typeof t === "object" ? t.name : t;
+                return `<span style="display: inline-block; margin: 2px 4px; padding: 2px 8px; background: #fffbe6; border: 1px solid #ffe58f; border-radius: 4px; color: #b78103; font-size: 12px; font-weight: 600;">🏆 ${name}</span>`;
+            }).join('');
+        } else {
+            titlesHtml = "<i>Không có</i>";
+        }
+
+        const targetName = regData.name || regData.departmentName || "Đơn vị";
+        const schoolYear = regData.schoolYear || "N/A";
+        const actionTimeStr = new Date().toLocaleString('vi-VN');
+        const subject = `[${actionName}] ${targetName} - Năm học ${schoolYear}`;
+
+        let htmlContent = EMULATION_STATUS_EMAIL_TEMPLATE
+            .replace(/{actionName}/g, actionName)
+            .replace(/{departmentName}/g, regData.departmentName || "Ban Giám hiệu / Nhà trường")
+            .replace(/{targetName}/g, targetName)
+            .replace(/{schoolYear}/g, schoolYear)
+            .replace(/{statusLabel}/g, statusLabel)
+            .replace(/{actorName}/g, actorName)
+            .replace(/{actorRole}/g, actorRole)
+            .replace(/{actionTime}/g, actionTimeStr)
+            .replace(/{notes}/g, note || "Không có ý kiến bổ sung")
+            .replace(/{titlesHtml}/g, titlesHtml)
+            .replace(/{headerColorStart}/g, headerColorStart)
+            .replace(/{headerColorEnd}/g, headerColorEnd)
+            .replace(/{headerBorderColor}/g, headerBorderColor);
+
+        const mailOptions = {
+            from: sender,
+            to: sender,
+            bcc: bccList.join(','),
+            subject: subject,
+            html: htmlContent,
+        };
+
+        await transporter.sendMail(mailOptions).catch(err => console.error(`Error sending emulation status email:`, err));
+        return true;
+    } catch (error) {
+        console.error("Error in sendEmulationStatusEmail:", error);
+    }
+};
+
 module.exports = {
     sentTempPassword,
     sendRestoreOtpEmail,
     sendNewDocumentEmail,
     sendTaskReminderEmail,
     sendTaskNotificationEmail,
-    sendReviewNotificationEmail
-}
+    sendReviewNotificationEmail,
+    sendEmulationRegistrationEmail,
+    sendEmulationStatusEmail,
+};
