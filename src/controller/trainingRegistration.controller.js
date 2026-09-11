@@ -59,6 +59,26 @@ async function getOrCreateTrainingFolder(drive) {
   }
 }
 
+// === Helper: Check Special Privileged User (Mai Anh Thy) ===
+const isUserMaiAnhThy = (user) => {
+  if (!user) return false;
+  const name = (user.name || "").trim().toLowerCase();
+  const normalizedName = name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D");
+  if (normalizedName === "mai anh thy" || normalizedName.includes("mai anh thy")) return true;
+
+  const username = (user.username || "").trim().toLowerCase();
+  if (username === "maianhthy" || username.includes("maianhthy") || username === "thymaianh") return true;
+
+  const email = (user.email || "").trim().toLowerCase();
+  if (email.includes("maianhthy") || email.startsWith("thy") || email.includes("thiy")) return true;
+
+  return false;
+};
+
 // === Helper: Check User Role BGH ===
 const isUserBGH = (user) => {
   if (!user) return false;
@@ -74,20 +94,23 @@ const getUserRoleInfo = (user) => {
   if (!user) return {};
   const isBGH = isUserBGH(user);
   const isAdminOrManager = ["admin", "manager"].includes(user?.role);
+  const isMaiAnhThy = isUserMaiAnhThy(user);
   const posName = (user?.position?.positionName || "").toLowerCase();
   const isCapTruong =
+    !isMaiAnhThy &&
     !isBGH &&
     !isAdminOrManager &&
     (user?.role === "staff" || user?.role === "captruong" || posName.includes("trưởng"));
   const isCapPho =
+    !isMaiAnhThy &&
     !isBGH &&
     !isAdminOrManager &&
     !isCapTruong &&
     (user?.role === "cappho" || posName.includes("phó"));
-  const isChuyenVien = !isBGH && !isAdminOrManager && !isCapTruong && !isCapPho;
+  const isChuyenVien = !isMaiAnhThy && !isBGH && !isAdminOrManager && !isCapTruong && !isCapPho;
   const userDeptId = user?.department?._id || user?.department;
   const userDeptName = user?.department?.departmentName || user?.departmentName || "";
-  return { isBGH, isAdminOrManager, isCapTruong, isCapPho, isChuyenVien, userDeptId, userDeptName };
+  return { isBGH, isAdminOrManager, isMaiAnhThy, isCapTruong, isCapPho, isChuyenVien, userDeptId, userDeptName };
 };
 
 /**
@@ -265,9 +288,9 @@ const getRegistrations = async (req, res) => {
       .populate("department")
       .populate("position");
 
-    const { isBGH, isAdminOrManager, isCapTruong, isCapPho, isChuyenVien, userDeptId } =
+    const { isBGH, isAdminOrManager, isMaiAnhThy, isCapTruong, isCapPho, isChuyenVien, userDeptId } =
       getUserRoleInfo(currentUser);
-    const isAdminOrManagerOrBGH = isAdminOrManager || isBGH;
+    const isAdminOrManagerOrBGH = isAdminOrManager || isBGH || isMaiAnhThy;
 
     const {
       year,
@@ -465,12 +488,20 @@ const deleteRegistration = async (req, res) => {
     const isCreator = record.createdByUser?.toString() === req.user._id.toString();
     const isAdmin = req.user.role === "admin";
 
-    if (!isCreator && !isAdmin) {
-      return res.status(403).json({ success: false, message: "Bạn không có quyền xóa hồ sơ này." });
-    }
-
-    if (record.status !== "PENDING" && !isAdmin) {
-      return res.status(400).json({ success: false, message: "Hồ sơ đã được duyệt, không thể xóa." });
+    // Nếu hồ sơ đã duyệt hoặc không ở trạng thái PENDING: CHỈ ADMIN MỚI ĐƯỢC XÓA
+    if (record.status !== "PENDING") {
+      if (!isAdmin) {
+        return res.status(403).json({
+          success: false,
+          message: "Hồ sơ đã được duyệt. Chỉ quản trị viên (Admin) mới có quyền xóa.",
+        });
+      }
+    } else {
+      // Khi status === "PENDING": Người tạo, Manager hoặc Admin mới được xóa
+      const isAdminOrManager = ["admin", "manager"].includes(req.user.role);
+      if (!isCreator && !isAdminOrManager) {
+        return res.status(403).json({ success: false, message: "Bạn không có quyền xóa hồ sơ này." });
+      }
     }
 
     await TrainingRegistration.findByIdAndDelete(id);
@@ -483,7 +514,7 @@ const deleteRegistration = async (req, res) => {
 };
 
 /**
- * 6. MANAGER / ADMIN XÉT DUYỆT HỒ SƠ
+ * 6. MANAGER / ADMIN / MAI ANH THY XÉT DUYỆT HỒ SƠ
  */
 const reviewRegistration = async (req, res) => {
   try {
@@ -492,6 +523,14 @@ const reviewRegistration = async (req, res) => {
 
     if (!["APPROVED", "REJECTED"].includes(status)) {
       return res.status(400).json({ success: false, message: "Trạng thái phê duyệt không hợp lệ (chỉ chấp nhận APPROVED hoặc REJECTED)." });
+    }
+
+    const currentUser = await User.findById(req.user._id)
+      .populate("department")
+      .populate("position");
+    const { isAdminOrManager, isMaiAnhThy } = getUserRoleInfo(currentUser || req.user);
+    if (!isAdminOrManager && !isMaiAnhThy) {
+      return res.status(403).json({ success: false, message: "Bạn không có quyền xét duyệt hồ sơ này." });
     }
 
     const record = await TrainingRegistration.findById(id);
