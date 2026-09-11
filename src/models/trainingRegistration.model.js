@@ -202,6 +202,25 @@ const trainingRegistrationSchema = new mongoose.Schema(
         type: Number,
         default: 0,
       },
+      // Thông tin văn bằng / chứng chỉ sau khi học xong
+      certificateNumber: {
+        type: String,
+        default: "",
+        trim: true,
+      },
+      issueDate: {
+        type: Date,
+      },
+      issuePlace: {
+        type: String,
+        default: "",
+        trim: true,
+      },
+      actualTrainingDuration: {
+        type: String,
+        default: "",
+        trim: true,
+      },
       proofFiles: [attachedProofSchema],
       reportedBy: {
         type: mongoose.Schema.Types.ObjectId,

@@ -713,6 +713,10 @@ const reportResult = async (req, res) => {
       resultDetails,
       hasFundingSupport,
       actualFundAmount,
+      certificateNumber,
+      issueDate,
+      issuePlace,
+      actualTrainingDuration,
       proofFiles,
     } = req.body;
 
@@ -767,6 +771,10 @@ const reportResult = async (req, res) => {
       resultDetails: isAttended ? (resultDetails || "").trim() : "",
       hasFundingSupport: isAttended ? Boolean(hasFundingSupport) : false,
       actualFundAmount: isAttended ? Number(actualFundAmount) || 0 : 0,
+      certificateNumber: isAttended ? (certificateNumber || "").trim() : "",
+      issueDate: isAttended && issueDate ? new Date(issueDate) : null,
+      issuePlace: isAttended ? (issuePlace || "").trim() : "",
+      actualTrainingDuration: isAttended ? (actualTrainingDuration || "").trim() : "",
       proofFiles: isAttended && Array.isArray(proofFiles) ? proofFiles : [],
       reportedBy: req.user._id,
       reportedByName: req.user.name,
@@ -1288,6 +1296,10 @@ const exportExcel = async (req, res) => {
       { header: "Ý kiến duyệt", key: "reviewNote", width: 25 },
       { header: "Tình trạng học", key: "attendedStatus", width: 18 },
       { header: "Kết quả bồi dưỡng", key: "resultDetails", width: 25 },
+      { header: "Số hiệu CC/VB", key: "certificateNumber", width: 20 },
+      { header: "Ngày cấp", key: "issueDate", width: 15 },
+      { header: "Nơi cấp", key: "issuePlace", width: 28 },
+      { header: "Thời gian đào tạo thực tế", key: "actualTrainingDuration", width: 24 },
       { header: "Hỗ trợ kinh phí", key: "fundingSupport", width: 18 },
       { header: "Kinh phí hỗ trợ thực tế (VNĐ)", key: "actualFundAmount", width: 25 },
       { header: "Xác nhận kết quả", key: "managerConfirmed", width: 18 },
@@ -1365,6 +1377,10 @@ const exportExcel = async (req, res) => {
         reviewNote: r.managerReview?.note || "",
         attendedStatus: attendedText,
         resultDetails: r.reportResult?.resultDetails || "",
+        certificateNumber: r.reportResult?.certificateNumber || "",
+        issueDate: formatDateVi(r.reportResult?.issueDate),
+        issuePlace: r.reportResult?.issuePlace || "",
+        actualTrainingDuration: r.reportResult?.actualTrainingDuration || "",
         fundingSupport: fundingText,
         actualFundAmount: r.reportResult?.actualFundAmount || 0,
         managerConfirmed: confirmedText,
@@ -1380,13 +1396,13 @@ const exportExcel = async (req, res) => {
           bottom: { style: "thin", color: { argb: "FFE2E8F0" } },
           right: { style: "thin", color: { argb: "FFE2E8F0" } },
         };
-        // Số tiền
-        if (colNumber === 12 || colNumber === 21) {
+        // Số tiền: Kinh phí dự kiến (cột 12), Kinh phí thực tế (cột 25)
+        if (colNumber === 12 || colNumber === 25) {
           cell.numFmt = "#,##0";
           cell.alignment = { horizontal: "right", vertical: "middle" };
         } else if (
-          // Căn giữa: STT, Năm, Từ ngày, Đến ngày, Ngày đăng ký, Trạng thái, Xác nhận
-          [1, 5, 10, 11, 14, 15, 22].includes(colNumber)
+          // Căn giữa: STT(1), Năm(5), Từ ngày(10), Đến ngày(11), Ngày đăng ký(14), Trạng thái(15), Ngày cấp(20), Xác nhận(26)
+          [1, 5, 10, 11, 14, 15, 20, 26].includes(colNumber)
         ) {
           cell.alignment = { horizontal: "center", vertical: "middle" };
         } else {
