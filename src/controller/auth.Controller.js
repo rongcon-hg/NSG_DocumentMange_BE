@@ -472,9 +472,96 @@ const deleteAvatar = async (req, res) => {
   }
 };
 
+const importUsers = async (req, res) => {
+  try {
+    const { users } = req.body;
+    if (!users || !Array.isArray(users) || users.length === 0) {
+      return res.status(400).json({ success: false, message: "Danh sách người dùng không hợp lệ hoặc rỗng" });
+    }
+
+    const createdUsers = [];
+    const errors = [];
+
+    for (let i = 0; i < users.length; i++) {
+      const u = users[i];
+      const rowIndex = i + 1;
+      const email = u.email ? String(u.email).trim().toLowerCase() : "";
+      const name = u.name ? String(u.name).trim() : "";
+      const mobile = u.mobile ? String(u.mobile).trim() : "";
+      const password = u.password ? String(u.password).trim() : "123456";
+      const department = u.department;
+      const position = u.position;
+      const role = u.role ? String(u.role).trim().toLowerCase() : "staff";
+      const description = u.description ? String(u.description).trim() : "";
+
+      if (!name || !email || !mobile) {
+        errors.push({ row: rowIndex, email, message: "Thiếu Họ tên, Email hoặc Số điện thoại" });
+        continue;
+      }
+
+      if (!department) {
+        errors.push({ row: rowIndex, email, message: "Chưa xác định Đơn vị / Phòng ban hợp lệ" });
+        continue;
+      }
+
+      if (!position) {
+        errors.push({ row: rowIndex, email, message: "Chưa xác định Chức vụ hợp lệ" });
+        continue;
+      }
+
+      if (!VALID_ROLES.includes(role)) {
+        errors.push({ row: rowIndex, email, message: `Vai trò '${role}' không hợp lệ. Cho phép: ${VALID_ROLES.join(", ")}` });
+        continue;
+      }
+
+      // Kiểm tra trùng email trong DB
+      const existingUser = await User.findOne({ email });
+      if (existingUser) {
+        errors.push({ row: rowIndex, email, message: `Email '${email}' đã tồn tại trong hệ thống` });
+        continue;
+      }
+
+      // Kiểm tra trùng email trong cùng danh sách import
+      if (createdUsers.some((cu) => cu.email === email)) {
+        errors.push({ row: rowIndex, email, message: `Email '${email}' bị trùng lặp trong danh sách import` });
+        continue;
+      }
+
+      try {
+        const newUser = await User.create({
+          name,
+          email,
+          password,
+          mobile,
+          department,
+          position,
+          role,
+          description,
+        });
+        createdUsers.push({ _id: newUser._id, name: newUser.name, email: newUser.email });
+      } catch (createErr) {
+        errors.push({ row: rowIndex, email, message: createErr.message || "Lỗi khi tạo tài khoản" });
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Đã nhập thành công ${createdUsers.length} người dùng${errors.length > 0 ? `, ${errors.length} dòng lỗi` : ""}`,
+      createdCount: createdUsers.length,
+      errorCount: errors.length,
+      createdUsers,
+      errors,
+    });
+  } catch (error) {
+    console.error("Lỗi importUsers:", error);
+    return res.status(500).json({ success: false, message: "Lỗi máy chủ khi import người dùng", error: error.message });
+  }
+};
+
 module.exports = {
     signin,
     createUser,
+    importUsers,
     reqResetPass,
     verrifyCode,
     resetPassword,

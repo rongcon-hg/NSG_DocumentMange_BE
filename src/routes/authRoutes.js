@@ -10,6 +10,7 @@ router.get('/avatar/:fileId', authController.getAvatarImage);
 router.delete('/avatar', verifyToken, authController.deleteAvatar);
 
 router.post('/createUser',verifyManager,authController.createUser)
+router.post('/importUsers',verifyManager,authController.importUsers)
 router.post('/signin',authController.signin)
 router.post('/reqResetPass',authController.reqResetPass)
 router.post('/verifyCode',authController.verrifyCode)
