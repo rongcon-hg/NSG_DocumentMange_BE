@@ -246,6 +246,116 @@ const EMULATION_STATUS_EMAIL_TEMPLATE = `
 </html>
 `;
 
+const TRAINING_REGISTRATION_EMAIL_TEMPLATE = `
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Thông Báo: Đăng Ký Học Tập Bồi Dưỡng Mới</title>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 680px; margin: 0 auto; padding: 20px;">
+  <div style="background: linear-gradient(to right, #1d4ed8, #3b82f6); padding: 22px; text-align: center; border-radius: 8px 8px 0 0;">
+    <h1 style="color: #fff; margin: 0; font-size: 20px; text-transform: uppercase; letter-spacing: 0.5px;">Thông Báo: Đăng Ký Học Tập Bồi Dưỡng</h1>
+  </div>
+  <div style="background-color: #f9fbfd; padding: 24px; border-radius: 0 0 8px 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid #e1e8ed; border-top: none;">
+    <p>Kính chào Quý Thầy/Cô,</p>
+    <p>Hệ thống Quản lý văn bản NSG vừa ghi nhận <strong>kế hoạch học tập bồi dưỡng mới</strong> được đăng ký trên hệ thống:</p>
+    
+    <div style="background: #fff; padding: 18px; border-left: 4px solid #2563eb; margin: 20px 0; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+      <p style="margin: 6px 0;"><strong>Năm đào tạo:</strong> <span style="color: #1d4ed8; font-weight: bold;">{year}</span></p>
+      <p style="margin: 6px 0;"><strong>Người lập hồ sơ:</strong> {creatorName}</p>
+      <p style="margin: 6px 0;"><strong>Thời gian gửi:</strong> {createdAt}</p>
+      
+      <div style="margin-top: 14px; padding-top: 12px; border-top: 1px dashed #e1e8ed;">
+        <p style="margin: 6px 0;"><strong>Danh sách bồi dưỡng ({itemsCount} lượt đăng ký):</strong></p>
+        <div style="overflow-x: auto;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 6px;">
+            <thead>
+              <tr style="background-color: #f0f4f8; text-align: left;">
+                <th style="padding: 6px 8px; text-align: center;">STT</th>
+                <th style="padding: 6px 8px;">Nhân sự</th>
+                <th style="padding: 6px 8px;">Đơn vị</th>
+                <th style="padding: 6px 8px;">Nội dung bồi dưỡng</th>
+                <th style="padding: 6px 8px;">Hình thức</th>
+                <th style="padding: 6px 8px; text-align: right;">Kinh phí dự kiến</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recordsTableRows}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {notesBlock}
+    </div>
+
+    <div style="text-align: center; margin: 25px 0;">
+      <a href="https://qlvb.namsaigon.edu.vn/training/list" target="_blank" style="background-color: #2563eb; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block; box-shadow: 0 2px 4px rgba(37,99,235,0.3);">
+        Xem và Xét duyệt hồ sơ trên hệ thống
+      </a>
+    </div>
+
+    <p style="font-size: 13px; color: #666;">Vui lòng đăng nhập vào hệ thống để xem chi tiết và thực hiện các bước xét duyệt / theo dõi.</p>
+    <p style="margin-top: 20px;">Trân trọng,<br><strong>Hệ thống Quản lý văn bản NSG</strong></p>
+  </div>
+  <div style="text-align: center; margin-top: 15px; color: #888; font-size: 11px;">
+    <p>Đây là email tự động từ hệ thống Quản lý văn bản NSG, vui lòng không trả lời trực tiếp email này.</p>
+  </div>
+</body>
+</html>
+`;
+
+const TRAINING_STATUS_EMAIL_TEMPLATE = `
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Thông báo: {actionName}</title>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 650px; margin: 0 auto; padding: 20px;">
+  <div style="background: linear-gradient(to right, {headerColorStart}, {headerColorEnd}); padding: 22px; text-align: center; border-radius: 8px 8px 0 0;">
+    <h1 style="color: #fff; margin: 0; font-size: 20px; text-transform: uppercase; letter-spacing: 0.5px;">Thông Báo: {actionName}</h1>
+  </div>
+  <div style="background-color: #f9fbfd; padding: 24px; border-radius: 0 0 8px 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid #e1e8ed; border-top: none;">
+    <p>Kính chào Quý Thầy/Cô,</p>
+    <p>Hệ thống Quản lý văn bản NSG xin thông báo cập nhật về hồ sơ học tập bồi dưỡng:</p>
+    
+    <div style="background: #fff; padding: 18px; border-left: 4px solid {headerBorderColor}; margin: 20px 0; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+      <p style="margin: 6px 0;"><strong>Nhân sự bồi dưỡng:</strong> <span style="font-weight: bold;">{userName}</span> ({positionName})</p>
+      <p style="margin: 6px 0;"><strong>Đơn vị / Phòng ban:</strong> {departmentName}</p>
+      <p style="margin: 6px 0;"><strong>Nội dung bồi dưỡng:</strong> <span style="color: #1d4ed8; font-weight: bold;">{trainingContent}</span></p>
+      <p style="margin: 6px 0;"><strong>Hình thức đào tạo:</strong> {trainingForm} | <strong>Năm:</strong> {year}</p>
+      <p style="margin: 6px 0;"><strong>Trạng thái hồ sơ:</strong> {statusLabel}</p>
+      <p style="margin: 6px 0;"><strong>Người thực hiện:</strong> {actorName} ({actorRole})</p>
+      <p style="margin: 6px 0;"><strong>Thời gian:</strong> {actionTime}</p>
+      
+      {extraDetailsHtml}
+
+      <div style="margin-top: 14px; padding-top: 12px; border-top: 1px dashed #e1e8ed;">
+        <p style="margin: 6px 0;"><strong>Ý kiến / Ghi chú:</strong></p>
+        <div style="background-color: #f5f5f5; padding: 10px 14px; border-radius: 4px; font-style: italic; color: #444;">
+          {notes}
+        </div>
+      </div>
+    </div>
+
+    <div style="text-align: center; margin: 25px 0;">
+      <a href="{actionUrl}" target="_blank" style="background-color: {headerBorderColor}; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
+        Xem chi tiết hồ sơ trên hệ thống
+      </a>
+    </div>
+
+    <p style="font-size: 13px; color: #666;">Vui lòng đăng nhập vào hệ thống để theo dõi và thực hiện các bước tiếp theo.</p>
+    <p style="margin-top: 20px;">Trân trọng,<br><strong>Hệ thống Quản lý văn bản NSG</strong></p>
+  </div>
+  <div style="text-align: center; margin-top: 15px; color: #888; font-size: 11px;">
+    <p>Đây là email tự động từ hệ thống Quản lý văn bản NSG, vui lòng không trả lời trực tiếp email này.</p>
+  </div>
+</body>
+</html>
+`;
+
 module.exports = {
   TEMPPASSWORD_EMAIL_TEMPLATE,
   NEW_DOCUMENT_EMAIL_TEMPLATE,
@@ -253,4 +363,6 @@ module.exports = {
   REVIEW_NOTIFICATION_EMAIL_TEMPLATE,
   EMULATION_REGISTRATION_EMAIL_TEMPLATE,
   EMULATION_STATUS_EMAIL_TEMPLATE,
+  TRAINING_REGISTRATION_EMAIL_TEMPLATE,
+  TRAINING_STATUS_EMAIL_TEMPLATE,
 };

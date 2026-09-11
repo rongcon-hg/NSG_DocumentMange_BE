@@ -7,6 +7,10 @@ const DriveConfig = require("../models/driveConfig.model");
 const { google } = require("googleapis");
 const { Readable } = require("stream");
 const ExcelJS = require("exceljs");
+const {
+  sendTrainingRegistrationEmail,
+  sendTrainingStatusEmail,
+} = require("../service/NodeMailer.service/email");
 
 // === Helper: Google Drive Authorization ===
 async function authorizeDrive() {
@@ -111,6 +115,23 @@ const getUserRoleInfo = (user) => {
   const userDeptId = user?.department?._id || user?.department;
   const userDeptName = user?.department?.departmentName || user?.departmentName || "";
   return { isBGH, isAdminOrManager, isMaiAnhThy, isCapTruong, isCapPho, isChuyenVien, userDeptId, userDeptName };
+};
+
+// === Helper: Lấy danh sách Manager, Admin và tài khoản đặc quyền Mai Anh Thy ===
+const getManagerAndThyUsers = async () => {
+  try {
+    const users = await User.find({
+      $or: [
+        { role: { $in: ["admin", "manager"] } },
+        { name: /Mai Anh Thy/i },
+        { username: /maianhthy/i },
+      ],
+    }).select("_id name email emailNotifications role");
+    return users;
+  } catch (err) {
+    console.error("Lỗi getManagerAndThyUsers:", err);
+    return [];
+  }
 };
 
 /**
@@ -244,29 +265,78 @@ const createRegistrations = async (req, res) => {
       createdRecords.push(saved);
     }
 
-    // Gửi thông báo chuông cho Manager và Admin về việc có đăng ký bồi dưỡng mới
-    try {
-      const managersAndAdmins = await User.find({
-        role: { $in: ["admin", "manager"] },
-        _id: { $ne: creatorId },
-      }).select("_id");
+    // Gửi thông báo chuông và email thông báo (bất đồng bộ, không chặn response)
+    (async () => {
+      try {
+        const managersAndThy = await getManagerAndThyUsers();
 
-      if (managersAndAdmins.length > 0 && createdRecords.length > 0) {
-        const notifs = managersAndAdmins.map((m) => ({
-          recipient: m._id,
-          sender: creatorId,
-          type: "GENERAL",
-          title: "Đăng ký học tập bồi dưỡng mới",
-          message: `${creatorName} vừa gửi ${createdRecords.length} hồ sơ đăng ký bồi dưỡng cần xác nhận/phê duyệt.`,
-          link: "/training/list?status=PENDING",
-          isRead: false,
-          isPopupShown: false,
-        }));
-        await Notification.insertMany(notifs);
+        // 1. Chuông thông báo
+        const notifs = [];
+        // Gửi cho Manager/Admin/Mai Anh Thy
+        managersAndThy.forEach((m) => {
+          if (m._id.toString() !== creatorId.toString()) {
+            notifs.push({
+              recipient: m._id,
+              sender: creatorId,
+              type: "GENERAL",
+              title: "Đăng ký học tập bồi dưỡng mới",
+              message: `${creatorName} vừa gửi ${createdRecords.length} hồ sơ đăng ký bồi dưỡng cần xét duyệt.`,
+              link: "/training/list?status=PENDING",
+              isRead: false,
+              isPopupShown: false,
+            });
+          }
+        });
+
+        // Gửi chuông cho người được đăng ký (nếu được đăng ký hộ)
+        createdRecords.forEach((r) => {
+          if (r.user && r.user.toString() !== creatorId.toString()) {
+            notifs.push({
+              recipient: r.user,
+              sender: creatorId,
+              type: "GENERAL",
+              title: "Đăng ký kế hoạch bồi dưỡng",
+              message: `Bạn đã được ${creatorName} đăng ký tham gia khóa bồi dưỡng "${r.trainingContent}" (${r.year}).`,
+              link: "/training/list",
+              isRead: false,
+              isPopupShown: false,
+            });
+          }
+        });
+
+        if (notifs.length > 0) {
+          await Notification.insertMany(notifs);
+        }
+
+        // 2. Email thông báo
+        const recipientMap = new Map();
+        managersAndThy.forEach((m) => {
+          if (m.email) recipientMap.set(m._id.toString(), m);
+        });
+        if (creatorUser && creatorUser.email) {
+          recipientMap.set(creatorUser._id.toString(), creatorUser);
+        }
+
+        // Thêm nhân sự được đăng ký nếu có tài khoản email
+        const targetUserIds = createdRecords.map((r) => r.user).filter((id) => !!id);
+        if (targetUserIds.length > 0) {
+          const registeredUsers = await User.find({ _id: { $in: targetUserIds } }).select(
+            "_id name email emailNotifications role"
+          );
+          registeredUsers.forEach((u) => {
+            if (u.email) recipientMap.set(u._id.toString(), u);
+          });
+        }
+
+        await sendTrainingRegistrationEmail(
+          Array.from(recipientMap.values()),
+          createdRecords,
+          creatorName
+        );
+      } catch (notifyErr) {
+        console.error("Lỗi gửi thông báo / email đăng ký bồi dưỡng:", notifyErr);
       }
-    } catch (notifErr) {
-      console.error("Lỗi gửi thông báo đăng ký bồi dưỡng:", notifErr);
-    }
+    })();
 
     res.status(201).json({
       success: true,
@@ -559,30 +629,48 @@ const reviewRegistration = async (req, res) => {
 
     await record.save();
 
-    // Gửi thông báo chuông cho nhân sự và cấp trưởng lập hồ sơ
-    try {
-      const recipientIds = new Set();
-      if (record.user) recipientIds.add(record.user.toString());
-      if (record.createdByUser) recipientIds.add(record.createdByUser.toString());
-      recipientIds.delete(req.user._id.toString());
+    // Gửi thông báo chuông và email thông báo xét duyệt (bất đồng bộ)
+    (async () => {
+      try {
+        const recipientIds = new Set();
+        if (record.user) recipientIds.add(record.user.toString());
+        if (record.createdByUser) recipientIds.add(record.createdByUser.toString());
+        recipientIds.delete(req.user._id.toString());
 
-      const notifs = Array.from(recipientIds).map((recId) => ({
-        recipient: recId,
-        sender: req.user._id,
-        type: "GENERAL",
-        title: status === "APPROVED" ? "Hồ sơ bồi dưỡng đã được phê duyệt" : "Hồ sơ bồi dưỡng bị từ chối",
-        message: `Hồ sơ bồi dưỡng "${record.trainingContent}" của ${record.userName} đã được Manager ${statusLabel.toLowerCase()}.${note ? ` (Ghi chú: ${note})` : ""}`,
-        link: "/training/list",
-        isRead: false,
-        isPopupShown: false,
-      }));
+        // 1. Chuông thông báo
+        const notifs = Array.from(recipientIds).map((recId) => ({
+          recipient: recId,
+          sender: req.user._id,
+          type: "GENERAL",
+          title: status === "APPROVED" ? "Hồ sơ bồi dưỡng đã được phê duyệt" : "Hồ sơ bồi dưỡng bị từ chối",
+          message: `Hồ sơ bồi dưỡng "${record.trainingContent}" của ${record.userName} đã được ${req.user.name} ${statusLabel.toLowerCase()}.${note ? ` (Ghi chú: ${note})` : ""}`,
+          link: "/training/list",
+          isRead: false,
+          isPopupShown: false,
+        }));
 
-      if (notifs.length > 0) {
-        await Notification.insertMany(notifs);
+        if (notifs.length > 0) {
+          await Notification.insertMany(notifs);
+        }
+
+        // 2. Email thông báo
+        if (recipientIds.size > 0) {
+          const emailUsers = await User.find({ _id: { $in: Array.from(recipientIds) } }).select(
+            "_id name email emailNotifications role"
+          );
+          await sendTrainingStatusEmail(
+            emailUsers,
+            record,
+            status === "APPROVED" ? "REVIEW_APPROVED" : "REVIEW_REJECTED",
+            note,
+            req.user.name,
+            isMaiAnhThy ? "Xét duyệt (Mai Anh Thy)" : req.user.role
+          );
+        }
+      } catch (notifyErr) {
+        console.error("Lỗi gửi thông báo / email xét duyệt bồi dưỡng:", notifyErr);
       }
-    } catch (notifErr) {
-      console.error("Lỗi gửi thông báo xét duyệt bồi dưỡng:", notifErr);
-    }
+    })();
 
     res.status(200).json({
       success: true,
@@ -681,25 +769,73 @@ const reportResult = async (req, res) => {
 
     await record.save();
 
-    // Gửi thông báo chuông cho Manager về việc có báo cáo kết quả mới
-    try {
-      const managers = await User.find({ role: { $in: ["admin", "manager"] } }).select("_id");
-      if (managers.length > 0) {
-        const notifs = managers.map((m) => ({
-          recipient: m._id,
-          sender: req.user._id,
-          type: "GENERAL",
-          title: "Báo cáo kết quả bồi dưỡng mới",
-          message: `${req.user.name} đã gửi báo cáo kết quả bồi dưỡng khóa "${record.trainingContent}" của ${record.userName} (${isAttended ? "Đã học" : "Không học"}).`,
-          link: `/training/list`,
-          isRead: false,
-          isPopupShown: false,
-        }));
-        await Notification.insertMany(notifs);
+    // Gửi thông báo chuông và email thông báo báo cáo kết quả (bất đồng bộ)
+    (async () => {
+      try {
+        const managersAndThy = await getManagerAndThyUsers();
+
+        // 1. Chuông thông báo
+        const notifs = [];
+        managersAndThy.forEach((m) => {
+          if (m._id.toString() !== req.user._id.toString()) {
+            notifs.push({
+              recipient: m._id,
+              sender: req.user._id,
+              type: "GENERAL",
+              title: "Báo cáo kết quả bồi dưỡng mới",
+              message: `${req.user.name} đã nộp báo cáo kết quả khóa bồi dưỡng "${record.trainingContent}" của ${record.userName} (${isAttended ? "Đã học" : "Không tham gia"}).`,
+              link: "/training/result-report",
+              isRead: false,
+              isPopupShown: false,
+            });
+          }
+        });
+
+        // Nếu người nộp báo cáo khác với nhân sự được bồi dưỡng
+        if (record.user && record.user.toString() !== req.user._id.toString()) {
+          notifs.push({
+            recipient: record.user,
+            sender: req.user._id,
+            type: "GENERAL",
+            title: "Báo cáo kết quả bồi dưỡng",
+            message: `${req.user.name} đã cập nhật báo cáo kết quả khóa bồi dưỡng "${record.trainingContent}" của bạn.`,
+            link: "/training/result-report",
+            isRead: false,
+            isPopupShown: false,
+          });
+        }
+
+        if (notifs.length > 0) {
+          await Notification.insertMany(notifs);
+        }
+
+        // 2. Email thông báo
+        const recipientMap = new Map();
+        managersAndThy.forEach((m) => {
+          if (m.email && m._id.toString() !== req.user._id.toString()) {
+            recipientMap.set(m._id.toString(), m);
+          }
+        });
+
+        if (record.user && record.user.toString() !== req.user._id.toString()) {
+          const u = await User.findById(record.user).select("_id name email emailNotifications role");
+          if (u && u.email) recipientMap.set(u._id.toString(), u);
+        }
+
+        await sendTrainingStatusEmail(
+          Array.from(recipientMap.values()),
+          record,
+          "REPORT_SUBMITTED",
+          isAttended
+            ? (record.reportResult?.resultDetails || "Đã hoàn thành khóa học và nộp hồ sơ minh chứng.")
+            : (record.reportResult?.notAttendedReason || "Không tham gia học"),
+          req.user.name,
+          req.user.role
+        );
+      } catch (notifyErr) {
+        console.error("Lỗi gửi thông báo / email báo cáo kết quả:", notifyErr);
       }
-    } catch (notifErr) {
-      console.error("Lỗi gửi thông báo báo cáo kết quả:", notifErr);
-    }
+    })();
 
     res.status(200).json({
       success: true,
@@ -1360,8 +1496,9 @@ const confirmReportResult = async (req, res) => {
       return res.status(404).json({ success: false, message: "Không tìm thấy hồ sơ" });
     }
 
-    if (!["admin", "manager"].includes(req.user.role)) {
-      return res.status(403).json({ success: false, message: "Chỉ Manager/Admin mới có quyền xác nhận kết quả bồi dưỡng." });
+    const { isAdminOrManager, isMaiAnhThy } = getUserRoleInfo(req.user);
+    if (!isAdminOrManager && !isMaiAnhThy) {
+      return res.status(403).json({ success: false, message: "Chỉ Manager/Admin/Mai Anh Thy mới có quyền xác nhận kết quả bồi dưỡng." });
     }
 
     if (!record.reportResult || record.reportResult.status !== "REPORTED") {
@@ -1378,11 +1515,55 @@ const confirmReportResult = async (req, res) => {
       actor: req.user._id,
       actorName: req.user.name,
       actorRole: req.user.role,
-      details: `Manager ${req.user.name} đã xác nhận kết quả báo cáo bồi dưỡng.`,
+      details: `${req.user.name} đã xác nhận kết quả báo cáo bồi dưỡng.`,
       timestamp: new Date(),
     });
 
     await record.save();
+
+    // Gửi thông báo chuông và email thông báo xác nhận kết quả (bất đồng bộ)
+    (async () => {
+      try {
+        const recipientIds = new Set();
+        if (record.user) recipientIds.add(record.user.toString());
+        if (record.reportResult?.reportedBy) recipientIds.add(record.reportResult.reportedBy.toString());
+        if (record.createdByUser) recipientIds.add(record.createdByUser.toString());
+        recipientIds.delete(req.user._id.toString());
+
+        // 1. Chuông thông báo
+        const notifs = Array.from(recipientIds).map((recId) => ({
+          recipient: recId,
+          sender: req.user._id,
+          type: "GENERAL",
+          title: "Xác nhận kết quả bồi dưỡng",
+          message: `Quản lý ${req.user.name} đã xác nhận kết quả báo cáo khóa bồi dưỡng "${record.trainingContent}" của ${record.userName}.`,
+          link: "/training/result-report",
+          isRead: false,
+          isPopupShown: false,
+        }));
+
+        if (notifs.length > 0) {
+          await Notification.insertMany(notifs);
+        }
+
+        // 2. Email thông báo
+        if (recipientIds.size > 0) {
+          const emailUsers = await User.find({ _id: { $in: Array.from(recipientIds) } }).select(
+            "_id name email emailNotifications role"
+          );
+          await sendTrainingStatusEmail(
+            emailUsers,
+            record,
+            "REPORT_CONFIRMED",
+            `Quản lý ${req.user.name} đã xác nhận kết quả báo cáo bồi dưỡng.`,
+            req.user.name,
+            req.user.role
+          );
+        }
+      } catch (notifyErr) {
+        console.error("Lỗi gửi thông báo / email xác nhận kết quả:", notifyErr);
+      }
+    })();
 
     res.status(200).json({
       success: true,

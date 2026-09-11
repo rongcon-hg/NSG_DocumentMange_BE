@@ -82,6 +82,7 @@ const userSchema = new mongoose.Schema({
         taskAssign: { type: Boolean, default: true },
         taskReminder: { type: Boolean, default: true },
         emulationRegister: { type: Boolean, default: true },
+        trainingRegister: { type: Boolean, default: true },
     },
 },
 {

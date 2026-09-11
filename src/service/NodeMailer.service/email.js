@@ -4,7 +4,9 @@ const {
     TASK_NOTIFICATION_EMAIL_TEMPLATE,
     REVIEW_NOTIFICATION_EMAIL_TEMPLATE,
     EMULATION_REGISTRATION_EMAIL_TEMPLATE,
-    EMULATION_STATUS_EMAIL_TEMPLATE
+    EMULATION_STATUS_EMAIL_TEMPLATE,
+    TRAINING_REGISTRATION_EMAIL_TEMPLATE,
+    TRAINING_STATUS_EMAIL_TEMPLATE
 } = require("./emailTemplate");
 const nodemailer = require("nodemailer");
 const dotenv = require("dotenv");
@@ -583,6 +585,178 @@ const sendEmulationStatusEmail = async (uniqueUsers, regData, actionType, note =
     }
 };
 
+const sendTrainingRegistrationEmail = async (uniqueUsers, records, creatorName = "Cán bộ") => {
+    try {
+        if (!uniqueUsers || uniqueUsers.length === 0 || !records || records.length === 0) return;
+        const allowedUsers = uniqueUsers.filter(u => !u.emailNotifications || u.emailNotifications.trainingRegister !== false);
+        const bccList = allowedUsers.map(u => u.email).filter(e => !!e);
+        if (bccList.length === 0) return;
+
+        const { transporter, sender } = await getTransporterAndSender();
+
+        const year = records[0]?.year || new Date().getFullYear().toString();
+        const createdAtStr = new Date().toLocaleString('vi-VN');
+
+        const rows = records.map((r, idx) => {
+            const costFormatted = (Number(r.estimatedCost) || 0).toLocaleString('vi-VN') + ' đ';
+            return `
+                <tr style="border-bottom: 1px solid #eee;">
+                    <td style="padding: 8px; text-align: center;">${idx + 1}</td>
+                    <td style="padding: 8px; font-weight: 600;">${r.userName || "--"}</td>
+                    <td style="padding: 8px;">${r.departmentName || "--"}</td>
+                    <td style="padding: 8px; color: #1d4ed8; font-weight: 600;">${r.trainingContent || "--"}</td>
+                    <td style="padding: 8px;">${r.trainingForm || "Khác"}</td>
+                    <td style="padding: 8px; text-align: right; font-weight: 600; color: #059669;">${costFormatted}</td>
+                </tr>
+            `;
+        }).join('');
+
+        let notesBlock = "";
+        const allNotes = records.map(r => r.notes).filter(n => !!n);
+        if (allNotes.length > 0) {
+            notesBlock = `
+                <div style="margin-top: 14px; padding-top: 12px; border-top: 1px dashed #e1e8ed;">
+                    <p style="margin: 6px 0;"><strong>Ghi chú:</strong></p>
+                    <div style="background-color: #f8fafc; padding: 10px 14px; border-radius: 4px; font-size: 13px; color: #475569;">
+                        ${allNotes.join('; ')}
+                    </div>
+                </div>
+            `;
+        }
+
+        const subject = `[Đăng ký bồi dưỡng] ${creatorName} vừa gửi ${records.length} hồ sơ đăng ký mới - Năm ${year}`;
+
+        let htmlContent = TRAINING_REGISTRATION_EMAIL_TEMPLATE
+            .replace(/{year}/g, year)
+            .replace(/{creatorName}/g, creatorName)
+            .replace(/{createdAt}/g, createdAtStr)
+            .replace(/{itemsCount}/g, records.length)
+            .replace(/{recordsTableRows}/g, rows)
+            .replace(/{notesBlock}/g, notesBlock);
+
+        const mailOptions = {
+            from: sender,
+            to: sender,
+            bcc: bccList.join(','),
+            subject: subject,
+            html: htmlContent,
+        };
+
+        await transporter.sendMail(mailOptions).catch(err => console.error(`Error sending training registration email:`, err));
+        return true;
+    } catch (error) {
+        console.error("Error in sendTrainingRegistrationEmail:", error);
+    }
+};
+
+const sendTrainingStatusEmail = async (uniqueUsers, record, actionType, note = "", actorName = "Quản lý", actorRole = "Manager") => {
+    try {
+        if (!uniqueUsers || uniqueUsers.length === 0 || !record) return;
+        const allowedUsers = uniqueUsers.filter(u => !u.emailNotifications || u.emailNotifications.trainingRegister !== false);
+        const bccList = allowedUsers.map(u => u.email).filter(e => !!e);
+        if (bccList.length === 0) return;
+
+        const { transporter, sender } = await getTransporterAndSender();
+
+        let actionName = "Cập nhật hồ sơ bồi dưỡng";
+        let statusLabel = '<span style="color: #2563eb; font-weight: bold;">Đang xử lý</span>';
+        let headerColorStart = "#1d4ed8";
+        let headerColorEnd = "#3b82f6";
+        let headerBorderColor = "#2563eb";
+        let actionUrl = "https://qlvb.namsaigon.edu.vn/training/list";
+        let extraDetailsHtml = "";
+
+        if (actionType === 'REVIEW_APPROVED') {
+            actionName = "Hồ sơ bồi dưỡng đã được phê duyệt";
+            statusLabel = '<span style="color: #10b981; font-weight: bold;">✓ Đã phê duyệt</span>';
+            headerColorStart = "#059669";
+            headerColorEnd = "#10b981";
+            headerBorderColor = "#10b981";
+            actionUrl = "https://qlvb.namsaigon.edu.vn/training/list";
+        } else if (actionType === 'REVIEW_REJECTED') {
+            actionName = "Hồ sơ bồi dưỡng bị từ chối";
+            statusLabel = '<span style="color: #ef4444; font-weight: bold;">✕ Từ chối</span>';
+            headerColorStart = "#dc2626";
+            headerColorEnd = "#f87171";
+            headerBorderColor = "#ef4444";
+            actionUrl = "https://qlvb.namsaigon.edu.vn/training/list";
+        } else if (actionType === 'REPORT_SUBMITTED') {
+            actionName = "Đã nộp báo cáo kết quả bồi dưỡng";
+            const attended = record.reportResult?.attended !== false;
+            statusLabel = attended
+                ? '<span style="color: #0284c7; font-weight: bold;">✓ Đã hoàn thành khóa học & nộp báo cáo</span>'
+                : '<span style="color: #e11d48; font-weight: bold;">Không tham gia học</span>';
+            headerColorStart = "#0284c7";
+            headerColorEnd = "#38bdf8";
+            headerBorderColor = "#0284c7";
+            actionUrl = "https://qlvb.namsaigon.edu.vn/training/result-report";
+
+            let proofFilesHtml = "";
+            if (Array.isArray(record.reportResult?.proofFiles) && record.reportResult.proofFiles.length > 0) {
+                proofFilesHtml = record.reportResult.proofFiles.map(f => {
+                    return `<li><a href="${f.fileUrl}" target="_blank" style="color: #2563eb; text-decoration: none;">📄 ${f.fileName || "Xem minh chứng"}</a></li>`;
+                }).join('');
+            } else {
+                proofFilesHtml = "<li>Không có tệp minh chứng đính kèm</li>";
+            }
+
+            extraDetailsHtml = `
+                <div style="margin-top: 14px; padding-top: 12px; border-top: 1px dashed #e1e8ed;">
+                    <p style="margin: 6px 0;"><strong>Tình trạng tham gia:</strong> ${attended ? "Đã tham gia bồi dưỡng" : "Không tham gia học"}</p>
+                    <p style="margin: 6px 0;"><strong>Kết quả đạt được:</strong> ${record.reportResult?.resultDetails || (attended ? "Đạt" : "Không có")}</p>
+                    ${record.reportResult?.hasFundingSupport ? `<p style="margin: 6px 0;"><strong>Kinh phí hỗ trợ:</strong> ${(Number(record.reportResult.actualFundAmount) || 0).toLocaleString('vi-VN')} đ</p>` : ''}
+                    <p style="margin: 6px 0;"><strong>Hồ sơ minh chứng đính kèm:</strong></p>
+                    <ul style="padding-left: 20px; margin: 4px 0;">
+                        ${proofFilesHtml}
+                    </ul>
+                </div>
+            `;
+        } else if (actionType === 'REPORT_CONFIRMED') {
+            actionName = "Quản lý đã xác nhận kết quả bồi dưỡng";
+            statusLabel = '<span style="color: #16a34a; font-weight: bold;">✓ Đã xác nhận hoàn thành</span>';
+            headerColorStart = "#16a34a";
+            headerColorEnd = "#4ade80";
+            headerBorderColor = "#16a34a";
+            actionUrl = "https://qlvb.namsaigon.edu.vn/training/result-report";
+        }
+
+        const subject = `[Bồi dưỡng - ${actionName}] ${record.userName} - ${record.trainingContent}`;
+        const actionTime = new Date().toLocaleString('vi-VN');
+
+        let htmlContent = TRAINING_STATUS_EMAIL_TEMPLATE
+            .replace(/{actionName}/g, actionName)
+            .replace(/{headerColorStart}/g, headerColorStart)
+            .replace(/{headerColorEnd}/g, headerColorEnd)
+            .replace(/{headerBorderColor}/g, headerBorderColor)
+            .replace(/{actionUrl}/g, actionUrl)
+            .replace(/{userName}/g, record.userName || "--")
+            .replace(/{positionName}/g, record.positionName || "Cán bộ")
+            .replace(/{departmentName}/g, record.departmentName || "Đơn vị")
+            .replace(/{trainingContent}/g, record.trainingContent || "--")
+            .replace(/{trainingForm}/g, record.trainingForm || "Khác")
+            .replace(/{year}/g, record.year || "--")
+            .replace(/{statusLabel}/g, statusLabel)
+            .replace(/{actorName}/g, actorName)
+            .replace(/{actorRole}/g, actorRole)
+            .replace(/{actionTime}/g, actionTime)
+            .replace(/{extraDetailsHtml}/g, extraDetailsHtml)
+            .replace(/{notes}/g, note || "Không có ghi chú thêm.");
+
+        const mailOptions = {
+            from: sender,
+            to: sender,
+            bcc: bccList.join(','),
+            subject: subject,
+            html: htmlContent,
+        };
+
+        await transporter.sendMail(mailOptions).catch(err => console.error(`Error sending training status email:`, err));
+        return true;
+    } catch (error) {
+        console.error("Error in sendTrainingStatusEmail:", error);
+    }
+};
+
 module.exports = {
     sentTempPassword,
     sendRestoreOtpEmail,
@@ -592,4 +766,6 @@ module.exports = {
     sendReviewNotificationEmail,
     sendEmulationRegistrationEmail,
     sendEmulationStatusEmail,
+    sendTrainingRegistrationEmail,
+    sendTrainingStatusEmail,
 };
