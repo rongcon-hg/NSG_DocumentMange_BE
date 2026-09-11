@@ -45,7 +45,8 @@ const getRoleLabel = (role) => {
     case "pho_don_vi":
       return "Cấp phó";
     case "chuyen_vien":
-      return "Chuyên viên";
+    case "chuyenvien":
+      return "GV-VC";
     default:
       return role || "Cán bộ";
   }

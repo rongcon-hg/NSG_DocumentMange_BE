@@ -740,7 +740,7 @@ const reportResult = async (req, res) => {
       if (!isTargetUser) {
         return res.status(403).json({
           success: false,
-          message: "Chuyên viên chỉ có quyền báo cáo kết quả bồi dưỡng cho bản thân.",
+          message: "GV-VC chỉ có quyền báo cáo kết quả bồi dưỡng cho bản thân.",
         });
       }
     } else if (isCapTruong || isCapPho) {
@@ -1431,7 +1431,7 @@ const importExcel = async (req, res) => {
       return res.status(403).json({
         success: false,
         message:
-          "Chuyên viên không được quyền import Excel danh sách bồi dưỡng. Vui lòng đăng ký trực tiếp trên giao diện cá nhân.",
+          "GV-VC không được quyền import Excel danh sách bồi dưỡng. Vui lòng đăng ký trực tiếp trên giao diện cá nhân.",
       });
     }
 
