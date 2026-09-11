@@ -79,6 +79,8 @@ const emulationDocumentTypeRoutes = require("./src/routes/emulationDocumentType.
 const emulationRegistrationRoutes = require("./src/routes/emulationRegistration.routes");
 const emulationAchievementRoutes = require("./src/routes/emulationAchievement.routes");
 const systemConfigRoutes = require("./src/routes/systemConfig.routes");
+const notificationRoutes = require("./src/routes/notification.routes");
+const trainingRegistrationRoutes = require("./src/routes/trainingRegistration.routes");
 
 // Ensure DB connection is established before handling requests in Vercel Serverless
 app.use(async (req, res, next) => {
@@ -115,6 +117,8 @@ app.use('/api/emulation/document-types', emulationDocumentTypeRoutes);
 app.use('/api/emulation/registrations', emulationRegistrationRoutes);
 app.use('/api/emulation/achievements', emulationAchievementRoutes);
 app.use('/api/system-config', systemConfigRoutes);
+app.use('/notifications', notificationRoutes);
+app.use('/api/training/registrations', trainingRegistrationRoutes);
 
 // Cron endpoint for Vercel
 const cronRoutes = require('./src/routes/cronRoutes');

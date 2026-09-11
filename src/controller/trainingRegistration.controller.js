@@ -1,0 +1,1145 @@
+const TrainingRegistration = require("../models/trainingRegistration.model");
+const User = require("../models/user.model");
+const Department = require("../models/department.model");
+const Position = require("../models/position.model");
+const Notification = require("../models/notification.model");
+const DriveConfig = require("../models/driveConfig.model");
+const { google } = require("googleapis");
+const { Readable } = require("stream");
+const ExcelJS = require("exceljs");
+
+// === Helper: Google Drive Authorization ===
+async function authorizeDrive() {
+  const config = await DriveConfig.findOne();
+  if (!config || !config.clientEmail || !config.privateKey) {
+    throw new Error("Chưa cấu hình Service Account cho Google Drive.");
+  }
+  const auth = new google.auth.JWT({
+    email: config.clientEmail,
+    key: config.privateKey.replace(/\\n/g, "\n"),
+    scopes: ["https://www.googleapis.com/auth/drive"],
+  });
+  return auth;
+}
+
+// === Helper: Get or Create Training Proof Folder in Google Drive ===
+async function getOrCreateTrainingFolder(drive) {
+  let parentId = process.env.DRIVE_FOLDER_ID;
+  const config = await DriveConfig.findOne();
+  if (config && config.folderId) parentId = config.folderId;
+
+  try {
+    const res = await drive.files.list({
+      q: `'${parentId}' in parents and name = 'HocTap_BoiDuong' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+      fields: "files(id, name)",
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    });
+
+    if (res.data.files && res.data.files.length > 0) {
+      return res.data.files[0].id;
+    }
+
+    const folderMetadata = {
+      name: "HocTap_BoiDuong",
+      mimeType: "application/vnd.google-apps.folder",
+      parents: [parentId],
+    };
+
+    const createResponse = await drive.files.create({
+      requestBody: folderMetadata,
+      fields: "id",
+      supportsAllDrives: true,
+    });
+
+    return createResponse.data.id;
+  } catch (err) {
+    console.error("Lỗi getOrCreateTrainingFolder:", err);
+    return parentId;
+  }
+}
+
+// === Helper: Check User Role BGH ===
+const isUserBGH = (user) => {
+  if (!user) return false;
+  if (user.department?.departmentCode === "BGH") return true;
+  if (user.departmentName?.toUpperCase().includes("BAN GIÁM HIỆU")) return true;
+  const posName = user.position?.positionName?.toLowerCase() || "";
+  if (posName.includes("hiệu trưởng") || posName.includes("phó hiệu trưởng")) return true;
+  return false;
+};
+
+/**
+ * 1. TẠO MỚI HỒ SƠ ĐĂNG KÝ BỒI DƯỠNG (Hỗ trợ 1 hoặc nhiều người)
+ */
+const createRegistrations = async (req, res) => {
+  try {
+    const creatorId = req.user._id;
+    const creatorName = req.user.name || "Cấp trưởng";
+    const payload = req.body;
+
+    const items = Array.isArray(payload.items) ? payload.items : [payload];
+    if (items.length === 0) {
+      return res.status(400).json({ success: false, message: "Danh sách đăng ký trống." });
+    }
+
+    const createdRecords = [];
+
+    for (const item of items) {
+      if (!item.userId && !item.user) {
+        continue;
+      }
+      const targetUserId = item.userId || item.user;
+      const targetUser = await User.findById(targetUserId)
+        .populate("department")
+        .populate("position");
+
+      if (!targetUser) continue;
+
+      const newReg = new TrainingRegistration({
+        user: targetUser._id,
+        userName: targetUser.name,
+        department: targetUser.department?._id || item.department || null,
+        departmentName: targetUser.department?.departmentName || item.departmentName || "",
+        position: targetUser.position?._id || item.position || null,
+        positionName: targetUser.position?.positionName || item.positionName || "",
+        year: item.year || new Date().getFullYear().toString(),
+        trainingContent: item.trainingContent || "",
+        estimatedCost: Number(item.estimatedCost) || 0,
+        trainingLocation: item.trainingLocation || "",
+        startDate: item.startDate ? new Date(item.startDate) : null,
+        endDate: item.endDate ? new Date(item.endDate) : null,
+        trainingDuration: item.trainingDuration || "",
+        trainingForm: item.trainingForm || "Chứng chỉ",
+        createdByUser: creatorId,
+        createdByUserName: creatorName,
+        notes: item.notes || "",
+        status: "PENDING",
+        history: [
+          {
+            action: "Lập hồ sơ đăng ký",
+            actor: creatorId,
+            actorName: creatorName,
+            actorRole: req.user.role,
+            details: `Đăng ký khóa bồi dưỡng "${item.trainingContent}" cho nhân sự ${targetUser.name}`,
+            timestamp: new Date(),
+          },
+        ],
+      });
+
+      const saved = await newReg.save();
+      createdRecords.push(saved);
+    }
+
+    // Gửi thông báo chuông cho Manager và Admin về việc có đăng ký bồi dưỡng mới
+    try {
+      const managersAndAdmins = await User.find({
+        role: { $in: ["admin", "manager"] },
+        _id: { $ne: creatorId },
+      }).select("_id");
+
+      if (managersAndAdmins.length > 0 && createdRecords.length > 0) {
+        const notifs = managersAndAdmins.map((m) => ({
+          recipient: m._id,
+          sender: creatorId,
+          type: "GENERAL",
+          title: "Đăng ký học tập bồi dưỡng mới",
+          message: `${creatorName} vừa gửi ${createdRecords.length} hồ sơ đăng ký bồi dưỡng cần xác nhận/phê duyệt.`,
+          link: "/training/list?status=PENDING",
+          isRead: false,
+          isPopupShown: false,
+        }));
+        await Notification.insertMany(notifs);
+      }
+    } catch (notifErr) {
+      console.error("Lỗi gửi thông báo đăng ký bồi dưỡng:", notifErr);
+    }
+
+    res.status(201).json({
+      success: true,
+      message: `Đã đăng ký thành công ${createdRecords.length} hồ sơ bồi dưỡng.`,
+      data: createdRecords,
+    });
+  } catch (error) {
+    console.error("Lỗi createRegistrations:", error);
+    res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });
+  }
+};
+
+/**
+ * 2. LẤY DANH SÁCH ĐĂNG KÝ BỒI DƯỠNG (KÈM BỘ LỌC VÀ PHÂN QUYỀN)
+ */
+const getRegistrations = async (req, res) => {
+  try {
+    const currentUser = await User.findById(req.user._id)
+      .populate("department")
+      .populate("position");
+
+    const isBGH = isUserBGH(currentUser);
+    const isAdmin = currentUser.role === "admin";
+    const isManager = currentUser.role === "manager";
+    const isAdminOrManagerOrBGH = isAdmin || isManager || isBGH;
+    const isCapTruong = currentUser.role === "captruong" || currentUser.role === "staff";
+    const isCapPho = currentUser.role === "cappho";
+
+    const {
+      year,
+      department,
+      status,
+      trainingForm,
+      reportStatus,
+      attended,
+      search,
+      page = 1,
+      limit = 20,
+      fetchAll = "false",
+    } = req.query;
+
+    const query = {};
+
+    // 1. Phân quyền xem
+    if (!isAdminOrManagerOrBGH) {
+      if (isCapTruong || isCapPho) {
+        // Cấp trưởng / phó: xem của đơn vị mình HOẶC do mình lập HOẶC của chính mình
+        const userDeptId = currentUser.department?._id || currentUser.department;
+        query.$or = [
+          { department: userDeptId },
+          { createdByUser: currentUser._id },
+          { user: currentUser._id },
+        ];
+      } else {
+        // Chuyên viên / Nhân sự: chỉ xem của bản thân
+        query.user = currentUser._id;
+      }
+    }
+
+    // 2. Bộ lọc
+    if (year) query.year = year;
+    if (department) query.department = department;
+    if (status) query.status = status;
+    if (trainingForm) query.trainingForm = trainingForm;
+    if (reportStatus) query["reportResult.status"] = reportStatus;
+    if (attended !== undefined && attended !== "") {
+      query["reportResult.attended"] = attended === "true";
+    }
+
+    // 3. Tìm kiếm từ khóa
+    if (search && search.trim() !== "") {
+      const keyword = search.trim();
+      const regex = new RegExp(keyword, "i");
+      query.$and = query.$and || [];
+      query.$and.push({
+        $or: [
+          { userName: regex },
+          { trainingContent: regex },
+          { trainingLocation: regex },
+          { departmentName: regex },
+        ],
+      });
+    }
+
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const shouldFetchAll = fetchAll === "true";
+
+    let dbQuery = TrainingRegistration.find(query)
+      .populate("user", "name email phone department position avatar")
+      .populate("department", "departmentName departmentCode")
+      .populate("position", "positionName")
+      .populate("createdByUser", "name email")
+      .populate("managerReview.reviewedBy", "name email")
+      .populate("reportResult.reportedBy", "name email")
+      .sort({ createdAt: -1 });
+
+    if (!shouldFetchAll) {
+      dbQuery = dbQuery.skip((pageNum - 1) * limitNum).limit(limitNum);
+    }
+
+    const [data, total] = await Promise.all([
+      dbQuery.lean(),
+      TrainingRegistration.countDocuments(query),
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data,
+      total,
+      page: pageNum,
+      totalPages: shouldFetchAll ? 1 : Math.ceil(total / limitNum) || 1,
+    });
+  } catch (error) {
+    console.error("Lỗi getRegistrations:", error);
+    res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });
+  }
+};
+
+/**
+ * 3. LẤY CHI TIẾT MỘT HỒ SƠ
+ */
+const getRegistrationById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const record = await TrainingRegistration.findById(id)
+      .populate("user", "name email phone department position avatar")
+      .populate("department", "departmentName departmentCode")
+      .populate("position", "positionName")
+      .populate("createdByUser", "name email")
+      .populate("managerReview.reviewedBy", "name email")
+      .populate("reportResult.reportedBy", "name email");
+
+    if (!record) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy hồ sơ bồi dưỡng" });
+    }
+
+    res.status(200).json({ success: true, data: record });
+  } catch (error) {
+    console.error("Lỗi getRegistrationById:", error);
+    res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });
+  }
+};
+
+/**
+ * 4. CẬP NHẬT HỒ SƠ ĐĂNG KÝ (Khi còn PENDING)
+ */
+const updateRegistration = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const record = await TrainingRegistration.findById(id);
+
+    if (!record) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy hồ sơ" });
+    }
+
+    const isCreator = record.createdByUser?.toString() === req.user._id.toString();
+    const isAdminOrManager = ["admin", "manager"].includes(req.user.role);
+
+    if (!isCreator && !isAdminOrManager) {
+      return res.status(403).json({ success: false, message: "Bạn không có quyền chỉnh sửa hồ sơ này." });
+    }
+
+    if (record.status !== "PENDING" && !isAdminOrManager) {
+      return res.status(400).json({ success: false, message: "Hồ sơ đã được phê duyệt, không thể sửa đổi." });
+    }
+
+    const {
+      trainingContent,
+      estimatedCost,
+      trainingLocation,
+      startDate,
+      endDate,
+      trainingDuration,
+      trainingForm,
+      notes,
+      year,
+    } = req.body;
+
+    if (trainingContent) record.trainingContent = trainingContent.trim();
+    if (estimatedCost !== undefined) record.estimatedCost = Number(estimatedCost) || 0;
+    if (trainingLocation !== undefined) record.trainingLocation = trainingLocation.trim();
+    if (startDate !== undefined) record.startDate = startDate ? new Date(startDate) : null;
+    if (endDate !== undefined) record.endDate = endDate ? new Date(endDate) : null;
+    if (trainingDuration !== undefined) record.trainingDuration = trainingDuration.trim();
+    if (trainingForm) record.trainingForm = trainingForm;
+    if (notes !== undefined) record.notes = notes.trim();
+    if (year) record.year = year.trim();
+
+    record.history.push({
+      action: "Cập nhật hồ sơ",
+      actor: req.user._id,
+      actorName: req.user.name,
+      actorRole: req.user.role,
+      details: "Chỉnh sửa thông tin khóa bồi dưỡng",
+      timestamp: new Date(),
+    });
+
+    await record.save();
+
+    res.status(200).json({ success: true, message: "Cập nhật thành công", data: record });
+  } catch (error) {
+    console.error("Lỗi updateRegistration:", error);
+    res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });
+  }
+};
+
+/**
+ * 5. XÓA HỒ SƠ ĐĂNG KÝ
+ */
+const deleteRegistration = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const record = await TrainingRegistration.findById(id);
+
+    if (!record) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy hồ sơ" });
+    }
+
+    const isCreator = record.createdByUser?.toString() === req.user._id.toString();
+    const isAdmin = req.user.role === "admin";
+
+    if (!isCreator && !isAdmin) {
+      return res.status(403).json({ success: false, message: "Bạn không có quyền xóa hồ sơ này." });
+    }
+
+    if (record.status !== "PENDING" && !isAdmin) {
+      return res.status(400).json({ success: false, message: "Hồ sơ đã được duyệt, không thể xóa." });
+    }
+
+    await TrainingRegistration.findByIdAndDelete(id);
+
+    res.status(200).json({ success: true, message: "Đã xóa hồ sơ đăng ký bồi dưỡng." });
+  } catch (error) {
+    console.error("Lỗi deleteRegistration:", error);
+    res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });
+  }
+};
+
+/**
+ * 6. MANAGER / ADMIN XÉT DUYỆT HỒ SƠ
+ */
+const reviewRegistration = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, note } = req.body;
+
+    if (!["APPROVED", "REJECTED"].includes(status)) {
+      return res.status(400).json({ success: false, message: "Trạng thái phê duyệt không hợp lệ (chỉ chấp nhận APPROVED hoặc REJECTED)." });
+    }
+
+    const record = await TrainingRegistration.findById(id);
+    if (!record) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy hồ sơ bồi dưỡng" });
+    }
+
+    record.status = status;
+    record.managerReview = {
+      status,
+      reviewedBy: req.user._id,
+      reviewedByName: req.user.name,
+      reviewedAt: new Date(),
+      note: note || "",
+    };
+
+    const statusLabel = status === "APPROVED" ? "Phê duyệt" : "Từ chối";
+    record.history.push({
+      action: statusLabel,
+      actor: req.user._id,
+      actorName: req.user.name,
+      actorRole: req.user.role,
+      details: `${statusLabel} hồ sơ đăng ký bồi dưỡng. ${note ? `Ghi chú: ${note}` : ""}`,
+      timestamp: new Date(),
+    });
+
+    await record.save();
+
+    // Gửi thông báo chuông cho nhân sự và cấp trưởng lập hồ sơ
+    try {
+      const recipientIds = new Set();
+      if (record.user) recipientIds.add(record.user.toString());
+      if (record.createdByUser) recipientIds.add(record.createdByUser.toString());
+      recipientIds.delete(req.user._id.toString());
+
+      const notifs = Array.from(recipientIds).map((recId) => ({
+        recipient: recId,
+        sender: req.user._id,
+        type: "GENERAL",
+        title: status === "APPROVED" ? "Hồ sơ bồi dưỡng đã được phê duyệt" : "Hồ sơ bồi dưỡng bị từ chối",
+        message: `Hồ sơ bồi dưỡng "${record.trainingContent}" của ${record.userName} đã được Manager ${statusLabel.toLowerCase()}.${note ? ` (Ghi chú: ${note})` : ""}`,
+        link: "/training/list",
+        isRead: false,
+        isPopupShown: false,
+      }));
+
+      if (notifs.length > 0) {
+        await Notification.insertMany(notifs);
+      }
+    } catch (notifErr) {
+      console.error("Lỗi gửi thông báo xét duyệt bồi dưỡng:", notifErr);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Đã ${statusLabel.toLowerCase()} hồ sơ thành công.`,
+      data: record,
+    });
+  } catch (error) {
+    console.error("Lỗi reviewRegistration:", error);
+    res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });
+  }
+};
+
+/**
+ * 7. BÁO CÁO KẾT QUẢ BỒI DƯỠNG (SAU KHI HỌC XONG)
+ */
+const reportResult = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      attended, // true / false
+      notAttendedReason,
+      resultDetails,
+      hasFundingSupport,
+      actualFundAmount,
+      proofFiles,
+    } = req.body;
+
+    const record = await TrainingRegistration.findById(id);
+    if (!record) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy hồ sơ" });
+    }
+
+    if (record.status !== "APPROVED") {
+      return res.status(400).json({ success: false, message: "Hồ sơ phải được phê duyệt trước khi báo cáo kết quả." });
+    }
+
+    const isTargetUser = record.user?.toString() === req.user._id.toString();
+    const isCreator = record.createdByUser?.toString() === req.user._id.toString();
+    const isAdminOrManager = ["admin", "manager"].includes(req.user.role);
+
+    if (!isTargetUser && !isCreator && !isAdminOrManager) {
+      return res.status(403).json({ success: false, message: "Bạn không có quyền báo cáo kết quả cho hồ sơ này." });
+    }
+
+    const isAttended = attended === true || attended === "true";
+
+    record.reportResult = {
+      status: "REPORTED",
+      attended: isAttended,
+      notAttendedReason: !isAttended ? (notAttendedReason || "").trim() : "",
+      resultDetails: isAttended ? (resultDetails || "").trim() : "",
+      hasFundingSupport: isAttended ? Boolean(hasFundingSupport) : false,
+      actualFundAmount: isAttended ? Number(actualFundAmount) || 0 : 0,
+      proofFiles: isAttended && Array.isArray(proofFiles) ? proofFiles : [],
+      reportedBy: req.user._id,
+      reportedByName: req.user.name,
+      reportedAt: new Date(),
+      managerConfirmed: false,
+    };
+
+    record.history.push({
+      action: "Báo cáo kết quả bồi dưỡng",
+      actor: req.user._id,
+      actorName: req.user.name,
+      actorRole: req.user.role,
+      details: isAttended
+        ? `Đã tham gia học. Kết quả: ${resultDetails || "Đạt"}. ${hasFundingSupport ? `Có hỗ trợ kinh phí: ${actualFundAmount || 0}đ` : "Không hỗ trợ kinh phí"}`
+        : `Không tham gia học. Lý do: ${notAttendedReason || "Không nêu rõ"}`,
+      timestamp: new Date(),
+    });
+
+    await record.save();
+
+    // Gửi thông báo chuông cho Manager về việc có báo cáo kết quả mới
+    try {
+      const managers = await User.find({ role: { $in: ["admin", "manager"] } }).select("_id");
+      if (managers.length > 0) {
+        const notifs = managers.map((m) => ({
+          recipient: m._id,
+          sender: req.user._id,
+          type: "GENERAL",
+          title: "Báo cáo kết quả bồi dưỡng mới",
+          message: `${req.user.name} đã gửi báo cáo kết quả bồi dưỡng khóa "${record.trainingContent}" của ${record.userName} (${isAttended ? "Đã học" : "Không học"}).`,
+          link: `/training/list`,
+          isRead: false,
+          isPopupShown: false,
+        }));
+        await Notification.insertMany(notifs);
+      }
+    } catch (notifErr) {
+      console.error("Lỗi gửi thông báo báo cáo kết quả:", notifErr);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Gửi báo cáo kết quả bồi dưỡng thành công.",
+      data: record,
+    });
+  } catch (error) {
+    console.error("Lỗi reportResult:", error);
+    res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });
+  }
+};
+
+/**
+ * 8. UPLOAD TỆP MINH CHỨNG KẾT QUẢ BỒI DƯỠNG LÊN GOOGLE DRIVE
+ */
+const uploadProofFiles = async (req, res) => {
+  try {
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ success: false, message: "Không có file nào được tải lên." });
+    }
+
+    const auth = await authorizeDrive();
+    const drive = google.drive({ version: "v3", auth });
+    const targetFolderId = await getOrCreateTrainingFolder(drive);
+
+    const uploadedFiles = [];
+    for (const file of req.files) {
+      const originalName = Buffer.from(file.originalname, "latin1").toString("utf8");
+      const fileMetadata = {
+        name: originalName,
+        parents: [targetFolderId],
+      };
+      const media = {
+        mimeType: file.mimetype,
+        body: Readable.from(file.buffer),
+      };
+
+      const response = await drive.files.create({
+        requestBody: fileMetadata,
+        media,
+        fields: "id, name, mimeType, size, webViewLink",
+        supportsAllDrives: true,
+      });
+
+      uploadedFiles.push({
+        fileId: response.data.id,
+        fileName: response.data.name || originalName,
+        mimeType: response.data.mimeType || file.mimetype,
+        size: response.data.size ? `${(response.data.size / 1024).toFixed(1)} KB` : "",
+        fileUrl: response.data.webViewLink || `https://drive.google.com/file/d/${response.data.id}/view`,
+        uploadedAt: new Date(),
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Tải lên ${uploadedFiles.length} file minh chứng thành công`,
+      data: uploadedFiles,
+    });
+  } catch (error) {
+    console.error("Lỗi uploadProofFiles:", error);
+    res.status(500).json({ success: false, message: "Lỗi tải tệp lên Google Drive", error: error.message });
+  }
+};
+
+/**
+ * 9. THỐNG KÊ TỔNG HỢP HỌC TẬP BỒI DƯỠNG
+ */
+const getStats = async (req, res) => {
+  try {
+    const { year, department } = req.query;
+    const match = {};
+    if (year) match.year = year;
+    if (department) match.department = new (require("mongoose").Types.ObjectId)(department);
+
+    const [allRecords, deptList] = await Promise.all([
+      TrainingRegistration.find(match).lean(),
+      Department.find().select("departmentName departmentCode").lean(),
+    ]);
+
+    const totalRegistrations = allRecords.length;
+    let pendingCount = 0;
+    let approvedCount = 0;
+    let rejectedCount = 0;
+
+    let totalEstimatedCost = 0;
+    let totalActualFund = 0;
+
+    let reportedCount = 0;
+    let attendedCount = 0;
+    let notAttendedCount = 0;
+
+    const formStats = {
+      "Chứng chỉ": 0,
+      "Chứng nhận": 0,
+      "Văn bằng": 0,
+      "Khác": 0,
+    };
+
+    const deptStatsMap = {};
+    deptList.forEach((d) => {
+      deptStatsMap[d._id.toString()] = {
+        departmentName: d.departmentName,
+        total: 0,
+        approved: 0,
+        attended: 0,
+        notAttended: 0,
+        totalCost: 0,
+      };
+    });
+
+    allRecords.forEach((r) => {
+      if (r.status === "PENDING") pendingCount++;
+      if (r.status === "APPROVED") approvedCount++;
+      if (r.status === "REJECTED") rejectedCount++;
+
+      totalEstimatedCost += r.estimatedCost || 0;
+
+      if (r.trainingForm && formStats[r.trainingForm] !== undefined) {
+        formStats[r.trainingForm]++;
+      } else {
+        formStats["Khác"]++;
+      }
+
+      if (r.reportResult?.status === "REPORTED") {
+        reportedCount++;
+        if (r.reportResult.attended === true) {
+          attendedCount++;
+          if (r.reportResult.hasFundingSupport) {
+            totalActualFund += r.reportResult.actualFundAmount || 0;
+          }
+        } else if (r.reportResult.attended === false) {
+          notAttendedCount++;
+        }
+      }
+
+      const dId = r.department?.toString();
+      if (dId && deptStatsMap[dId]) {
+        deptStatsMap[dId].total++;
+        if (r.status === "APPROVED") deptStatsMap[dId].approved++;
+        if (r.reportResult?.attended === true) deptStatsMap[dId].attended++;
+        if (r.reportResult?.attended === false) deptStatsMap[dId].notAttended++;
+        deptStatsMap[dId].totalCost += r.estimatedCost || 0;
+      }
+    });
+
+    const completionRate = approvedCount > 0 ? Math.round((attendedCount / approvedCount) * 100) : 0;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        totalRegistrations,
+        pendingCount,
+        approvedCount,
+        rejectedCount,
+        reportedCount,
+        attendedCount,
+        notAttendedCount,
+        completionRate,
+        totalEstimatedCost,
+        totalActualFund,
+        formStats,
+        departmentBreakdown: Object.values(deptStatsMap).filter((d) => d.total > 0),
+      },
+    });
+  } catch (error) {
+    console.error("Lỗi getStats:", error);
+    res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });
+  }
+};
+
+/**
+ * 10. TẢI FILE MẪU EXCEL ĐĂNG KÝ BỒI DƯỠNG (2 Sheet)
+ */
+const getTemplateExcel = async (req, res) => {
+  try {
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "Hệ thống Quản lý Văn bản";
+
+    // Sheet 1: Mẫu nhập liệu
+    const sheet1 = workbook.addWorksheet("Mau_Dang_Ky");
+    sheet1.columns = [
+      { header: "STT", key: "stt", width: 8 },
+      { header: "Email / Mã nhân sự (*)", key: "userIdentifier", width: 28 },
+      { header: "Họ và tên", key: "userName", width: 25 },
+      { header: "Đơn vị (*)", key: "departmentName", width: 30 },
+      { header: "Chức danh", key: "positionName", width: 20 },
+      { header: "Năm đào tạo (*)", key: "year", width: 16 },
+      { header: "Nội dung bồi dưỡng (*)", key: "trainingContent", width: 35 },
+      { header: "Hình thức đào tạo (*)", key: "trainingForm", width: 22 },
+      { header: "Nơi đào tạo (*)", key: "trainingLocation", width: 30 },
+      { header: "Thời gian đào tạo", key: "trainingDuration", width: 22 },
+      { header: "Kinh phí dự kiến (VNĐ)", key: "estimatedCost", width: 25 },
+      { header: "Ghi chú", key: "notes", width: 25 },
+    ];
+
+    // Format Header Sheet 1
+    sheet1.getRow(1).height = 28;
+    sheet1.getRow(1).eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF1E40AF" }, // Blue 800
+      };
+      cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+      cell.border = {
+        top: { style: "thin" },
+        left: { style: "thin" },
+        bottom: { style: "thin" },
+        right: { style: "thin" },
+      };
+    });
+
+    // Thêm vài dòng mẫu
+    sheet1.addRow({
+      stt: 1,
+      userIdentifier: "nguyenvana@namsaigon.edu.vn",
+      userName: "Nguyễn Văn A",
+      departmentName: "Khoa Công nghệ Thông tin",
+      positionName: "Giảng viên",
+      year: new Date().getFullYear().toString(),
+      trainingContent: "Bồi dưỡng chuẩn chức danh nghề nghiệp Giảng viên đại học",
+      trainingForm: "Chứng chỉ",
+      trainingLocation: "Trường Cán bộ Quản lý Giáo dục TP.HCM",
+      trainingDuration: "03 tháng",
+      estimatedCost: 3500000,
+      notes: "Đăng ký kế hoạch đợt 1",
+    });
+
+    sheet1.addRow({
+      stt: 2,
+      userIdentifier: "tranthib@namsaigon.edu.vn",
+      userName: "Trần Thị B",
+      departmentName: "Phòng Tổ chức - Hành chính",
+      positionName: "Chuyên viên",
+      year: new Date().getFullYear().toString(),
+      trainingContent: "Tập huấn nghiệp vụ Lưu trữ và Số hóa tài liệu điện tử",
+      trainingForm: "Chứng nhận",
+      trainingLocation: "Học viện Hành chính Quốc gia",
+      trainingDuration: "05 ngày",
+      estimatedCost: 1500000,
+      notes: "",
+    });
+
+    // Sheet 2: Danh mục tham chiếu
+    const sheet2 = workbook.addWorksheet("Huong_Dan_DanhMuc");
+
+    const [departments, positions, users] = await Promise.all([
+      Department.find().select("departmentName departmentCode").lean(),
+      Position.find().select("positionName").lean(),
+      User.find().select("name email department").populate("department", "departmentName").lean(),
+    ]);
+
+    sheet2.columns = [
+      { header: "Tên Đơn vị / Phòng ban", key: "dept", width: 35 },
+      { header: "Hình thức đào tạo chuẩn", key: "form", width: 25 },
+      { header: "Chức danh / Chức vụ", key: "pos", width: 25 },
+      { header: "Họ tên nhân sự (Hệ thống)", key: "uName", width: 25 },
+      { header: "Email nhân sự (Dùng để nhập)", key: "uEmail", width: 32 },
+    ];
+
+    sheet2.getRow(1).height = 25;
+    sheet2.getRow(1).eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF047857" }, // Emerald 700
+      };
+      cell.alignment = { vertical: "middle", horizontal: "center" };
+    });
+
+    const forms = ["Chứng chỉ", "Chứng nhận", "Văn bằng", "Khác"];
+    const maxRows = Math.max(departments.length, forms.length, positions.length, users.length);
+
+    for (let i = 0; i < maxRows; i++) {
+      sheet2.addRow({
+        dept: departments[i]?.departmentName || "",
+        form: forms[i] || "",
+        pos: positions[i]?.positionName || "",
+        uName: users[i]?.name || "",
+        uEmail: users[i]?.email || "",
+      });
+    }
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=Mau_Dang_Ky_Boi_Duong_${new Date().getFullYear()}.xlsx`
+    );
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error("Lỗi getTemplateExcel:", error);
+    res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });
+  }
+};
+
+/**
+ * 11. XUẤT EXCEL DANH SÁCH BỒI DƯỠNG (Theo bộ lọc hiện tại)
+ */
+const exportExcel = async (req, res) => {
+  try {
+    const { year, department, status, trainingForm, reportStatus, attended } = req.query;
+    const query = {};
+    if (year) query.year = year;
+    if (department) query.department = department;
+    if (status) query.status = status;
+    if (trainingForm) query.trainingForm = trainingForm;
+    if (reportStatus) query["reportResult.status"] = reportStatus;
+    if (attended !== undefined && attended !== "") {
+      query["reportResult.attended"] = attended === "true";
+    }
+
+    const records = await TrainingRegistration.find(query)
+      .populate("user", "name email")
+      .populate("department", "departmentName")
+      .populate("position", "positionName")
+      .populate("managerReview.reviewedBy", "name")
+      .populate("reportResult.reportedBy", "name")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "Hệ thống Quản lý Văn bản";
+
+    const worksheet = workbook.addWorksheet("Danh_Sach_Boi_Duong");
+
+    worksheet.columns = [
+      { header: "STT", key: "stt", width: 8 },
+      { header: "Họ và tên", key: "userName", width: 24 },
+      { header: "Đơn vị", key: "departmentName", width: 28 },
+      { header: "Chức danh", key: "positionName", width: 18 },
+      { header: "Năm", key: "year", width: 10 },
+      { header: "Nội dung học tập bồi dưỡng", key: "trainingContent", width: 35 },
+      { header: "Hình thức", key: "trainingForm", width: 16 },
+      { header: "Nơi đào tạo", key: "trainingLocation", width: 28 },
+      { header: "Thời gian đào tạo", key: "trainingDuration", width: 20 },
+      { header: "Kinh phí dự kiến (VNĐ)", key: "estimatedCost", width: 22 },
+      { header: "Trạng thái duyệt", key: "status", width: 18 },
+      { header: "Tình trạng học", key: "attendedStatus", width: 18 },
+      { header: "Kết quả bồi dưỡng", key: "resultDetails", width: 25 },
+      { header: "Hỗ trợ kinh phí", key: "fundingSupport", width: 20 },
+      { header: "Kinh phí hỗ trợ thực tế (VNĐ)", key: "actualFundAmount", width: 25 },
+      { header: "Lý do không học (nếu có)", key: "notAttendedReason", width: 28 },
+      { header: "Ghi chú", key: "notes", width: 20 },
+    ];
+
+    worksheet.getRow(1).height = 28;
+    worksheet.getRow(1).eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF1E3A8A" }, // Indigo 900
+      };
+      cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+      cell.border = {
+        top: { style: "thin" },
+        left: { style: "thin" },
+        bottom: { style: "thin" },
+        right: { style: "thin" },
+      };
+    });
+
+    const statusLabels = {
+      PENDING: "Chờ phê duyệt",
+      APPROVED: "Đã phê duyệt",
+      REJECTED: "Đã từ chối",
+    };
+
+    records.forEach((r, idx) => {
+      let attendedText = "Chưa báo cáo";
+      if (r.reportResult?.status === "REPORTED") {
+        attendedText = r.reportResult.attended === true ? "Đã tham gia học" : "Không tham gia học";
+      }
+
+      let fundingText = "Không";
+      if (r.reportResult?.hasFundingSupport) {
+        fundingText = "Có hỗ trợ";
+      }
+
+      const row = worksheet.addRow({
+        stt: idx + 1,
+        userName: r.userName || r.user?.name || "",
+        departmentName: r.departmentName || r.department?.departmentName || "",
+        positionName: r.positionName || r.position?.positionName || "",
+        year: r.year || "",
+        trainingContent: r.trainingContent || "",
+        trainingForm: r.trainingForm || "",
+        trainingLocation: r.trainingLocation || "",
+        trainingDuration: r.trainingDuration || "",
+        estimatedCost: r.estimatedCost || 0,
+        status: statusLabels[r.status] || r.status,
+        attendedStatus: attendedText,
+        resultDetails: r.reportResult?.resultDetails || "",
+        fundingSupport: fundingText,
+        actualFundAmount: r.reportResult?.actualFundAmount || 0,
+        notAttendedReason: r.reportResult?.notAttendedReason || "",
+        notes: r.notes || "",
+      });
+
+      row.eachCell((cell, colNumber) => {
+        cell.border = {
+          top: { style: "thin", color: { argb: "FFE2E8F0" } },
+          left: { style: "thin", color: { argb: "FFE2E8F0" } },
+          bottom: { style: "thin", color: { argb: "FFE2E8F0" } },
+          right: { style: "thin", color: { argb: "FFE2E8F0" } },
+        };
+        // Định dạng tiền tệ
+        if (colNumber === 10 || colNumber === 15) {
+          cell.numFmt = "#,##0";
+          cell.alignment = { horizontal: "right", vertical: "middle" };
+        } else if (colNumber === 1 || colNumber === 5) {
+          cell.alignment = { horizontal: "center", vertical: "middle" };
+        } else {
+          cell.alignment = { vertical: "middle" };
+        }
+      });
+    });
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=Bao_Cao_Boi_Duong_${year || "All"}.xlsx`
+    );
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error("Lỗi exportExcel:", error);
+    res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });
+  }
+};
+
+/**
+ * 12. IMPORT DANH SÁCH ĐĂNG KÝ TỪ FILE EXCEL
+ */
+const importExcel = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: "Vui lòng chọn file Excel để tải lên." });
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(req.file.buffer);
+
+    const worksheet = workbook.worksheets[0];
+    if (!worksheet) {
+      return res.status(400).json({ success: false, message: "File Excel không có trang tính hợp lệ." });
+    }
+
+    const [allUsers, allDepts, allPositions] = await Promise.all([
+      User.find().populate("department").populate("position").lean(),
+      Department.find().lean(),
+      Position.find().lean(),
+    ]);
+
+    const usersByEmail = new Map();
+    const usersByName = new Map();
+    allUsers.forEach((u) => {
+      if (u.email) usersByEmail.set(u.email.toLowerCase().trim(), u);
+      if (u.name) usersByName.set(u.name.toLowerCase().trim(), u);
+    });
+
+    const deptsByName = new Map();
+    allDepts.forEach((d) => {
+      if (d.departmentName) deptsByName.set(d.departmentName.toLowerCase().trim(), d);
+    });
+
+    const positionsByName = new Map();
+    allPositions.forEach((p) => {
+      if (p.positionName) positionsByName.set(p.positionName.toLowerCase().trim(), p);
+    });
+
+    const validRows = [];
+    const errors = [];
+
+    // Duyệt từ dòng thứ 2 (bỏ qua header)
+    worksheet.eachRow((row, rowNumber) => {
+      if (rowNumber === 1) return;
+
+      const userIdentifier = row.getCell(2).text ? row.getCell(2).text.trim() : "";
+      const rawUserName = row.getCell(3).text ? row.getCell(3).text.trim() : "";
+      const rawDept = row.getCell(4).text ? row.getCell(4).text.trim() : "";
+      const rawPos = row.getCell(5).text ? row.getCell(5).text.trim() : "";
+      const rawYear = row.getCell(6).text ? row.getCell(6).text.trim() : new Date().getFullYear().toString();
+      const rawContent = row.getCell(7).text ? row.getCell(7).text.trim() : "";
+      const rawForm = row.getCell(8).text ? row.getCell(8).text.trim() : "Chứng chỉ";
+      const rawLocation = row.getCell(9).text ? row.getCell(9).text.trim() : "";
+      const rawDuration = row.getCell(10).text ? row.getCell(10).text.trim() : "";
+      const rawCost = row.getCell(11).value;
+      const rawNotes = row.getCell(12).text ? row.getCell(12).text.trim() : "";
+
+      if (!rawContent) {
+        errors.push(`Dòng ${rowNumber}: Thiếu nội dung học tập bồi dưỡng.`);
+        return;
+      }
+
+      // Tìm user theo Email trước, sau đó theo Tên
+      let matchedUser = null;
+      if (userIdentifier && usersByEmail.has(userIdentifier.toLowerCase())) {
+        matchedUser = usersByEmail.get(userIdentifier.toLowerCase());
+      } else if (rawUserName && usersByName.has(rawUserName.toLowerCase())) {
+        matchedUser = usersByName.get(rawUserName.toLowerCase());
+      }
+
+      if (!matchedUser) {
+        errors.push(`Dòng ${rowNumber}: Không tìm thấy nhân sự "${userIdentifier || rawUserName}" trong hệ thống.`);
+        return;
+      }
+
+      const matchedDept = rawDept ? deptsByName.get(rawDept.toLowerCase()) : matchedUser.department;
+      const matchedPos = rawPos ? positionsByName.get(rawPos.toLowerCase()) : matchedUser.position;
+
+      const validForms = ["Chứng chỉ", "Chứng nhận", "Văn bằng", "Khác"];
+      const finalForm = validForms.includes(rawForm) ? rawForm : "Chứng chỉ";
+
+      let costNum = 0;
+      if (typeof rawCost === "number") costNum = rawCost;
+      else if (rawCost) costNum = Number(String(rawCost).replace(/[^0-9.-]+/g, "")) || 0;
+
+      validRows.push({
+        user: matchedUser._id,
+        userName: matchedUser.name,
+        department: matchedDept?._id || matchedUser.department?._id || null,
+        departmentName: matchedDept?.departmentName || matchedUser.department?.departmentName || rawDept,
+        position: matchedPos?._id || matchedUser.position?._id || null,
+        positionName: matchedPos?.positionName || matchedUser.position?.positionName || rawPos,
+        year: rawYear || new Date().getFullYear().toString(),
+        trainingContent: rawContent,
+        estimatedCost: costNum,
+        trainingLocation: rawLocation,
+        trainingDuration: rawDuration,
+        trainingForm: finalForm,
+        notes: rawNotes,
+        createdByUser: req.user._id,
+        createdByUserName: req.user.name,
+        status: "PENDING",
+        history: [
+          {
+            action: "Import Excel",
+            actor: req.user._id,
+            actorName: req.user.name,
+            actorRole: req.user.role,
+            details: `Import từ file Excel: "${req.file.originalname}"`,
+            timestamp: new Date(),
+          },
+        ],
+      });
+    });
+
+    if (validRows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Không có dòng dữ liệu hợp lệ nào để import.",
+        errors,
+      });
+    }
+
+    const inserted = await TrainingRegistration.insertMany(validRows);
+
+    res.status(200).json({
+      success: true,
+      message: `Đã import thành công ${inserted.length} bản ghi đăng ký bồi dưỡng.`,
+      importedCount: inserted.length,
+      errors: errors.length > 0 ? errors : undefined,
+    });
+  } catch (error) {
+    console.error("Lỗi importExcel:", error);
+    res.status(500).json({ success: false, message: "Lỗi máy chủ khi import Excel", error: error.message });
+  }
+};
+
+module.exports = {
+  createRegistrations,
+  getRegistrations,
+  getRegistrationById,
+  updateRegistration,
+  deleteRegistration,
+  reviewRegistration,
+  reportResult,
+  uploadProofFiles,
+  getStats,
+  getTemplateExcel,
+  exportExcel,
+  importExcel,
+};

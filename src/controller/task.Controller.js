@@ -1,5 +1,6 @@
 const Task = require("../models/task.model");
 const User = require("../models/user.model");
+const Notification = require("../models/notification.model");
 const Department = require("../models/department.model");
 const Position = require("../models/position.model");
 const { google } = require("googleapis");
@@ -1125,9 +1126,6 @@ const getKpiStats = async (req, res) => {
                 if (!stat) return;
 
                 let userSubtask = subtaskInfo;
-                if (!userSubtask && Array.isArray(task.subtasks)) {
-                    userSubtask = task.subtasks.find(st => st.assignee && (st.assignee._id || st.assignee).toString() === uId);
-                }
 
                 let effectiveIsDone = isDone;
                 let effectiveIsOnTime = isOnTime;
@@ -1215,7 +1213,9 @@ const getKpiStats = async (req, res) => {
                     actualScore = Number((executionScore * difficultyRate).toFixed(2));
 
                     // Cột 10: Vượt yêu cầu về tiến độ/chất lượng ("X")
-                    if (task.evaluation && task.evaluation.isExceeded !== undefined) {
+                    if (userSubtask && userSubtask.evaluation && userSubtask.evaluation.isExceeded !== undefined) {
+                        isExceeded = Boolean(userSubtask.evaluation.isExceeded);
+                    } else if (!userSubtask && task.evaluation && task.evaluation.isExceeded !== undefined) {
                         isExceeded = Boolean(task.evaluation.isExceeded);
                     } else if (effectiveIsDone && effectiveDaysLate <= 0 && effectiveQualityRate === 100) {
                         const deadlineCheck = userSubtask?.endDate ? new Date(userSubtask.endDate) : endOfDayDeadline;
@@ -1227,7 +1227,7 @@ const getKpiStats = async (req, res) => {
                 }
 
                 // Cột 11: Đề xuất khen thưởng (Điểm thưởng)
-                const bonusScore = (task.evaluation && task.evaluation.bonusScore) ? Number(task.evaluation.bonusScore) : 0;
+                const bonusScore = (evalSource && evalSource.bonusScore) ? Number(evalSource.bonusScore) : ((task.evaluation && task.evaluation.bonusScore) ? Number(task.evaluation.bonusScore) : 0);
 
                 if (roleType === 'assignee') {
                     stat.totalAssignedTasks += 1;
@@ -1303,38 +1303,52 @@ const getKpiStats = async (req, res) => {
                 });
             };
 
-            const processedUserIds = new Set();
+            const hasSubtasks = Array.isArray(task.subtasks) && task.subtasks.length > 0;
+            const usersWithSubtasks = new Set();
 
+            if (hasSubtasks) {
+                task.subtasks.forEach(s => {
+                    if (s) {
+                        let subAssigneeId = s.assignee ? (s.assignee._id || s.assignee).toString() : null;
+
+                        // Nếu việc con chưa chỉ định người thực hiện riêng, mặc định thuộc về người chủ trì
+                        if (!subAssigneeId && Array.isArray(task.assignees) && task.assignees.length > 0) {
+                            subAssigneeId = (task.assignees[0]._id || task.assignees[0]).toString();
+                        } else if (!subAssigneeId && task.createdBy) {
+                            subAssigneeId = (task.createdBy._id || task.createdBy).toString();
+                        }
+
+                        if (subAssigneeId) {
+                            usersWithSubtasks.add(subAssigneeId);
+                            const isMainAssignee = Array.isArray(task.assignees) && task.assignees.some(a => (a._id || a).toString() === subAssigneeId);
+                            accumulateForUser(subAssigneeId, isMainAssignee ? 'assignee' : 'collaborator', s);
+                        }
+                    }
+                });
+            }
+
+            // Đối với công việc cha:
+            // 1. Nếu công việc KHÔNG có việc con: tích lũy công việc cha cho tất cả người chủ trì và phối hợp
+            // 2. Nếu công việc CÓ việc con: chỉ tích lũy công việc cha cho những người tham gia mà KHÔNG phụ trách việc con cụ thể nào
             if (Array.isArray(task.assignees) && task.assignees.length > 0) {
                 task.assignees.forEach(a => {
                     const id = (a._id || a).toString();
-                    accumulateForUser(id, 'assignee');
-                    processedUserIds.add(id);
+                    if (!hasSubtasks || !usersWithSubtasks.has(id)) {
+                        accumulateForUser(id, 'assignee', null);
+                    }
                 });
             } else if (task.createdBy) {
                 const creatorId = (task.createdBy._id || task.createdBy).toString();
-                accumulateForUser(creatorId, 'assignee');
-                processedUserIds.add(creatorId);
+                if (!hasSubtasks || !usersWithSubtasks.has(creatorId)) {
+                    accumulateForUser(creatorId, 'assignee', null);
+                }
             }
 
             if (Array.isArray(task.collaborators)) {
                 task.collaborators.forEach(c => {
                     const id = (c._id || c).toString();
-                    if (!processedUserIds.has(id)) {
-                        accumulateForUser(id, 'collaborator');
-                        processedUserIds.add(id);
-                    }
-                });
-            }
-
-            if (Array.isArray(task.subtasks)) {
-                task.subtasks.forEach(s => {
-                    if (s && s.assignee) {
-                        const subAssigneeId = (s.assignee._id || s.assignee).toString();
-                        if (!processedUserIds.has(subAssigneeId)) {
-                            accumulateForUser(subAssigneeId, 'collaborator', s);
-                            processedUserIds.add(subAssigneeId);
-                        }
+                    if (!hasSubtasks || !usersWithSubtasks.has(id)) {
+                        accumulateForUser(id, 'collaborator', null);
                     }
                 });
             }
@@ -1601,6 +1615,9 @@ const updateSubtask = async (req, res) => {
             subtask.endDate = endDate ? new Date(endDate) : null;
         }
 
+        const oldStatus = subtask.status;
+        const isCompletedNow = status === 'DONE' && oldStatus !== 'DONE';
+
         if (status && status !== subtask.status) {
             const statusLabels = { 'TODO': 'Chưa làm', 'IN_PROGRESS': 'Đang làm', 'DONE': 'Hoàn thành' };
             historyDetails.push(`Việc con "${subtask.title}": Chuyển trạng thái sang "${statusLabels[status] || status}"`);
@@ -1623,6 +1640,65 @@ const updateSubtask = async (req, res) => {
 
         existingTask.collaborators = syncCollaboratorsWithSubtasks(existingTask.assignees, existingTask.collaborators, existingTask.subtasks);
         await existingTask.save();
+
+        // Gửi thông báo cho Người giao việc và Người phụ trách chính khi việc con hoàn thành
+        if (isCompletedNow) {
+            try {
+                const recipientSet = new Set();
+
+                // 1. Người giao việc chính (task.createdBy)
+                if (existingTask.createdBy) {
+                    recipientSet.add(existingTask.createdBy.toString());
+                }
+
+                // 2. Người phụ trách chính (task.assignees)
+                if (Array.isArray(existingTask.assignees)) {
+                    existingTask.assignees.forEach(a => {
+                        const id = (a?._id || a)?.toString();
+                        if (id) recipientSet.add(id);
+                    });
+                }
+
+                // 3. Người tạo việc con (nếu có)
+                if (subtask.createdBy) {
+                    recipientSet.add(subtask.createdBy.toString());
+                }
+
+                // Loại trừ người vừa bấm hoàn thành việc con (để không tự thông báo cho chính mình)
+                if (updater) {
+                    recipientSet.delete(updater.toString());
+                }
+
+                const recipientIds = Array.from(recipientSet);
+                if (recipientIds.length > 0) {
+                    const performerName = req.user?.name || "Người thực hiện";
+                    const notificationsToInsert = recipientIds.map(recId => ({
+                        recipient: recId,
+                        sender: updater,
+                        type: 'SUBTASK_COMPLETED',
+                        title: 'Công việc con đã hoàn thành',
+                        message: `${performerName} đã hoàn thành công việc con "${subtask.title}" thuộc công việc "${existingTask.title}".`,
+                        task: existingTask._id,
+                        subtaskId: subtask._id,
+                        link: `/schedule?taskId=${existingTask._id}`,
+                        isRead: false,
+                        isPopupShown: false,
+                        metadata: {
+                            taskId: existingTask._id,
+                            taskTitle: existingTask.title,
+                            subtaskId: subtask._id,
+                            subtaskTitle: subtask.title,
+                            performerName,
+                            completedAt: subtask.completedAt || new Date()
+                        }
+                    }));
+
+                    await Notification.insertMany(notificationsToInsert);
+                }
+            } catch (notifyErr) {
+                console.error("Lỗi tạo thông báo khi hoàn thành việc con:", notifyErr);
+            }
+        }
 
         const populatedTask = await Task.findById(existingTask._id)
             .populate("assignees", "name email emailNotifications")
