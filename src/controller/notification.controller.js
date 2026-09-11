@@ -8,10 +8,16 @@ const getMyNotifications = async (req, res) => {
     const userId = req.user._id;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
+    const unreadOnly = req.query.unreadOnly === "true";
     const skip = (page - 1) * limit;
 
+    const filter = { recipient: userId };
+    if (unreadOnly) {
+      filter.isRead = false;
+    }
+
     const [notifications, totalUnread, total] = await Promise.all([
-      Notification.find({ recipient: userId })
+      Notification.find(filter)
         .populate("sender", "name avatar")
         .populate("task", "title status priority")
         .sort({ createdAt: -1 })
