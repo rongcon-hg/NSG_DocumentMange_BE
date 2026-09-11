@@ -735,6 +735,15 @@ const reportResult = async (req, res) => {
     const { isBGH, isAdminOrManager, isMaiAnhThy, isCapTruong, isCapPho, isChuyenVien, userDeptId } =
       getUserRoleInfo(currentUser);
 
+    // Kiểm tra: Nếu báo cáo kết quả đã được Quản lý xác nhận, CHỈ Admin mới có quyền chỉnh sửa
+    const isRealAdmin = req.user.role === "admin";
+    if (record.reportResult?.managerConfirmed && !isRealAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: "Báo cáo kết quả đã được Quản lý xác nhận. Chỉ Quản trị viên (Admin) mới có quyền chỉnh sửa.",
+      });
+    }
+
     const isTargetUser = Boolean(
       (record.user && currentUser._id && record.user.toString() === currentUser._id.toString()) ||
       (record.userName && currentUser.name && record.userName.trim().toLowerCase() === currentUser.name.trim().toLowerCase()) ||
@@ -785,7 +794,10 @@ const reportResult = async (req, res) => {
       reportedBy: req.user._id,
       reportedByName: req.user.name,
       reportedAt: new Date(),
-      managerConfirmed: false,
+      managerConfirmed: Boolean(record.reportResult?.managerConfirmed),
+      confirmedBy: record.reportResult?.confirmedBy || null,
+      confirmedByName: record.reportResult?.confirmedByName || "",
+      confirmedAt: record.reportResult?.confirmedAt || null,
     };
 
     record.history.push({
@@ -793,9 +805,11 @@ const reportResult = async (req, res) => {
       actor: req.user._id,
       actorName: req.user.name,
       actorRole: req.user.role,
-      details: isAttended
-        ? `Đã tham gia học. Kết quả: ${resultDetails || "Đạt"}. ${hasFundingSupport ? `Có hỗ trợ kinh phí: ${actualFundAmount || 0}đ` : "Không hỗ trợ kinh phí"}`
-        : `Không tham gia học. Lý do: ${notAttendedReason || "Không nêu rõ"}`,
+      details: `${isRealAdmin && record.reportResult?.managerConfirmed ? "[Admin cập nhật KQ đã xác nhận] " : ""}${
+        isAttended
+          ? `Đã tham gia học. Kết quả: ${resultDetails || "Đạt"}. ${hasFundingSupport ? `Có hỗ trợ kinh phí: ${actualFundAmount || 0}đ` : "Không hỗ trợ kinh phí"}`
+          : `Không tham gia học. Lý do: ${notAttendedReason || "Không nêu rõ"}`
+      }`,
       timestamp: new Date(),
     });
 
