@@ -241,6 +241,17 @@ const trainingRegistrationSchema = new mongoose.Schema(
         type: String,
         default: "",
       },
+      confirmedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+      confirmedByName: {
+        type: String,
+        default: "",
+      },
+      confirmedAt: {
+        type: Date,
+      },
     },
     history: [historySchema],
   },
