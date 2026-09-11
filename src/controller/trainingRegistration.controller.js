@@ -732,30 +732,36 @@ const reportResult = async (req, res) => {
     const currentUser = await User.findById(req.user._id)
       .populate("department")
       .populate("position");
-    const { isBGH, isAdminOrManager, isCapTruong, isCapPho, isChuyenVien, userDeptId } =
+    const { isBGH, isAdminOrManager, isMaiAnhThy, isCapTruong, isCapPho, isChuyenVien, userDeptId } =
       getUserRoleInfo(currentUser);
 
-    const isTargetUser = record.user?.toString() === currentUser._id.toString();
+    const isTargetUser = Boolean(
+      (record.user && currentUser._id && record.user.toString() === currentUser._id.toString()) ||
+      (record.userName && currentUser.name && record.userName.trim().toLowerCase() === currentUser.name.trim().toLowerCase()) ||
+      (isMaiAnhThy && record.userName && (
+        record.userName.trim().toLowerCase() === "mai anh thy" ||
+        record.userName.trim().toLowerCase().includes("mai anh thy")
+      ))
+    );
     const isRecordInDept = record.department?.toString() === userDeptId?.toString();
     const isCreator = record.createdByUser?.toString() === currentUser._id.toString();
 
-    if (isChuyenVien) {
-      // Chuyên viên: CHỈ ĐƯỢC BÁO CÁO KẾT QUẢ CHO CÁ NHÂN MÌNH
-      if (!isTargetUser) {
-        return res.status(403).json({
-          success: false,
-          message: "GV-VC chỉ có quyền báo cáo kết quả bồi dưỡng cho bản thân.",
-        });
-      }
+    // Quyền báo cáo kết quả:
+    // 1. Bản thân người học (isTargetUser): Luôn được quyền nộp báo cáo kết quả của chính mình
+    // 2. Quản trị viên, Quản lý, Ban Giám hiệu, Mai Anh Thy: Toàn quyền báo cáo/sửa báo cáo
+    // 3. Cấp trưởng, Cấp phó: Được báo cáo cho nhân sự trong đơn vị mình hoặc do mình tạo
+    if (isTargetUser) {
+      // Cho phép báo cáo kết quả của chính mình
+    } else if (isAdminOrManager || isBGH || isMaiAnhThy) {
+      // Quản lý, Admin, BGH, Mai Anh Thy toàn quyền
     } else if (isCapTruong || isCapPho) {
-      // Cấp trưởng & Cấp phó: Báo cáo cho các hồ sơ trong đơn vị mình hoặc do mình tạo/thuộc về mình
-      if (!isRecordInDept && !isCreator && !isTargetUser) {
+      if (!isRecordInDept && !isCreator) {
         return res.status(403).json({
           success: false,
           message: "Cấp trưởng/phó chỉ có quyền báo cáo kết quả cho nhân sự trong đơn vị mình.",
         });
       }
-    } else if (!isAdminOrManager && !isBGH) {
+    } else {
       return res.status(403).json({
         success: false,
         message: "Bạn không có quyền báo cáo kết quả cho hồ sơ này.",
