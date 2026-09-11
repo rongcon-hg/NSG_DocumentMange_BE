@@ -27,5 +27,6 @@ router.patch("/:id/review", verifyToken, controller.reviewRegistration);
 
 // 6. Báo cáo kết quả bồi dưỡng sau khi học xong
 router.patch("/:id/report", verifyToken, controller.reportResult);
+router.patch("/:id/confirm-result", verifyToken, controller.confirmReportResult);
 
 module.exports = router;

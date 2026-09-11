@@ -83,26 +83,49 @@ const createRegistrations = async (req, res) => {
       return res.status(400).json({ success: false, message: "Danh sách đăng ký trống." });
     }
 
-    const createdRecords = [];
+    // Kiểm tra vai trò của người lập
+    const isManagerOrAdmin = ["admin", "manager"].includes(req.user.role);
+    const creatorUser = await User.findById(creatorId).populate("department");
+    const creatorDeptId = creatorUser?.department?._id || creatorUser?.department;
+    const creatorDeptName = creatorUser?.department?.departmentName || "";
 
     for (const item of items) {
-      if (!item.userId && !item.user) {
+      const rawName = (item.userName || "").trim();
+      const targetUserId = item.userId || item.user;
+
+      let targetUser = null;
+      if (targetUserId) {
+        targetUser = await User.findById(targetUserId)
+          .populate("department")
+          .populate("position");
+      }
+
+      const finalUserName = targetUser ? targetUser.name : rawName;
+      if (!finalUserName) {
         continue;
       }
-      const targetUserId = item.userId || item.user;
-      const targetUser = await User.findById(targetUserId)
-        .populate("department")
-        .populate("position");
 
-      if (!targetUser) continue;
+      // Xác định đơn vị: Cấp trưởng chỉ được đăng ký cho đơn vị mình
+      let finalDeptId = item.department || null;
+      let finalDeptName = item.departmentName || "";
+
+      if (!isManagerOrAdmin) {
+        finalDeptId = creatorDeptId || finalDeptId;
+        finalDeptName = creatorDeptName || finalDeptName;
+      } else if (targetUser?.department) {
+        finalDeptId = targetUser.department._id || finalDeptId;
+        finalDeptName = targetUser.department.departmentName || finalDeptName;
+      }
+
+      const finalPositionName = targetUser?.position?.positionName || item.positionName || "Cán bộ";
 
       const newReg = new TrainingRegistration({
-        user: targetUser._id,
-        userName: targetUser.name,
-        department: targetUser.department?._id || item.department || null,
-        departmentName: targetUser.department?.departmentName || item.departmentName || "",
-        position: targetUser.position?._id || item.position || null,
-        positionName: targetUser.position?.positionName || item.positionName || "",
+        user: targetUser ? targetUser._id : null,
+        userName: finalUserName,
+        department: finalDeptId,
+        departmentName: finalDeptName,
+        position: targetUser?.position?._id || item.position || null,
+        positionName: finalPositionName,
         year: item.year || new Date().getFullYear().toString(),
         trainingContent: item.trainingContent || "",
         estimatedCost: Number(item.estimatedCost) || 0,
@@ -121,7 +144,7 @@ const createRegistrations = async (req, res) => {
             actor: creatorId,
             actorName: creatorName,
             actorRole: req.user.role,
-            details: `Đăng ký khóa bồi dưỡng "${item.trainingContent}" cho nhân sự ${targetUser.name}`,
+            details: `Đăng ký khóa bồi dưỡng "${item.trainingContent}" cho nhân sự ${finalUserName}${!targetUser ? " (Chưa có tài khoản hệ thống)" : ""}`,
             timestamp: new Date(),
           },
         ],
@@ -1115,8 +1138,6 @@ const importExcel = async (req, res) => {
       });
     }
 
-    const inserted = await TrainingRegistration.insertMany(validRows);
-
     res.status(200).json({
       success: true,
       message: `Đã import thành công ${inserted.length} bản ghi đăng ký bồi dưỡng.`,
@@ -1129,6 +1150,52 @@ const importExcel = async (req, res) => {
   }
 };
 
+/**
+ * 13. MANAGER XÁC NHẬN KẾT QUẢ BÁO CÁO
+ */
+const confirmReportResult = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const record = await TrainingRegistration.findById(id);
+    if (!record) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy hồ sơ" });
+    }
+
+    if (!["admin", "manager"].includes(req.user.role)) {
+      return res.status(403).json({ success: false, message: "Chỉ Manager/Admin mới có quyền xác nhận kết quả bồi dưỡng." });
+    }
+
+    if (!record.reportResult || record.reportResult.status !== "REPORTED") {
+      return res.status(400).json({ success: false, message: "Hồ sơ chưa có báo cáo kết quả để xác nhận." });
+    }
+
+    record.reportResult.managerConfirmed = true;
+    record.reportResult.confirmedBy = req.user._id;
+    record.reportResult.confirmedByName = req.user.name;
+    record.reportResult.confirmedAt = new Date();
+
+    record.history.push({
+      action: "Xác nhận kết quả bồi dưỡng",
+      actor: req.user._id,
+      actorName: req.user.name,
+      actorRole: req.user.role,
+      details: `Manager ${req.user.name} đã xác nhận kết quả báo cáo bồi dưỡng.`,
+      timestamp: new Date(),
+    });
+
+    await record.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Đã xác nhận kết quả bồi dưỡng thành công.",
+      data: record,
+    });
+  } catch (error) {
+    console.error("Lỗi confirmReportResult:", error);
+    res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });
+  }
+};
+
 module.exports = {
   createRegistrations,
   getRegistrations,
@@ -1137,6 +1204,7 @@ module.exports = {
   deleteRegistration,
   reviewRegistration,
   reportResult,
+  confirmReportResult,
   uploadProofFiles,
   getStats,
   getTemplateExcel,

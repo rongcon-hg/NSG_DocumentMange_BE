@@ -62,11 +62,12 @@ const historySchema = new mongoose.Schema(
 
 const trainingRegistrationSchema = new mongoose.Schema(
   {
-    // Nhân sự được đăng ký
+    // Nhân sự được đăng ký (có thể null nếu nhân sự chưa có tài khoản trong hệ thống)
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true,
+      required: false,
+      default: null,
       index: true,
     },
     userName: {
