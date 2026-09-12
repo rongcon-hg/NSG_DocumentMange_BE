@@ -89,8 +89,8 @@ const taskSchema = new mongoose.Schema(
     evaluation: {
       score: { type: Number, min: 0, max: 100 },
       rating: { type: Number, min: 1, max: 5 },
-      qualityRate: { type: Number, min: 0, max: 100, default: 100 }, // 100%, 80%, 60%, 0%
-      progressRate: { type: Number, min: 0, max: 100, default: 100 }, // 100%, 80%, 60%, 0%
+      qualityRate: { type: Number, min: 0, max: 100 }, // 100%, 80%, 60%, 0%
+      progressRate: { type: Number, min: 0, max: 100 }, // 100%, 80%, 60%, 0%
       isExceeded: { type: Boolean, default: false }, // Hoàn thành sớm và đạt chất lượng 100% (đánh dấu X cột 10)
       bonusScore: { type: Number, default: 0 }, // Điểm thưởng đề xuất
       feedback: { type: String },

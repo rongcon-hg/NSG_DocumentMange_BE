@@ -176,9 +176,10 @@ function calculateProgressRate(isDone, workingDaysLate, isOverdue) {
         return 0;                             // Chậm trên 5 ngày làm việc: 0%
     } else {
         if (isOverdue) {
-            if (workingDaysLate <= 3) return 60;
-            if (workingDaysLate <= 5) return 40;
-            return 0;
+            if (workingDaysLate <= 0) return 100;
+            if (workingDaysLate <= 3) return 80;  // Chậm 1 - 3 ngày làm việc: 80%
+            if (workingDaysLate <= 5) return 60;  // Chậm 4 - 5 ngày làm việc: 60%
+            return 0;                             // Chậm trên 5 ngày làm việc: 0%
         }
         return null; // Chưa làm hoặc đang làm mà chưa đến hết hạn xử lý: để trống
     }
@@ -1189,19 +1190,20 @@ const getKpiStats = async (req, res) => {
 
                 if (!isPendingWithinDeadline) {
                     // Cột 6: Tiến độ % (100%, 80%, 60%, 0%)
-                    if (evalSource.progressRate !== undefined && evalSource.progressRate !== null) {
+                    const autoProgressRate = calculateProgressRate(effectiveIsDone, effectiveDaysLate, effectiveIsOverdue);
+                    if (evalSource.evaluatedBy && evalSource.progressRate !== undefined && evalSource.progressRate !== null) {
                         effectiveProgressRate = Number(evalSource.progressRate);
                     } else {
-                        effectiveProgressRate = calculateProgressRate(effectiveIsDone, effectiveDaysLate, effectiveIsOverdue);
+                        effectiveProgressRate = autoProgressRate;
                     }
 
                     // Cột 7: Kết quả % (100%, 80%, 60%, 0%)
-                    if (evalSource.qualityRate !== undefined && evalSource.qualityRate !== null) {
+                    if (evalSource.evaluatedBy && evalSource.qualityRate !== undefined && evalSource.qualityRate !== null) {
                         effectiveQualityRate = Number(evalSource.qualityRate);
-                    } else if (evalSource.score !== undefined) {
+                    } else if (evalSource.evaluatedBy && evalSource.score !== undefined && evalSource.score !== null) {
                         effectiveQualityRate = Number(evalSource.score);
                     } else if (!effectiveIsDone) {
-                        effectiveQualityRate = 60; // Mặc định chưa hoàn thành nhưng quá hạn: 60%
+                        effectiveQualityRate = 0; // Chưa hoàn thành và quá hạn: 0% theo Phụ lục 4 ("Không đạt yêu cầu hoặc không hoàn thành: 0%")
                     } else {
                         effectiveQualityRate = 100; // Mặc định hoàn thành: 100% (Đạt đầy đủ yêu cầu)
                     }
@@ -1245,7 +1247,7 @@ const getKpiStats = async (req, res) => {
                     else stat.inProgressTasks += 1;
                 }
 
-                if (task.evaluation && task.evaluation.score !== undefined) {
+                if (task.evaluation && task.evaluation.score !== undefined && task.evaluation.evaluatedBy) {
                     stat.evaluatedTasksCount += 1;
                     stat.totalEvaluationScore += task.evaluation.score;
                 }
