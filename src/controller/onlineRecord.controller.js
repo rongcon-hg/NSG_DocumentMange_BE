@@ -116,28 +116,34 @@ const getRecords = async (req, res) => {
     const currentUserRole = req.user?.role;
     const {
       page = 1,
-      limit = 15,
+      limit = 20,
       search,
       status,
       category,
       department,
+      startDate,
+      endDate,
+      isExport,
       type = "all", // "all", "sent" (hồ sơ tôi gửi), "received" (hồ sơ gửi đến tôi)
     } = req.query;
 
     const query = {};
+    const andConditions = [];
 
     // Phân loại hồ sơ theo vai trò và tab
     const isAdminOrManager = currentUserRole === "admin" || currentUserRole === "manager";
 
     if (type === "sent") {
-      query.sender = currentUserId;
+      andConditions.push({ sender: currentUserId });
     } else if (type === "received") {
-      query.recipients = currentUserId;
+      andConditions.push({ recipients: currentUserId });
     } else {
       // type === "all"
       if (!isAdminOrManager) {
         // Người dùng thông thường: xem hồ sơ mình gửi HOẶC hồ sơ gửi đích danh đến mình
-        query.$or = [{ sender: currentUserId }, { recipients: currentUserId }];
+        andConditions.push({
+          $or: [{ sender: currentUserId }, { recipients: currentUserId }],
+        });
       }
     }
 
@@ -145,26 +151,48 @@ const getRecords = async (req, res) => {
     if (category) query.category = category;
     if (department) query.department = department;
 
+    // Lọc theo khoảng thời gian gửi hồ sơ
+    if (startDate || endDate) {
+      const dateFilter = {};
+      if (startDate) {
+        const start = new Date(startDate);
+        start.setHours(0, 0, 0, 0);
+        dateFilter.$gte = start;
+      }
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        dateFilter.$lte = end;
+      }
+      query.createdAt = dateFilter;
+    }
+
     if (search) {
       const regex = new RegExp(search.trim(), "i");
-      query.$or = [
-        ...(query.$or || []),
-        { recordCode: regex },
-        { title: regex },
-        { fullName: regex },
-        { departmentName: regex },
-      ];
+      andConditions.push({
+        $or: [
+          { recordCode: regex },
+          { title: regex },
+          { fullName: regex },
+          { departmentName: regex },
+        ],
+      });
+    }
+
+    if (andConditions.length > 0) {
+      query.$and = andConditions;
     }
 
     const pageNum = parseInt(page, 10);
-    const limitNum = parseInt(limit, 10);
-    const skip = (pageNum - 1) * limitNum;
+    const limitNum = isExport === "true" || isExport === true ? 10000 : parseInt(limit, 10);
+    const skip = isExport === "true" || isExport === true ? 0 : (pageNum - 1) * limitNum;
 
     const [records, total] = await Promise.all([
       OnlineRecord.find(query)
         .populate("category", "code name")
         .populate("sender", "name email avatar")
         .populate("recipients", "name email avatar position department")
+        .populate("attachedFiles.attachmentType", "name code")
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limitNum)
