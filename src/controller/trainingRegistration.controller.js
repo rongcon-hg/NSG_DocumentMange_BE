@@ -1937,6 +1937,7 @@ const getReportResultTemplateExcel = async (req, res) => {
       { header: "Thời gian đào tạo thực tế", key: "actualTrainingDuration", width: 24 },
       { header: "Hỗ trợ kinh phí (*) (Có/Không)", key: "hasFundingSupport", width: 26 },
       { header: "Kinh phí thực tế (VNĐ)", key: "actualFundAmount", width: 24 },
+      { header: "Minh chứng đính kèm (Link / Tệp)", key: "proofFiles", width: 35 },
       { header: "Ghi chú / Nhận xét", key: "notes", width: 28 },
     ];
 
@@ -1977,6 +1978,10 @@ const getReportResultTemplateExcel = async (req, res) => {
         }
         let fundingStr = r.reportResult?.hasFundingSupport ? "Có" : "Không";
 
+        const proofFilesStr = Array.isArray(r.reportResult?.proofFiles)
+          ? r.reportResult.proofFiles.map((f) => f.fileUrl || f.fileName || "").filter(Boolean).join("\n")
+          : "";
+
         const row = sheet1.addRow({
           stt: idx + 1,
           recordId: r._id.toString(),
@@ -1995,6 +2000,7 @@ const getReportResultTemplateExcel = async (req, res) => {
           actualTrainingDuration: r.reportResult?.actualTrainingDuration || r.trainingDuration || "",
           hasFundingSupport: fundingStr,
           actualFundAmount: r.reportResult?.actualFundAmount || 0,
+          proofFiles: proofFilesStr,
           notes: r.reportResult?.managerConfirmNote || r.notes || "",
         });
 
@@ -2035,72 +2041,8 @@ const getReportResultTemplateExcel = async (req, res) => {
         actualTrainingDuration: "03 tháng",
         hasFundingSupport: "Có",
         actualFundAmount: 2500000,
+        proofFiles: "https://example.com/chungchi.pdf",
         notes: "Đạt loại xuất sắc",
-      });
-    }
-
-    // Sheet 2: Danh mục tham chiếu & Dữ liệu liên quan
-    const sheet2 = workbook.addWorksheet("DanhMuc_ThamChieu");
-
-    const [allDepts, allUsers, allPositions] = await Promise.all([
-      Department.find().select("departmentName departmentCode").lean(),
-      User.find().select("name email department").populate("department", "departmentName").lean(),
-      Position.find().select("positionName").lean(),
-    ]);
-
-    sheet2.columns = [
-      { header: "Tham gia học chuẩn", key: "attendedOpt", width: 22 },
-      { header: "Xếp loại kết quả chuẩn", key: "resultOpt", width: 25 },
-      { header: "Hỗ trợ kinh phí", key: "fundingOpt", width: 20 },
-      { header: "Hình thức đào tạo", key: "formOpt", width: 22 },
-      { header: "Tên Đơn vị / Phòng ban", key: "deptName", width: 35 },
-      { header: "Họ tên nhân sự (Hệ thống)", key: "uName", width: 25 },
-      { header: "Email nhân sự", key: "uEmail", width: 30 },
-    ];
-
-    sheet2.getRow(1).height = 28;
-    sheet2.getRow(1).eachCell((cell) => {
-      cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
-      cell.fill = {
-        type: "pattern",
-        pattern: "solid",
-        fgColor: { argb: "FF1E3A8A" }, // Indigo 900
-      };
-      cell.alignment = { vertical: "middle", horizontal: "center" };
-    });
-
-    const attendedOpts = ["Có", "Không"];
-    const resultOpts = [
-      "Hoàn thành xuất sắc",
-      "Hoàn thành tốt",
-      "Hoàn thành",
-      "Đạt",
-      "Không đạt",
-      "Được cấp chứng chỉ",
-      "Được cấp chứng nhận",
-      "Được cấp văn bằng",
-    ];
-    const fundingOpts = ["Có", "Không"];
-    const formOpts = ["Chứng chỉ", "Chứng nhận", "Văn bằng", "Khác"];
-
-    const maxRows = Math.max(
-      attendedOpts.length,
-      resultOpts.length,
-      fundingOpts.length,
-      formOpts.length,
-      allDepts.length,
-      allUsers.length
-    );
-
-    for (let i = 0; i < maxRows; i++) {
-      sheet2.addRow({
-        attendedOpt: attendedOpts[i] || "",
-        resultOpt: resultOpts[i] || "",
-        fundingOpt: fundingOpts[i] || "",
-        formOpt: formOpts[i] || "",
-        deptName: allDepts[i]?.departmentName || "",
-        uName: allUsers[i]?.name || "",
-        uEmail: allUsers[i]?.email || "",
       });
     }
 
@@ -2196,7 +2138,8 @@ const importReportResults = async (req, res) => {
       const rawActualDuration = row.getCell(15).text ? row.getCell(15).text.trim() : "";
       const rawFunding = row.getCell(16).text ? row.getCell(16).text.trim().toLowerCase() : "";
       const rawActualFund = row.getCell(17).value;
-      const rawNotes = row.getCell(18).text ? row.getCell(18).text.trim() : "";
+      const rawProofFiles = row.getCell(18).text ? row.getCell(18).text.trim() : "";
+      const rawNotes = row.getCell(19).text ? row.getCell(19).text.trim() : "";
 
       // Bỏ qua dòng hoàn toàn trống
       if (!rawRecordId && !rawUserName && !rawContent) {
@@ -2284,6 +2227,32 @@ const importReportResults = async (req, res) => {
       targetRecord.reportResult.reportedBy = req.user._id;
       targetRecord.reportResult.reportedByName = currentUser.name;
       targetRecord.reportResult.reportedAt = new Date();
+
+      // Cập nhật minh chứng đính kèm nếu có
+      if (rawProofFiles) {
+        targetRecord.reportResult.proofFiles = targetRecord.reportResult.proofFiles || [];
+        const links = rawProofFiles
+          .split(/[\r\n;,]+/)
+          .map((s) => s.trim())
+          .filter(Boolean);
+
+        for (let i = 0; i < links.length; i++) {
+          const item = links[i];
+          const isUrl = /^https?:\/\//i.test(item);
+          const fName = isUrl ? (item.split("/").pop().split("?")[0] || `Minh chứng ${i + 1}`) : item;
+          const alreadyExists = targetRecord.reportResult.proofFiles.some(
+            (p) => (p.fileUrl && p.fileUrl === item) || (p.fileName && p.fileName === item)
+          );
+          if (!alreadyExists) {
+            targetRecord.reportResult.proofFiles.push({
+              fileId: `import_${Date.now()}_${i}`,
+              fileName: fName.slice(0, 150),
+              fileUrl: isUrl ? item : "",
+              uploadedAt: new Date(),
+            });
+          }
+        }
+      }
 
       // Nếu người import là Manager / Admin hoặc Mai Anh Thy -> tự động xác nhận luôn
       if (isAdminOrManager || isMaiAnhThy) {
