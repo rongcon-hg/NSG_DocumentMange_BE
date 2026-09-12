@@ -8,6 +8,8 @@ const { verifyToken } = require("../middleware/authMiddleware");
 router.get("/template", verifyToken, controller.getTemplateExcel);
 router.get("/export", verifyToken, controller.exportExcel);
 router.post("/import", verifyToken, upload.single("file"), controller.importExcel);
+router.get("/report-result-template", verifyToken, controller.getReportResultTemplateExcel);
+router.post("/import-results", verifyToken, upload.single("file"), controller.importReportResults);
 
 // 2. Thống kê tổng hợp
 router.get("/stats", verifyToken, controller.getStats);

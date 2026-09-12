@@ -1882,6 +1882,447 @@ const batchReviewRegistrations = async (req, res) => {
   }
 };
 
+/**
+ * 14. TẢI FILE MẪU EXCEL BÁO CÁO KẾT QUẢ BỒI DƯỠNG (Kèm Sheet Danh mục tham chiếu liên quan)
+ */
+const getReportResultTemplateExcel = async (req, res) => {
+  try {
+    const currentUser = await User.findById(req.user._id).populate("department").populate("position");
+    const { isBGH, isAdminOrManager, isMaiAnhThy, isCapTruong, isCapPho, isChuyenVien, userDeptId, userDeptName } =
+      getUserRoleInfo(currentUser);
+
+    if (isChuyenVien) {
+      return res.status(403).json({ success: false, message: "GV-VC vui lòng báo cáo trực tiếp trên giao diện cá nhân." });
+    }
+
+    const { year, department } = req.query;
+    const query = { status: "APPROVED" }; // Chỉ các hồ sơ đã duyệt
+
+    if (isCapTruong || isCapPho) {
+      query.department = userDeptId;
+    } else if (department && department !== "ALL") {
+      query.department = department;
+    }
+
+    if (year && year !== "ALL") {
+      query.year = year;
+    }
+
+    const records = await TrainingRegistration.find(query)
+      .populate("user", "name email")
+      .populate("department", "departmentName departmentCode")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "Hệ thống Quản lý Văn bản";
+
+    // Sheet 1: Mẫu nhập liệu kết quả bồi dưỡng
+    const sheet1 = workbook.addWorksheet("Bao_Cao_Ket_Qua");
+    sheet1.columns = [
+      { header: "STT", key: "stt", width: 6 },
+      { header: "Mã hồ sơ (*)", key: "recordId", width: 26 },
+      { header: "Họ và tên nhân sự (*)", key: "userName", width: 24 },
+      { header: "Email nhân sự", key: "userEmail", width: 28 },
+      { header: "Đơn vị / Phòng ban (*)", key: "departmentName", width: 30 },
+      { header: "Năm (*)", key: "year", width: 10 },
+      { header: "Nội dung bồi dưỡng (*)", key: "trainingContent", width: 40 },
+      { header: "Hình thức", key: "trainingForm", width: 16 },
+      { header: "Tham gia học (*) (Có/Không)", key: "attended", width: 25 },
+      { header: "Lý do không tham gia (nếu Không)", key: "notAttendedReason", width: 30 },
+      { header: "Kết quả / Xếp loại (*)", key: "resultDetails", width: 25 },
+      { header: "Số văn bằng / Chứng chỉ", key: "certificateNumber", width: 22 },
+      { header: "Ngày cấp (DD/MM/YYYY)", key: "issueDate", width: 20 },
+      { header: "Nơi cấp / Cơ sở đào tạo", key: "issuePlace", width: 30 },
+      { header: "Thời gian đào tạo thực tế", key: "actualTrainingDuration", width: 24 },
+      { header: "Hỗ trợ kinh phí (*) (Có/Không)", key: "hasFundingSupport", width: 26 },
+      { header: "Kinh phí thực tế (VNĐ)", key: "actualFundAmount", width: 24 },
+      { header: "Ghi chú / Nhận xét", key: "notes", width: 28 },
+    ];
+
+    // Format Header Sheet 1
+    sheet1.getRow(1).height = 32;
+    sheet1.getRow(1).eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF065F46" }, // Emerald 800
+      };
+      cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+      cell.border = {
+        top: { style: "thin" },
+        left: { style: "thin" },
+        bottom: { style: "thin" },
+        right: { style: "thin" },
+      };
+    });
+
+    const formatDateVi = (d) => {
+      if (!d) return "";
+      const dt = new Date(d);
+      if (isNaN(dt.getTime())) return "";
+      const day = String(dt.getDate()).padStart(2, "0");
+      const month = String(dt.getMonth() + 1).padStart(2, "0");
+      const y = dt.getFullYear();
+      return `${day}/${month}/${y}`;
+    };
+
+    // Điền sẵn dữ liệu hồ sơ vào Sheet 1 để người dùng chỉ việc điền kết quả
+    if (records.length > 0) {
+      records.forEach((r, idx) => {
+        let attendedStr = "";
+        if (r.reportResult?.status === "REPORTED") {
+          attendedStr = r.reportResult.attended === true ? "Có" : (r.reportResult.attended === false ? "Không" : "");
+        }
+        let fundingStr = r.reportResult?.hasFundingSupport ? "Có" : "Không";
+
+        const row = sheet1.addRow({
+          stt: idx + 1,
+          recordId: r._id.toString(),
+          userName: r.userName || r.user?.name || "",
+          userEmail: r.user?.email || "",
+          departmentName: r.departmentName || r.department?.departmentName || "",
+          year: r.year || "",
+          trainingContent: r.trainingContent || "",
+          trainingForm: r.trainingForm || "Chứng chỉ",
+          attended: attendedStr,
+          notAttendedReason: r.reportResult?.notAttendedReason || "",
+          resultDetails: r.reportResult?.resultDetails || "",
+          certificateNumber: r.reportResult?.certificateNumber || "",
+          issueDate: formatDateVi(r.reportResult?.issueDate),
+          issuePlace: r.reportResult?.issuePlace || r.trainingLocation || "",
+          actualTrainingDuration: r.reportResult?.actualTrainingDuration || r.trainingDuration || "",
+          hasFundingSupport: fundingStr,
+          actualFundAmount: r.reportResult?.actualFundAmount || 0,
+          notes: r.reportResult?.managerConfirmNote || r.notes || "",
+        });
+
+        row.eachCell((cell, colNumber) => {
+          cell.border = {
+            top: { style: "thin", color: { argb: "FFE2E8F0" } },
+            left: { style: "thin", color: { argb: "FFE2E8F0" } },
+            bottom: { style: "thin", color: { argb: "FFE2E8F0" } },
+            right: { style: "thin", color: { argb: "FFE2E8F0" } },
+          };
+          if (colNumber === 17) {
+            cell.numFmt = "#,##0";
+            cell.alignment = { horizontal: "right", vertical: "middle" };
+          } else if ([1, 6, 9, 13, 16].includes(colNumber)) {
+            cell.alignment = { horizontal: "center", vertical: "middle" };
+          } else {
+            cell.alignment = { vertical: "middle" };
+          }
+        });
+      });
+    } else {
+      // Thêm 1 dòng mẫu
+      sheet1.addRow({
+        stt: 1,
+        recordId: "6a8... (hoặc để trống nếu tìm theo Tên)",
+        userName: "Nguyễn Văn A",
+        userEmail: "nguyenvana@namsaigon.edu.vn",
+        departmentName: userDeptName || "Khoa Công nghệ Thông tin",
+        year: year || new Date().getFullYear().toString(),
+        trainingContent: "Bồi dưỡng nghiệp vụ sư phạm",
+        trainingForm: "Chứng chỉ",
+        attended: "Có",
+        notAttendedReason: "",
+        resultDetails: "Hoàn thành xuất sắc",
+        certificateNumber: "CC-2026/0123",
+        issueDate: "20/08/2026",
+        issuePlace: "Trường Cán bộ Quản lý Giáo dục TP.HCM",
+        actualTrainingDuration: "03 tháng",
+        hasFundingSupport: "Có",
+        actualFundAmount: 2500000,
+        notes: "Đạt loại xuất sắc",
+      });
+    }
+
+    // Sheet 2: Danh mục tham chiếu & Dữ liệu liên quan
+    const sheet2 = workbook.addWorksheet("DanhMuc_ThamChieu");
+
+    const [allDepts, allUsers, allPositions] = await Promise.all([
+      Department.find().select("departmentName departmentCode").lean(),
+      User.find().select("name email department").populate("department", "departmentName").lean(),
+      Position.find().select("positionName").lean(),
+    ]);
+
+    sheet2.columns = [
+      { header: "Tham gia học chuẩn", key: "attendedOpt", width: 22 },
+      { header: "Xếp loại kết quả chuẩn", key: "resultOpt", width: 25 },
+      { header: "Hỗ trợ kinh phí", key: "fundingOpt", width: 20 },
+      { header: "Hình thức đào tạo", key: "formOpt", width: 22 },
+      { header: "Tên Đơn vị / Phòng ban", key: "deptName", width: 35 },
+      { header: "Họ tên nhân sự (Hệ thống)", key: "uName", width: 25 },
+      { header: "Email nhân sự", key: "uEmail", width: 30 },
+    ];
+
+    sheet2.getRow(1).height = 28;
+    sheet2.getRow(1).eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF1E3A8A" }, // Indigo 900
+      };
+      cell.alignment = { vertical: "middle", horizontal: "center" };
+    });
+
+    const attendedOpts = ["Có", "Không"];
+    const resultOpts = [
+      "Hoàn thành xuất sắc",
+      "Hoàn thành tốt",
+      "Hoàn thành",
+      "Đạt",
+      "Không đạt",
+      "Được cấp chứng chỉ",
+      "Được cấp chứng nhận",
+      "Được cấp văn bằng",
+    ];
+    const fundingOpts = ["Có", "Không"];
+    const formOpts = ["Chứng chỉ", "Chứng nhận", "Văn bằng", "Khác"];
+
+    const maxRows = Math.max(
+      attendedOpts.length,
+      resultOpts.length,
+      fundingOpts.length,
+      formOpts.length,
+      allDepts.length,
+      allUsers.length
+    );
+
+    for (let i = 0; i < maxRows; i++) {
+      sheet2.addRow({
+        attendedOpt: attendedOpts[i] || "",
+        resultOpt: resultOpts[i] || "",
+        fundingOpt: fundingOpts[i] || "",
+        formOpt: formOpts[i] || "",
+        deptName: allDepts[i]?.departmentName || "",
+        uName: allUsers[i]?.name || "",
+        uEmail: allUsers[i]?.email || "",
+      });
+    }
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename=Mau_Bao_Cao_Ket_Qua_Boi_Duong_${year || "All"}.xlsx`);
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error("Lỗi getReportResultTemplateExcel:", error);
+    res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });
+  }
+};
+
+/**
+ * 15. IMPORT KẾT QUẢ BỒI DƯỠNG TỪ FILE EXCEL
+ * Dành cho: Manager, Admin, Cấp trưởng, Cấp phó
+ */
+const importReportResults = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: "Vui lòng chọn file Excel để tải lên." });
+    }
+
+    const currentUser = await User.findById(req.user._id).populate("department").populate("position");
+    const { isBGH, isAdminOrManager, isMaiAnhThy, isCapTruong, isCapPho, isChuyenVien, userDeptId, userDeptName } =
+      getUserRoleInfo(currentUser);
+
+    if (isChuyenVien) {
+      return res.status(403).json({
+        success: false,
+        message: "Chuyên viên không có quyền import kết quả cho nhân sự khác. Vui lòng tự báo cáo kết quả trên giao diện cá nhân.",
+      });
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(req.file.buffer);
+
+    const worksheet = workbook.worksheets[0];
+    if (!worksheet) {
+      return res.status(400).json({ success: false, message: "File Excel không có trang tính hợp lệ." });
+    }
+
+    let updatedCount = 0;
+    let skippedCount = 0;
+    const errors = [];
+
+    // Helper parse date
+    const parseExcelDate = (val) => {
+      if (!val) return null;
+      if (val instanceof Date) return val;
+      if (typeof val === "number") {
+        // Excel serial date number
+        return new Date(Math.round((val - 25569) * 86400 * 1000));
+      }
+      if (typeof val === "string") {
+        const trimmed = val.trim();
+        // Check DD/MM/YYYY
+        const dmyMatch = trimmed.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+        if (dmyMatch) {
+          return new Date(Number(dmyMatch[3]), Number(dmyMatch[2]) - 1, Number(dmyMatch[1]));
+        }
+        // Check YYYY-MM-DD
+        const ymdMatch = trimmed.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+        if (ymdMatch) {
+          return new Date(Number(ymdMatch[1]), Number(ymdMatch[2]) - 1, Number(ymdMatch[3]));
+        }
+        const parsed = new Date(trimmed);
+        if (!isNaN(parsed.getTime())) return parsed;
+      }
+      return null;
+    };
+
+    // Duyệt qua từng dòng từ dòng 2
+    const rowsToProcess = [];
+    worksheet.eachRow((row, rowNumber) => {
+      if (rowNumber === 1) return;
+      rowsToProcess.push({ row, rowNumber });
+    });
+
+    for (const { row, rowNumber } of rowsToProcess) {
+      const rawRecordId = row.getCell(2).text ? row.getCell(2).text.trim() : "";
+      const rawUserName = row.getCell(3).text ? row.getCell(3).text.trim() : "";
+      const rawUserEmail = row.getCell(4).text ? row.getCell(4).text.trim() : "";
+      const rawDept = row.getCell(5).text ? row.getCell(5).text.trim() : "";
+      const rawYear = row.getCell(6).text ? row.getCell(6).text.trim() : "";
+      const rawContent = row.getCell(7).text ? row.getCell(7).text.trim() : "";
+      const rawAttended = row.getCell(9).text ? row.getCell(9).text.trim().toLowerCase() : "";
+      const rawNotAttendedReason = row.getCell(10).text ? row.getCell(10).text.trim() : "";
+      const rawResultDetails = row.getCell(11).text ? row.getCell(11).text.trim() : "";
+      const rawCertNum = row.getCell(12).text ? row.getCell(12).text.trim() : "";
+      const rawIssueDate = row.getCell(13).value;
+      const rawIssuePlace = row.getCell(14).text ? row.getCell(14).text.trim() : "";
+      const rawActualDuration = row.getCell(15).text ? row.getCell(15).text.trim() : "";
+      const rawFunding = row.getCell(16).text ? row.getCell(16).text.trim().toLowerCase() : "";
+      const rawActualFund = row.getCell(17).value;
+      const rawNotes = row.getCell(18).text ? row.getCell(18).text.trim() : "";
+
+      // Bỏ qua dòng hoàn toàn trống
+      if (!rawRecordId && !rawUserName && !rawContent) {
+        continue;
+      }
+
+      // 1. Tìm hồ sơ đăng ký
+      let targetRecord = null;
+      if (rawRecordId && rawRecordId.length === 24 && /^[0-9a-fA-F]{24}$/.test(rawRecordId)) {
+        targetRecord = await TrainingRegistration.findById(rawRecordId);
+      }
+
+      // Fallback nếu không có Mã hồ sơ: tìm theo tên + nội dung bồi dưỡng
+      if (!targetRecord && rawContent) {
+        const findQuery = { trainingContent: new RegExp(rawContent.trim(), "i") };
+        if (rawYear) findQuery.year = rawYear;
+        if (rawUserName) {
+          findQuery.userName = new RegExp(rawUserName.trim(), "i");
+        }
+        targetRecord = await TrainingRegistration.findOne(findQuery);
+      }
+
+      if (!targetRecord) {
+        errors.push(`Dòng ${rowNumber}: Không tìm thấy hồ sơ bồi dưỡng phù hợp (Mã: "${rawRecordId}", Tên: "${rawUserName}", Khóa học: "${rawContent}").`);
+        skippedCount++;
+        continue;
+      }
+
+      // 2. Kiểm tra phân quyền: Cấp trưởng / cấp phó chỉ được cập nhật cho thành viên trong đơn vị mình
+      if (isCapTruong || isCapPho) {
+        const recDeptId = targetRecord.department?.toString();
+        if (recDeptId && userDeptId && recDeptId !== userDeptId.toString()) {
+          errors.push(
+            `Dòng ${rowNumber}: Nhân sự "${targetRecord.userName}" thuộc đơn vị khác. Cấp trưởng/phó chỉ được nạp kết quả cho nhân sự đơn vị mình.`
+          );
+          skippedCount++;
+          continue;
+        }
+      }
+
+      // 3. Phân tích trạng thái tham gia
+      let attended = true;
+      if (
+        rawAttended === "không" ||
+        rawAttended === "khong" ||
+        rawAttended === "false" ||
+        rawAttended === "0" ||
+        rawAttended === "không tham gia"
+      ) {
+        attended = false;
+      }
+
+      // 4. Phân tích kinh phí
+      let hasFundingSupport = false;
+      if (
+        rawFunding === "có" ||
+        rawFunding === "co" ||
+        rawFunding === "true" ||
+        rawFunding === "1" ||
+        rawFunding === "có hỗ trợ"
+      ) {
+        hasFundingSupport = true;
+      }
+
+      let actualFundAmount = 0;
+      if (rawActualFund !== null && rawActualFund !== undefined && rawActualFund !== "") {
+        const cleanedFund = typeof rawActualFund === "string" ? rawActualFund.replace(/[^0-9]/g, "") : rawActualFund;
+        actualFundAmount = Number(cleanedFund) || 0;
+      }
+
+      const issueDate = parseExcelDate(rawIssueDate);
+
+      // 5. Cập nhật reportResult
+      targetRecord.reportResult = targetRecord.reportResult || {};
+      targetRecord.reportResult.status = "REPORTED";
+      targetRecord.reportResult.attended = attended;
+      targetRecord.reportResult.notAttendedReason = attended ? "" : (rawNotAttendedReason || "Không tham gia");
+      targetRecord.reportResult.resultDetails = rawResultDetails || (attended ? "Hoàn thành" : "Không hoàn thành");
+      targetRecord.reportResult.certificateNumber = rawCertNum;
+      targetRecord.reportResult.issueDate = issueDate;
+      targetRecord.reportResult.issuePlace = rawIssuePlace;
+      targetRecord.reportResult.actualTrainingDuration = rawActualDuration;
+      targetRecord.reportResult.hasFundingSupport = hasFundingSupport;
+      targetRecord.reportResult.actualFundAmount = actualFundAmount;
+      targetRecord.reportResult.reportedBy = req.user._id;
+      targetRecord.reportResult.reportedByName = currentUser.name;
+      targetRecord.reportResult.reportedAt = new Date();
+
+      // Nếu người import là Manager / Admin hoặc Mai Anh Thy -> tự động xác nhận luôn
+      if (isAdminOrManager || isMaiAnhThy) {
+        targetRecord.reportResult.managerConfirmed = true;
+        targetRecord.reportResult.confirmedBy = req.user._id;
+        targetRecord.reportResult.confirmedByName = currentUser.name;
+        targetRecord.reportResult.confirmedAt = new Date();
+        if (rawNotes) {
+          targetRecord.reportResult.managerConfirmNote = rawNotes;
+        }
+      }
+
+      // 6. Ghi log lịch sử
+      targetRecord.history.push({
+        action: "Import báo cáo kết quả",
+        actor: req.user._id,
+        actorName: currentUser.name,
+        actorRole: currentUser.role,
+        details: `Cập nhật kết quả bồi dưỡng qua file Excel: ${attended ? "Đã tham gia" : "Không tham gia"}${rawResultDetails ? ` - ${rawResultDetails}` : ""}`,
+        timestamp: new Date(),
+      });
+
+      await targetRecord.save();
+      updatedCount++;
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Đã import thành công kết quả cho ${updatedCount} hồ sơ bồi dưỡng.${skippedCount > 0 ? ` Bỏ qua ${skippedCount} dòng có lỗi.` : ""}`,
+      updatedCount,
+      skippedCount,
+      errors,
+    });
+  } catch (error) {
+    console.error("Lỗi importReportResults:", error);
+    return res.status(500).json({ success: false, message: "Lỗi máy chủ khi import kết quả", error: error.message });
+  }
+};
+
 module.exports = {
   createRegistrations,
   getRegistrations,
@@ -1898,4 +2339,6 @@ module.exports = {
   getTemplateExcel,
   exportExcel,
   importExcel,
+  getReportResultTemplateExcel,
+  importReportResults,
 };
