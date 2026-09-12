@@ -11,8 +11,9 @@ router.post("/import", verifyToken, upload.single("file"), controller.importExce
 router.get("/report-result-template", verifyToken, controller.getReportResultTemplateExcel);
 router.post("/import-results", verifyToken, upload.single("file"), controller.importReportResults);
 
-// 2. Thống kê tổng hợp
+// 2. Thống kê tổng hợp & Số lượng chờ duyệt
 router.get("/stats", verifyToken, controller.getStats);
+router.get("/pending-count", verifyToken, controller.getTrainingPendingCount);
 
 // 3. Upload file minh chứng kết quả bồi dưỡng lên Google Drive
 router.post("/upload-proof", verifyToken, upload.array("files", 10), controller.uploadProofFiles);

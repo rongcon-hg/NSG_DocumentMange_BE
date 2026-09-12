@@ -1115,6 +1115,12 @@ const getEmulationPendingCount = async (req, res) => {
       $or: userConditions,
     });
 
+    // 4. Đếm hồ sơ đang chưa duyệt (PENDING, SUBMITTED_TO_BGH) của user hoặc đơn vị mình
+    const pendingForUser = await EmulationRegistration.countDocuments({
+      status: { $in: ["PENDING", "SUBMITTED_TO_BGH"] },
+      $or: userConditions,
+    });
+
     let totalActionableCount = 0;
     if (isAdmin) {
       totalActionableCount = pendingForManager + pendingForBGH;
@@ -1123,7 +1129,7 @@ const getEmulationPendingCount = async (req, res) => {
     } else if (isBGH) {
       totalActionableCount = pendingForBGH;
     } else {
-      totalActionableCount = rejectedForUser;
+      totalActionableCount = pendingForUser > 0 ? pendingForUser : rejectedForUser;
     }
 
     res.status(200).json({
@@ -1132,6 +1138,7 @@ const getEmulationPendingCount = async (req, res) => {
         pendingForManager,
         pendingForBGH,
         rejectedForUser,
+        pendingForUser,
         totalActionableCount,
       },
     });

@@ -7,6 +7,11 @@ const User = require("../models/user.model");
 const Department = require("../models/department.model");
 const Position = require("../models/position.model");
 const DriveConfig = require("../models/driveConfig.model");
+const Notification = require("../models/notification.model");
+const {
+  sendOnlineRecordSubmitEmail,
+  sendOnlineRecordStatusEmail,
+} = require("../service/NodeMailer.service/email");
 
 // Helper: Authorize Google Drive
 async function authorizeDrive() {
@@ -329,6 +334,37 @@ const createRecord = async (req, res) => {
 
     await newRecord.save();
 
+    // Gửi thông báo chuông và email thông báo đến người nhận (bất đồng bộ)
+    (async () => {
+      try {
+        if (recipients && recipients.length > 0) {
+          // 1. Tạo chuông thông báo
+          const notifs = recipients.map((rId) => ({
+            recipient: rId,
+            sender: currentUserId,
+            type: "GENERAL",
+            title: "Hồ sơ trực tuyến mới cần xử lý",
+            message: `${senderName} vừa gửi hồ sơ: "${newRecord.title}" (${categoryDoc.name}).`,
+            link: "/online-records/list",
+            isRead: false,
+            isPopupShown: false,
+          }));
+
+          if (notifs.length > 0) {
+            await Notification.insertMany(notifs);
+          }
+
+          // 2. Gửi email
+          const recipientUserDocs = await User.find({ _id: { $in: recipients } }).select(
+            "name email emailNotifications role"
+          );
+          await sendOnlineRecordSubmitEmail(recipientUserDocs, newRecord, senderName);
+        }
+      } catch (mailErr) {
+        console.error("Lỗi gửi thông báo / email hồ sơ trực tuyến mới:", mailErr);
+      }
+    })();
+
     res.status(201).json({
       success: true,
       message: "Gửi hồ sơ trực tuyến thành công!",
@@ -516,6 +552,48 @@ const reviewRecord = async (req, res) => {
 
     await record.save();
 
+    // Gửi thông báo chuông và email thông báo xét duyệt đến người nộp hồ sơ (bất đồng bộ)
+    (async () => {
+      try {
+        const statusTextMap = {
+          APPROVED: "được phê duyệt",
+          REJECTED: "bị từ chối / yêu cầu bổ sung",
+          PROCESSING: "đang được tiếp nhận xử lý",
+        };
+
+        if (record.sender && String(record.sender) !== String(currentUserId)) {
+          // 1. Chuông thông báo cho người nộp
+          await Notification.create({
+            recipient: record.sender,
+            sender: currentUserId,
+            type: "GENERAL",
+            title: `Hồ sơ trực tuyến ${statusTextMap[status] || "được cập nhật"}`,
+            message: `Hồ sơ "${record.title}" của bạn đã ${statusTextMap[status] || "được cập nhật"} bởi ${reviewerName}.${reviewOpinion ? ` (Ý kiến: ${reviewOpinion})` : ""}`,
+            link: "/online-records/list",
+            isRead: false,
+            isPopupShown: false,
+          });
+
+          // 2. Email thông báo cho người nộp
+          const senderUser = await User.findById(record.sender).select(
+            "name email emailNotifications role"
+          );
+          if (senderUser) {
+            await sendOnlineRecordStatusEmail(
+              [senderUser],
+              record,
+              status,
+              reviewOpinion,
+              reviewerName,
+              reviewerRole === "manager" || reviewerRole === "admin" ? "Cấp Quản lý" : "Người nhận"
+            );
+          }
+        }
+      } catch (notifyErr) {
+        console.error("Lỗi gửi thông báo / email xét duyệt hồ sơ trực tuyến:", notifyErr);
+      }
+    })();
+
     res.status(200).json({
       success: true,
       message: `Đã cập nhật trạng thái hồ sơ của bạn: ${statusMap[status]}`,
@@ -555,16 +633,63 @@ const deleteRecord = async (req, res) => {
   }
 };
 
-// Lấy số lượng hồ sơ chờ xử lý (cho chuông thông báo)
+// Lấy số lượng hồ sơ chờ xử lý (cho chuông thông báo & badge menu)
 const getPendingRecordCount = async (req, res) => {
   try {
     const currentUserId = req.user?.userId || req.user?._id;
-    const count = await OnlineRecord.countDocuments({
-      recipients: currentUserId,
-      status: "PENDING",
-    });
+    const currentUserRole = req.user?.role;
+    const isAdminOrManager = currentUserRole === "admin" || currentUserRole === "manager";
 
-    res.status(200).json({ success: true, count });
+    let pendingCount = 0;
+    let pendingToReviewCount = 0; // Hồ sơ gửi đến mình cần duyệt
+    let pendingMySubmissions = 0; // Hồ sơ do mình nộp đang chờ duyệt
+
+    if (isAdminOrManager) {
+      // Manager/Admin thấy tất cả hồ sơ đang ở trạng thái PENDING trên toàn trường
+      pendingCount = await OnlineRecord.countDocuments({
+        status: "PENDING",
+      });
+      pendingToReviewCount = pendingCount;
+    } else {
+      // 1. Hồ sơ gửi đến mình mà mình chưa duyệt
+      pendingToReviewCount = await OnlineRecord.countDocuments({
+        status: { $in: ["PENDING", "PROCESSING"] },
+        $or: [
+          {
+            recipientReviews: {
+              $elemMatch: {
+                user: currentUserId,
+                status: "PENDING",
+              },
+            },
+          },
+          {
+            recipients: currentUserId,
+            "recipientReviews.user": { $ne: currentUserId },
+          },
+        ],
+      });
+
+      // 2. Hồ sơ do mình gửi mà chưa được duyệt xong
+      pendingMySubmissions = await OnlineRecord.countDocuments({
+        sender: currentUserId,
+        status: "PENDING",
+      });
+
+      // Nếu người dùng có hồ sơ cần duyệt -> ưu tiên hiển thị số cần duyệt
+      // Nếu không có hồ sơ cần duyệt -> hiển thị số hồ sơ của mình đang chờ duyệt
+      pendingCount = pendingToReviewCount > 0 ? pendingToReviewCount : pendingMySubmissions;
+    }
+
+    res.status(200).json({
+      success: true,
+      count: pendingCount,
+      data: {
+        pendingCount,
+        pendingToReviewCount,
+        pendingMySubmissions,
+      },
+    });
   } catch (error) {
     console.error("Lỗi getPendingRecordCount:", error);
     res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });

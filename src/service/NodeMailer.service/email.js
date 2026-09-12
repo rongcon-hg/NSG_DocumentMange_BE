@@ -6,7 +6,9 @@ const {
     EMULATION_REGISTRATION_EMAIL_TEMPLATE,
     EMULATION_STATUS_EMAIL_TEMPLATE,
     TRAINING_REGISTRATION_EMAIL_TEMPLATE,
-    TRAINING_STATUS_EMAIL_TEMPLATE
+    TRAINING_STATUS_EMAIL_TEMPLATE,
+    ONLINE_RECORD_SUBMIT_EMAIL_TEMPLATE,
+    ONLINE_RECORD_STATUS_EMAIL_TEMPLATE,
 } = require("./emailTemplate");
 const nodemailer = require("nodemailer");
 const dotenv = require("dotenv");
@@ -794,6 +796,133 @@ const sendTrainingStatusEmail = async (uniqueUsers, record, actionType, note = "
     }
 };
 
+const sendOnlineRecordSubmitEmail = async (uniqueUsers, recordData, senderName = "Cán bộ") => {
+    try {
+        if (!uniqueUsers || uniqueUsers.length === 0 || !recordData) return;
+        const allowedUsers = uniqueUsers.filter(u => !u.emailNotifications || u.emailNotifications.onlineRecord !== false);
+        const bccList = allowedUsers.map(u => u.email).filter(e => !!e);
+        if (bccList.length === 0) return;
+
+        const { transporter, sender } = await getTransporterAndSender();
+
+        const createdAtStr = formatVietnamDateTime(recordData.createdAt || Date.now());
+
+        // Files đính kèm HTML
+        let linksHtml = "";
+        const files = recordData.attachedFiles || [];
+        if (files.length > 0) {
+            linksHtml = files.map(f => {
+                const url = f.fileUrl || `https://drive.google.com/file/d/${f.fileId}/view`;
+                const typeName = f.attachmentTypeName || "Tài liệu";
+                return `<li style="margin: 4px 0;"><a href="${url}" target="_blank" style="color: #0d9488; text-decoration: none; font-weight: 500;">📎 ${typeName}: ${f.fileName || 'Xem file'}</a> ${f.size ? `<span style="color: #94a3b8; font-size: 11px;">(${f.size})</span>` : ''}</li>`;
+            }).join('');
+        } else {
+            linksHtml = "<li>Không có tệp đính kèm</li>";
+        }
+
+        const recipientsList = (recordData.recipientNames && recordData.recipientNames.length > 0)
+            ? recordData.recipientNames.join(', ')
+            : (recordData.recipients && recordData.recipients.map(r => r.name || r).join(', ')) || "Ban Giám hiệu / Quản lý";
+
+        const subject = `[Hồ sơ trực tuyến] ${senderName} vừa gửi hồ sơ: ${recordData.title || "Hồ sơ mới"}`;
+
+        let htmlContent = ONLINE_RECORD_SUBMIT_EMAIL_TEMPLATE
+            .replace(/{senderName}/g, senderName)
+            .replace(/{senderPosition}/g, recordData.positionName || "Cán bộ")
+            .replace(/{senderDepartment}/g, recordData.departmentName || "Đơn vị")
+            .replace(/{senderPhone}/g, recordData.phoneNumber || "--")
+            .replace(/{senderEmail}/g, recordData.email || "--")
+            .replace(/{categoryName}/g, recordData.categoryName || recordData.category?.name || "Hồ sơ trực tuyến")
+            .replace(/{recordTitle}/g, recordData.title || "--")
+            .replace(/{createdAt}/g, createdAtStr)
+            .replace(/{recipientsList}/g, recipientsList)
+            .replace(/{notes}/g, recordData.note || "Không có ghi chú thêm.")
+            .replace(/{filesCount}/g, files.length)
+            .replace(/{linksHtml}/g, linksHtml);
+
+        const mailOptions = {
+            from: sender,
+            to: sender,
+            bcc: bccList.join(','),
+            subject: subject,
+            html: htmlContent,
+        };
+
+        await transporter.sendMail(mailOptions).catch(err => console.error(`Error sending online record submit email:`, err));
+        return true;
+    } catch (error) {
+        console.error("Error in sendOnlineRecordSubmitEmail:", error);
+    }
+};
+
+const sendOnlineRecordStatusEmail = async (uniqueUsers, recordData, status, opinion = "", reviewerName = "Người duyệt", reviewerRole = "Quản lý") => {
+    try {
+        if (!uniqueUsers || uniqueUsers.length === 0 || !recordData) return;
+        const allowedUsers = uniqueUsers.filter(u => !u.emailNotifications || u.emailNotifications.onlineRecord !== false);
+        const bccList = allowedUsers.map(u => u.email).filter(e => !!e);
+        if (bccList.length === 0) return;
+
+        const { transporter, sender } = await getTransporterAndSender();
+
+        let actionName = "Cập nhật xử lý hồ sơ";
+        let statusLabel = '<span style="color: #0284c7; font-weight: bold;">Đang tiếp nhận xử lý</span>';
+        let headerColorStart = "#0284c7";
+        let headerColorEnd = "#38bdf8";
+        let headerBorderColor = "#0284c7";
+
+        if (status === "APPROVED") {
+            actionName = "Hồ sơ đã được phê duyệt";
+            statusLabel = '<span style="color: #059669; font-weight: bold;">✓ Đã phê duyệt</span>';
+            headerColorStart = "#059669";
+            headerColorEnd = "#10b981";
+            headerBorderColor = "#059669";
+        } else if (status === "REJECTED") {
+            actionName = "Hồ sơ bị từ chối / Cần bổ sung";
+            statusLabel = '<span style="color: #dc2626; font-weight: bold;">✕ Từ chối / Yêu cầu bổ sung</span>';
+            headerColorStart = "#dc2626";
+            headerColorEnd = "#f87171";
+            headerBorderColor = "#dc2626";
+        } else if (status === "PROCESSING") {
+            actionName = "Hồ sơ đang được xử lý";
+            statusLabel = '<span style="color: #2563eb; font-weight: bold;">Đang tiếp nhận xử lý</span>';
+            headerColorStart = "#1d4ed8";
+            headerColorEnd = "#3b82f6";
+            headerBorderColor = "#1d4ed8";
+        }
+
+        const actionTime = formatVietnamDateTime();
+        const subject = `[Hồ sơ trực tuyến - ${actionName}] ${recordData.title || "Hồ sơ"}`;
+
+        let htmlContent = ONLINE_RECORD_STATUS_EMAIL_TEMPLATE
+            .replace(/{actionName}/g, actionName)
+            .replace(/{headerColorStart}/g, headerColorStart)
+            .replace(/{headerColorEnd}/g, headerColorEnd)
+            .replace(/{headerBorderColor}/g, headerBorderColor)
+            .replace(/{recordTitle}/g, recordData.title || "--")
+            .replace(/{categoryName}/g, recordData.categoryName || recordData.category?.name || "Hồ sơ trực tuyến")
+            .replace(/{senderName}/g, recordData.fullName || recordData.sender?.name || "--")
+            .replace(/{senderDepartment}/g, recordData.departmentName || recordData.sender?.department?.departmentName || "--")
+            .replace(/{statusLabel}/g, statusLabel)
+            .replace(/{reviewerName}/g, reviewerName)
+            .replace(/{reviewerRole}/g, reviewerRole)
+            .replace(/{actionTime}/g, actionTime)
+            .replace(/{opinion}/g, opinion || "Không có ý kiến bổ sung.");
+
+        const mailOptions = {
+            from: sender,
+            to: sender,
+            bcc: bccList.join(','),
+            subject: subject,
+            html: htmlContent,
+        };
+
+        await transporter.sendMail(mailOptions).catch(err => console.error(`Error sending online record status email:`, err));
+        return true;
+    } catch (error) {
+        console.error("Error in sendOnlineRecordStatusEmail:", error);
+    }
+};
+
 module.exports = {
     sentTempPassword,
     sendRestoreOtpEmail,
@@ -805,4 +934,6 @@ module.exports = {
     sendEmulationStatusEmail,
     sendTrainingRegistrationEmail,
     sendTrainingStatusEmail,
+    sendOnlineRecordSubmitEmail,
+    sendOnlineRecordStatusEmail,
 };

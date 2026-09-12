@@ -2307,6 +2307,56 @@ const importReportResults = async (req, res) => {
   }
 };
 
+/**
+ * Lấy số lượng hồ sơ bồi dưỡng chưa duyệt (cho Chuông thông báo & Badge menu)
+ */
+const getTrainingPendingCount = async (req, res) => {
+  try {
+    const currentUser = await User.findById(req.user._id)
+      .populate("department")
+      .populate("position");
+
+    if (!currentUser) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    const { isAdminOrManager, isMaiAnhThy, isBGH, userDeptId } = getUserRoleInfo(currentUser);
+
+    let pendingCount = 0;
+
+    if (isAdminOrManager || isMaiAnhThy || isBGH) {
+      // Cấp xét duyệt (Manager/Admin/Mai Anh Thy/BGH): đếm tất cả hồ sơ PENDING toàn trường
+      pendingCount = await TrainingRegistration.countDocuments({
+        status: "PENDING",
+      });
+    } else {
+      // Các cấp khác (Trưởng/Phó đơn vị, GV-CV): đếm hồ sơ PENDING thuộc đơn vị hoặc do mình tạo/được đăng ký
+      const userConditions = [
+        { user: currentUser._id },
+        { createdByUser: currentUser._id },
+      ];
+      if (userDeptId) {
+        userConditions.push({ department: userDeptId });
+      }
+      pendingCount = await TrainingRegistration.countDocuments({
+        status: "PENDING",
+        $or: userConditions,
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      count: pendingCount,
+      data: {
+        pendingCount,
+      },
+    });
+  } catch (error) {
+    console.error("Lỗi getTrainingPendingCount:", error);
+    res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });
+  }
+};
+
 module.exports = {
   createRegistrations,
   getRegistrations,
@@ -2325,4 +2375,5 @@ module.exports = {
   importExcel,
   getReportResultTemplateExcel,
   importReportResults,
+  getTrainingPendingCount,
 };
