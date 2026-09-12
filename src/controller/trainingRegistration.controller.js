@@ -2237,9 +2237,18 @@ const importReportResults = async (req, res) => {
           .filter(Boolean);
 
         for (let i = 0; i < links.length; i++) {
-          const item = links[i];
           const isUrl = /^https?:\/\//i.test(item);
-          const fName = isUrl ? (item.split("/").pop().split("?")[0] || `Minh chứng ${i + 1}`) : item;
+          let fName = item;
+          if (isUrl) {
+            const parts = item.split("/").filter(Boolean);
+            const lastPart = parts.pop()?.split("?")[0] || "";
+            if (!lastPart || /^(view|preview|edit|download)$/i.test(lastPart)) {
+              const cert = rawCertNum ? ` (${rawCertNum})` : ` ${i + 1}`;
+              fName = `Tệp minh chứng${cert}`;
+            } else {
+              fName = decodeURIComponent(lastPart);
+            }
+          }
           const alreadyExists = targetRecord.reportResult.proofFiles.some(
             (p) => (p.fileUrl && p.fileUrl === item) || (p.fileName && p.fileName === item)
           );
