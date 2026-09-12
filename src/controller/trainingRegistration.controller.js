@@ -443,7 +443,7 @@ const getRegistrations = async (req, res) => {
     const shouldFetchAll = fetchAll === "true";
 
     let dbQuery = TrainingRegistration.find(query)
-      .populate("user", "name email phone department position avatar")
+      .populate("user", "name email phone mobile phoneNumber department position avatar")
       .populate("department", "departmentName departmentCode")
       .populate("position", "positionName")
       .populate("createdByUser", "name email")
@@ -480,7 +480,7 @@ const getRegistrationById = async (req, res) => {
   try {
     const { id } = req.params;
     const record = await TrainingRegistration.findById(id)
-      .populate("user", "name email phone department position avatar")
+      .populate("user", "name email phone mobile phoneNumber department position avatar")
       .populate("department", "departmentName departmentCode")
       .populate("position", "positionName")
       .populate("createdByUser", "name email")
