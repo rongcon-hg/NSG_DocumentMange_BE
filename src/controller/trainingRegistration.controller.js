@@ -466,6 +466,12 @@ const getRegistrations = async (req, res) => {
       total,
       page: pageNum,
       totalPages: shouldFetchAll ? 1 : Math.ceil(total / limitNum) || 1,
+      pagination: {
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: shouldFetchAll ? 1 : Math.ceil(total / limitNum) || 1,
+      },
     });
   } catch (error) {
     console.error("Lỗi getRegistrations:", error);
