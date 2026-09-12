@@ -239,9 +239,16 @@ const createRecord = async (req, res) => {
       return res.status(400).json({ success: false, message: "Loại hồ sơ không hợp lệ" });
     }
 
-    // Lấy tên các người nhận
-    const recipientUsers = await User.find({ _id: { $in: recipients } }).select("name");
+    // Lấy danh sách người nhận và khởi tạo trạng thái duyệt riêng lẻ cho từng người
+    const recipientUsers = await User.find({ _id: { $in: recipients } }).select("name role");
     const recipientNames = recipientUsers.map((u) => u.name);
+    const recipientReviews = recipientUsers.map((u) => ({
+      user: u._id,
+      userName: u.name,
+      userRole: u.role || "recipient",
+      status: "PENDING",
+      reviewOpinion: "",
+    }));
 
     // Lấy thông tin user hiện tại nếu frontend chưa gửi kèm đầy đủ
     let senderName = fullName;
@@ -286,6 +293,7 @@ const createRecord = async (req, res) => {
       note: note || "",
       recipients,
       recipientNames,
+      recipientReviews,
       attachedFiles: Array.isArray(attachedFiles) ? attachedFiles : [],
       status: "PENDING",
       history: [historyEntry],
@@ -404,26 +412,76 @@ const reviewRecord = async (req, res) => {
       return res.status(403).json({ success: false, message: "Bạn không có thẩm quyền xử lý hồ sơ này" });
     }
 
-    const reviewer = await User.findById(currentUserId).select("name");
+    const reviewer = await User.findById(currentUserId).select("name role");
+    const reviewerName = reviewer ? reviewer.name : "Người duyệt";
+    const reviewerRole = currentUserRole || reviewer?.role || "reviewer";
 
-    record.status = status;
+    // 1. Cập nhật ý kiến và trạng thái của riêng người duyệt này trong recipientReviews
+    if (!record.recipientReviews) {
+      record.recipientReviews = [];
+    }
+
+    let reviewItem = record.recipientReviews.find(
+      (r) => String(r.user) === String(currentUserId)
+    );
+
+    if (reviewItem) {
+      reviewItem.status = status;
+      reviewItem.reviewOpinion = reviewOpinion || "";
+      reviewItem.reviewedAt = new Date();
+    } else {
+      // Nếu là Admin/Manager duyệt mà không nằm trong recipients ban đầu
+      record.recipientReviews.push({
+        user: currentUserId,
+        userName: reviewerName,
+        userRole: reviewerRole,
+        status: status,
+        reviewOpinion: reviewOpinion || "",
+        reviewedAt: new Date(),
+      });
+    }
+
+    // 2. Tính toán lại trạng thái tổng thể của hồ sơ
+    // Nếu có ít nhất 1 người REJECTED -> hồ sơ tổng thể REJECTED
+    // Nếu tất cả người nhận đều APPROVED (hoặc Admin/Manager duyệt APPROVED) -> APPROVED
+    // Ngược lại nếu có người PROCESSING hoặc APPROVED một phần -> PROCESSING
+    const reviews = record.recipientReviews || [];
+    const hasRejected = reviews.some((r) => r.status === "REJECTED");
+    const allApproved =
+      reviews.length > 0 && reviews.every((r) => r.status === "APPROVED");
+    const hasApprovedOrProcessing = reviews.some(
+      (r) => r.status === "APPROVED" || r.status === "PROCESSING"
+    );
+
+    if (hasRejected) {
+      record.status = "REJECTED";
+    } else if (allApproved || (isAdminOrManager && status === "APPROVED")) {
+      record.status = "APPROVED";
+    } else if (hasApprovedOrProcessing) {
+      record.status = "PROCESSING";
+    } else {
+      record.status = "PENDING";
+    }
+
     record.reviewOpinion = reviewOpinion || "";
     record.reviewedBy = currentUserId;
-    record.reviewedByName = reviewer ? reviewer.name : "Người duyệt";
+    record.reviewedByName = reviewerName;
     record.reviewedAt = new Date();
 
     const statusMap = {
       PROCESSING: "Đang tiếp nhận xử lý",
-      APPROVED: "Đã phê duyệt / Tiếp nhận thành công",
+      APPROVED: "Đã phê duyệt",
       REJECTED: "Từ chối / Yêu cầu bổ sung",
     };
 
     const historyEntry = {
       action: status,
       actor: currentUserId,
-      actorName: reviewer ? reviewer.name : "Người duyệt",
-      actorRole: currentUserRole || "reviewer",
-      details: `${statusMap[status]}${reviewOpinion ? `: ${reviewOpinion}` : ""}`,
+      actorName: reviewerName,
+      actorRole: reviewerRole,
+      details: `${reviewerName} (${reviewerRole === "manager" || reviewerRole === "admin" ? "Cấp Quản lý" : "Người nhận"}) ${statusMap[status]}${
+        reviewOpinion ? `: ${reviewOpinion}` : ""
+      }`,
       timestamp: new Date(),
     };
     record.history.push(historyEntry);
@@ -432,7 +490,7 @@ const reviewRecord = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: `Đã cập nhật trạng thái hồ sơ: ${statusMap[status]}`,
+      message: `Đã cập nhật trạng thái hồ sơ của bạn: ${statusMap[status]}`,
       data: record,
     });
   } catch (error) {

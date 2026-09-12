@@ -42,7 +42,7 @@ const recordHistorySchema = new mongoose.Schema(
   {
     action: {
       type: String,
-      required: true, // "CREATED", "REVIEWED", "APPROVED", "REJECTED", "UPDATED", "CANCELLED"
+      required: true, // "CREATED", "PROCESSING", "APPROVED", "REJECTED", "UPDATED", "CANCELLED"
     },
     actor: {
       type: mongoose.Schema.Types.ObjectId,
@@ -63,6 +63,38 @@ const recordHistorySchema = new mongoose.Schema(
     timestamp: {
       type: Date,
       default: Date.now,
+    },
+  },
+  { _id: true }
+);
+
+// Trạng thái phê duyệt riêng lẻ theo từng người nhận
+const recipientReviewSchema = new mongoose.Schema(
+  {
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+    userName: {
+      type: String,
+      default: "",
+    },
+    userRole: {
+      type: String,
+      default: "",
+    },
+    status: {
+      type: String,
+      enum: ["PENDING", "PROCESSING", "APPROVED", "REJECTED"],
+      default: "PENDING",
+    },
+    reviewOpinion: {
+      type: String,
+      default: "",
+    },
+    reviewedAt: {
+      type: Date,
     },
   },
   { _id: true }
@@ -135,7 +167,7 @@ const onlineRecordSchema = new mongoose.Schema(
       default: "",
     },
 
-    // Người nhận (có thể gửi 1 hoặc nhiều người nhận theo quy định)
+    // Người nhận (mảng User ref)
     recipients: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -144,17 +176,24 @@ const onlineRecordSchema = new mongoose.Schema(
     ],
     recipientNames: [{ type: String }],
 
+    // Trạng thái phê duyệt/xử lý theo từng người nhận riêng lẻ
+    recipientReviews: [recipientReviewSchema],
+
     // Danh sách file đính kèm theo danh mục
     attachedFiles: [attachedFileSchema],
 
-    // Trạng thái hồ sơ
+    // Trạng thái tổng quát của hồ sơ:
+    // PENDING: Chưa ai duyệt hoặc đang chờ
+    // PROCESSING: Có ít nhất 1 người đang tiếp nhận
+    // APPROVED: Tất cả người nhận đã phê duyệt (hoặc Manager/Admin duyệt)
+    // REJECTED: Bị từ chối bởi ít nhất 1 người nhận (hoặc Manager/Admin)
     status: {
       type: String,
       enum: ["PENDING", "PROCESSING", "APPROVED", "REJECTED", "CANCELLED"],
       default: "PENDING",
     },
 
-    // Ý kiến xử lý / phản hồi của cấp duyệt
+    // Ý kiến xử lý / phản hồi gần nhất
     reviewOpinion: {
       type: String,
       default: "",
@@ -171,7 +210,7 @@ const onlineRecordSchema = new mongoose.Schema(
       type: Date,
     },
 
-    // Lịch sử xử lý
+    // Lịch sử xử lý tiến trình hồ sơ
     history: [recordHistorySchema],
   },
   {
