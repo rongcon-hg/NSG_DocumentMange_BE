@@ -65,6 +65,7 @@ const createTasksAndSyncGoogleCalendar = async (document, uniqueUsers) => {
         const taskDescription = document.shortDescription || 'N/A';
         const startDate = document.receivedAt || document.createAt || new Date();
         const endDate = new Date(document.deadlineDay);
+        endDate.setHours(23, 59, 59, 999);
 
         let taskPriority = 'NORMAL';
         if (document.urgency === 'high') {
