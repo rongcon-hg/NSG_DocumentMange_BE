@@ -1247,9 +1247,9 @@ const getKpiStats = async (req, res) => {
                     else stat.inProgressTasks += 1;
                 }
 
-                if (task.evaluation && task.evaluation.score !== undefined && task.evaluation.evaluatedBy) {
+                if (evalSource && evalSource.score !== undefined && evalSource.evaluatedBy) {
                     stat.evaluatedTasksCount += 1;
-                    stat.totalEvaluationScore += task.evaluation.score;
+                    stat.totalEvaluationScore += evalSource.score;
                 }
 
                 // Không tính điểm quy đổi vào tổng A và B đối với công việc chưa làm/đang làm còn trong hạn
@@ -1405,8 +1405,21 @@ const getKpiStats = async (req, res) => {
                 };
             });
 
-        // Sắp xếp theo KPI thang 70 giảm dần
-        userStats.sort((a, b) => b.kpiScore70 - a.kpiScore70);
+        // Sắp xếp theo tiêu chuẩn Phụ lục 4:
+        // 1. Điểm KPI Thang 70 cao nhất
+        // 2. Điểm thưởng đề xuất cao hơn (Cột 11)
+        // 3. Số nhiệm vụ vượt yêu cầu tiến độ/chất lượng nhiều hơn (Cột 10 - dấu X)
+        // 4. Tổng điểm quy đổi thực tế (Giá trị B - đóng góp khối lượng lớn hơn)
+        // 5. Số lượng công việc hoàn thành đúng hạn
+        // 6. Tổng số nhiệm vụ đảm nhận
+        userStats.sort((a, b) => {
+            if (b.kpiScore70 !== a.kpiScore70) return b.kpiScore70 - a.kpiScore70;
+            if ((b.totalBonusScore || 0) !== (a.totalBonusScore || 0)) return (b.totalBonusScore || 0) - (a.totalBonusScore || 0);
+            if ((b.totalExceededTasks || 0) !== (a.totalExceededTasks || 0)) return (b.totalExceededTasks || 0) - (a.totalExceededTasks || 0);
+            if ((b.valueB || 0) !== (a.valueB || 0)) return (b.valueB || 0) - (a.valueB || 0);
+            if ((b.onTimeTasks || 0) !== (a.onTimeTasks || 0)) return (b.onTimeTasks || 0) - (a.onTimeTasks || 0);
+            return (b.totalTasks || 0) - (a.totalTasks || 0);
+        });
 
         // Overall summary statistics
         const totalTasksCount = tasks.length;
