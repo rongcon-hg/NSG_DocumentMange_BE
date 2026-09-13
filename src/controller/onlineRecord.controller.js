@@ -135,8 +135,10 @@ const getRecords = async (req, res) => {
     const query = {};
     const andConditions = [];
 
-    // Phân loại hồ sơ theo vai trò và tab
-    const isAdminOrManager = currentUserRole === "admin" || currentUserRole === "manager";
+    // Phân loại hồ sơ theo vai trò và tab:
+    // Riêng Admin được xem tất cả hồ sơ toàn trường để quản lý/xóa nếu cần.
+    // Tất cả các quyền còn lại (kể cả Manager): chỉ người gửi và người tiếp nhận đích danh mới có thông tin.
+    const isAdmin = currentUserRole === "admin";
 
     if (type === "sent") {
       andConditions.push({ sender: currentUserId });
@@ -144,8 +146,7 @@ const getRecords = async (req, res) => {
       andConditions.push({ recipients: currentUserId });
     } else {
       // type === "all"
-      if (!isAdminOrManager) {
-        // Người dùng thông thường: xem hồ sơ mình gửi HOẶC hồ sơ gửi đích danh đến mình
+      if (!isAdmin) {
         andConditions.push({
           $or: [{ sender: currentUserId }, { recipients: currentUserId }],
         });
@@ -224,6 +225,8 @@ const getRecords = async (req, res) => {
 // Lấy chi tiết hồ sơ
 const getRecordById = async (req, res) => {
   try {
+    const currentUserId = req.user?.userId || req.user?._id;
+    const currentUserRole = req.user?.role;
     const { id } = req.params;
     const record = await OnlineRecord.findById(id)
       .populate("category", "code name description")
@@ -234,6 +237,14 @@ const getRecordById = async (req, res) => {
 
     if (!record) {
       return res.status(404).json({ success: false, message: "Không tìm thấy hồ sơ" });
+    }
+
+    const isOwner = String(record.sender?._id || record.sender) === String(currentUserId);
+    const isRecipient = record.recipients?.some((r) => String(r._id || r) === String(currentUserId));
+    const isAdmin = currentUserRole === "admin";
+
+    if (!isAdmin && !isOwner && !isRecipient) {
+      return res.status(403).json({ success: false, message: "Bạn không có quyền truy cập hồ sơ này" });
     }
 
     res.status(200).json({ success: true, data: record });
@@ -468,11 +479,11 @@ const reviewRecord = async (req, res) => {
       return res.status(404).json({ success: false, message: "Không tìm thấy hồ sơ" });
     }
 
-    // Kiểm tra quyền duyệt: người nhận hồ sơ HOẶC Admin/Manager
+    // Kiểm tra quyền duyệt: người nhận hồ sơ HOẶC Admin
     const isRecipient = record.recipients.some((r) => String(r) === String(currentUserId));
-    const isAdminOrManager = currentUserRole === "admin" || currentUserRole === "manager";
+    const isAdmin = currentUserRole === "admin";
 
-    if (!isRecipient && !isAdminOrManager) {
+    if (!isRecipient && !isAdmin) {
       return res.status(403).json({ success: false, message: "Bạn không có thẩm quyền xử lý hồ sơ này" });
     }
 
@@ -494,7 +505,7 @@ const reviewRecord = async (req, res) => {
       reviewItem.reviewOpinion = reviewOpinion || "";
       reviewItem.reviewedAt = new Date();
     } else {
-      // Nếu là Admin/Manager duyệt mà không nằm trong recipients ban đầu
+      // Nếu là Admin duyệt mà không nằm trong recipients ban đầu
       record.recipientReviews.push({
         user: currentUserId,
         userName: reviewerName,
@@ -507,7 +518,7 @@ const reviewRecord = async (req, res) => {
 
     // 2. Tính toán lại trạng thái tổng thể của hồ sơ
     // Nếu có ít nhất 1 người REJECTED -> hồ sơ tổng thể REJECTED
-    // Nếu tất cả người nhận đều APPROVED (hoặc Admin/Manager duyệt APPROVED) -> APPROVED
+    // Nếu tất cả người nhận đều APPROVED (hoặc Admin duyệt APPROVED) -> APPROVED
     // Ngược lại nếu có người PROCESSING hoặc APPROVED một phần -> PROCESSING
     const reviews = record.recipientReviews || [];
     const hasRejected = reviews.some((r) => r.status === "REJECTED");
@@ -519,7 +530,7 @@ const reviewRecord = async (req, res) => {
 
     if (hasRejected) {
       record.status = "REJECTED";
-    } else if (allApproved || (isAdminOrManager && status === "APPROVED")) {
+    } else if (allApproved || (isAdmin && status === "APPROVED")) {
       record.status = "APPROVED";
     } else if (hasApprovedOrProcessing) {
       record.status = "PROCESSING";
@@ -641,14 +652,14 @@ const getPendingRecordCount = async (req, res) => {
   try {
     const currentUserId = req.user?.userId || req.user?._id;
     const currentUserRole = req.user?.role;
-    const isAdminOrManager = currentUserRole === "admin" || currentUserRole === "manager";
+    const isAdmin = currentUserRole === "admin";
 
     let pendingCount = 0;
     let pendingToReviewCount = 0; // Hồ sơ gửi đến mình cần duyệt
     let pendingMySubmissions = 0; // Hồ sơ do mình nộp đang chờ duyệt
 
-    if (isAdminOrManager) {
-      // Manager/Admin thấy tất cả hồ sơ đang ở trạng thái PENDING trên toàn trường
+    if (isAdmin) {
+      // Admin thấy tất cả hồ sơ đang ở trạng thái PENDING trên toàn trường
       pendingCount = await OnlineRecord.countDocuments({
         status: "PENDING",
       });
