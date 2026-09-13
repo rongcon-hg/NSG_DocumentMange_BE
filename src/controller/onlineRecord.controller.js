@@ -620,8 +620,11 @@ const deleteRecord = async (req, res) => {
     const isOwner = String(record.sender) === String(currentUserId);
     const isAdmin = currentUserRole === "admin";
 
-    if (!isOwner && !isAdmin) {
-      return res.status(403).json({ success: false, message: "Bạn không có quyền xóa hồ sơ này" });
+    if (!isAdmin && (!isOwner || record.status !== "PENDING")) {
+      return res.status(403).json({
+        success: false,
+        message: "Hồ sơ đã được tiếp nhận hoặc xử lý, chỉ có Quản trị viên (Admin) mới có quyền xóa.",
+      });
     }
 
     await OnlineRecord.findByIdAndDelete(id);
