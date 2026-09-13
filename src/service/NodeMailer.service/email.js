@@ -855,7 +855,7 @@ const sendOnlineRecordSubmitEmail = async (uniqueUsers, recordData, senderName =
     }
 };
 
-const sendOnlineRecordStatusEmail = async (uniqueUsers, recordData, status, opinion = "", reviewerName = "Người duyệt", reviewerRole = "Quản lý") => {
+const sendOnlineRecordStatusEmail = async (uniqueUsers, recordData, status, opinion = "", reviewerName = "Người duyệt", reviewerRole = "Quản lý hệ thống") => {
     try {
         if (!uniqueUsers || uniqueUsers.length === 0 || !recordData) return;
         const allowedUsers = uniqueUsers.filter(u => !u.emailNotifications || u.emailNotifications.onlineRecord !== false);

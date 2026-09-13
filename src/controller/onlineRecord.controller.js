@@ -554,7 +554,7 @@ const reviewRecord = async (req, res) => {
       actor: currentUserId,
       actorName: reviewerName,
       actorRole: reviewerRole,
-      details: `${reviewerName} (${reviewerRole === "manager" || reviewerRole === "admin" ? "Cấp Quản lý" : "Người nhận"}) ${statusMap[status]}${
+      details: `${reviewerName} (${reviewerRole === "manager" || reviewerRole === "admin" ? "Quản lý hệ thống" : "Người nhận"}) ${statusMap[status]}${
         reviewOpinion ? `: ${reviewOpinion}` : ""
       }`,
       timestamp: new Date(),
@@ -596,7 +596,7 @@ const reviewRecord = async (req, res) => {
               status,
               reviewOpinion,
               reviewerName,
-              reviewerRole === "manager" || reviewerRole === "admin" ? "Cấp Quản lý" : "Người nhận"
+              reviewerRole === "manager" || reviewerRole === "admin" ? "Quản lý hệ thống" : "Người nhận"
             );
           }
         }
