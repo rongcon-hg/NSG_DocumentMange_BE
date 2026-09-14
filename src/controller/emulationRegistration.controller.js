@@ -11,6 +11,7 @@ const {
   sendEmulationRegistrationEmail,
   sendEmulationStatusEmail,
 } = require("../service/NodeMailer.service/email");
+const { formatFileName } = require("../utils/formatFileName");
 
 // Helper: Kiểm tra User có phải BGH hay không
 const isUserBGH = (user) => {
@@ -107,8 +108,9 @@ const uploadEmulationFile = async (req, res) => {
     const uploaded = [];
     for (const file of req.files) {
       const originalName = Buffer.from(file.originalname, "latin1").toString("utf8");
+      const sanitizedName = formatFileName(originalName);
       const fileMetadata = {
-        name: originalName,
+        name: sanitizedName,
         parents: [targetFolderId],
       };
       const media = {
@@ -125,7 +127,7 @@ const uploadEmulationFile = async (req, res) => {
 
       uploaded.push({
         fileId: response.data.id,
-        fileName: response.data.name || originalName,
+        fileName: response.data.name || sanitizedName,
         mimeType: response.data.mimeType || file.mimetype,
         size: response.data.size ? `${(response.data.size / 1024).toFixed(1)} KB` : "",
         fileUrl: response.data.webViewLink || `https://drive.google.com/file/d/${response.data.id}/view`,

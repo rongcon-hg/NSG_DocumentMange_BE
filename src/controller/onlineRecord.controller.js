@@ -12,6 +12,7 @@ const {
   sendOnlineRecordSubmitEmail,
   sendOnlineRecordStatusEmail,
 } = require("../service/NodeMailer.service/email");
+const { formatFileName } = require("../utils/formatFileName");
 
 // Helper: Authorize Google Drive
 async function authorizeDrive() {
@@ -79,8 +80,9 @@ const uploadRecordFile = async (req, res) => {
     const uploaded = await Promise.all(
       req.files.map(async (file) => {
         const originalName = Buffer.from(file.originalname, "latin1").toString("utf8");
+        const sanitizedName = formatFileName(originalName);
         const fileMetadata = {
-          name: originalName,
+          name: sanitizedName,
           parents: [targetFolderId],
         };
         const media = {
@@ -97,7 +99,7 @@ const uploadRecordFile = async (req, res) => {
 
         return {
           fileId: response.data.id,
-          fileName: response.data.name || originalName,
+          fileName: response.data.name || sanitizedName,
           mimeType: response.data.mimeType || file.mimetype,
           size: response.data.size ? `${(response.data.size / 1024).toFixed(1)} KB` : "",
           fileUrl: response.data.webViewLink || `https://drive.google.com/file/d/${response.data.id}/view`,
