@@ -65,6 +65,7 @@ async function getOrCreateRecordsFolder(drive) {
 }
 
 // Upload file đính kèm lên Google Drive
+// Upload file đính kèm lên Google Drive (hỗ trợ nhiều file cùng lúc)
 const uploadRecordFile = async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
@@ -75,37 +76,38 @@ const uploadRecordFile = async (req, res) => {
     const drive = google.drive({ version: "v3", auth });
     const targetFolderId = await getOrCreateRecordsFolder(drive);
 
-    const uploaded = [];
-    for (const file of req.files) {
-      const originalName = Buffer.from(file.originalname, "latin1").toString("utf8");
-      const fileMetadata = {
-        name: originalName,
-        parents: [targetFolderId],
-      };
-      const media = {
-        mimeType: file.mimetype,
-        body: Readable.from(file.buffer),
-      };
+    const uploaded = await Promise.all(
+      req.files.map(async (file) => {
+        const originalName = Buffer.from(file.originalname, "latin1").toString("utf8");
+        const fileMetadata = {
+          name: originalName,
+          parents: [targetFolderId],
+        };
+        const media = {
+          mimeType: file.mimetype,
+          body: Readable.from(file.buffer),
+        };
 
-      const response = await drive.files.create({
-        requestBody: fileMetadata,
-        media: media,
-        fields: "id, name, mimeType, size, webViewLink",
-        supportsAllDrives: true,
-      });
+        const response = await drive.files.create({
+          requestBody: fileMetadata,
+          media: media,
+          fields: "id, name, mimeType, size, webViewLink",
+          supportsAllDrives: true,
+        });
 
-      uploaded.push({
-        fileId: response.data.id,
-        fileName: response.data.name || originalName,
-        mimeType: response.data.mimeType || file.mimetype,
-        size: response.data.size ? `${(response.data.size / 1024).toFixed(1)} KB` : "",
-        fileUrl: response.data.webViewLink || `https://drive.google.com/file/d/${response.data.id}/view`,
-      });
-    }
+        return {
+          fileId: response.data.id,
+          fileName: response.data.name || originalName,
+          mimeType: response.data.mimeType || file.mimetype,
+          size: response.data.size ? `${(response.data.size / 1024).toFixed(1)} KB` : "",
+          fileUrl: response.data.webViewLink || `https://drive.google.com/file/d/${response.data.id}/view`,
+        };
+      })
+    );
 
     res.status(200).json({
       success: true,
-      message: "Tải file lên Google Drive thành công",
+      message: `Tải lên thành công ${uploaded.length} tệp lên Google Drive`,
       data: uploaded,
     });
   } catch (error) {

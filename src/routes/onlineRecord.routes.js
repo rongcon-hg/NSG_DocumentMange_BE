@@ -28,8 +28,8 @@ router.post("/attachment-types/init-default", verifyToken, verifyManager, attach
 // ==========================================
 // 3. ROUTE HỒ SƠ TRỰC TUYẾN (OnlineRecord)
 // ==========================================
-// Upload file minh chứng lên Google Drive
-router.post("/upload", verifyToken, upload.array("files", 10), recordController.uploadRecordFile);
+// Upload file minh chứng lên Google Drive (hỗ trợ nhiều file cùng lúc)
+router.post("/upload", verifyToken, upload.array("files", 50), recordController.uploadRecordFile);
 
 // Số lượng hồ sơ chờ duyệt (thông báo)
 router.get("/pending-count", verifyToken, recordController.getPendingRecordCount);
