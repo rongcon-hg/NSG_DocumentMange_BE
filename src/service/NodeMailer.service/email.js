@@ -377,7 +377,20 @@ const sendTaskNotificationEmail = async (uniqueUsers, taskData, actionType) => {
 const sendReviewNotificationEmail = async (uniqueUsers, docData, actionType, notes = "", actorName = "") => {
     try {
         if (!uniqueUsers || uniqueUsers.length === 0) return;
-        const allowedUsers = uniqueUsers.filter(u => !u.emailNotifications || u.emailNotifications.docReview !== false);
+        const allowedUsers = uniqueUsers.filter(u => {
+            if (!u.emailNotifications) return true;
+            if (actionType === 'submitToBGH') {
+                if (u.emailNotifications.replyDocSubmit !== undefined) {
+                    return u.emailNotifications.replyDocSubmit !== false;
+                }
+                return u.emailNotifications.docReview !== false;
+            } else {
+                if (u.emailNotifications.replyDocStatus !== undefined) {
+                    return u.emailNotifications.replyDocStatus !== false;
+                }
+                return u.emailNotifications.docReview !== false;
+            }
+        });
         const bccList = allowedUsers.map(u => u.email).filter(e => !!e);
         if (bccList.length === 0) return;
 
@@ -837,7 +850,16 @@ const sendTrainingStatusEmail = async (uniqueUsers, record, actionType, note = "
 const sendOnlineRecordSubmitEmail = async (uniqueUsers, recordData, senderName = "Cán bộ") => {
     try {
         if (!uniqueUsers || uniqueUsers.length === 0 || !recordData) return;
-        const allowedUsers = uniqueUsers.filter(u => !u.emailNotifications || u.emailNotifications.onlineRecord !== false);
+        const allowedUsers = uniqueUsers.filter(u => {
+            if (!u.emailNotifications) return true;
+            if (u.emailNotifications.onlineRecordSubmit !== undefined) {
+                return u.emailNotifications.onlineRecordSubmit !== false;
+            }
+            if (u.emailNotifications.onlineRecord !== undefined) {
+                return u.emailNotifications.onlineRecord !== false;
+            }
+            return true;
+        });
         const bccList = allowedUsers.map(u => u.email).filter(e => !!e);
         if (bccList.length === 0) return;
 
@@ -896,7 +918,16 @@ const sendOnlineRecordSubmitEmail = async (uniqueUsers, recordData, senderName =
 const sendOnlineRecordStatusEmail = async (uniqueUsers, recordData, status, opinion = "", reviewerName = "Người duyệt", reviewerRole = "Quản lý hệ thống") => {
     try {
         if (!uniqueUsers || uniqueUsers.length === 0 || !recordData) return;
-        const allowedUsers = uniqueUsers.filter(u => !u.emailNotifications || u.emailNotifications.onlineRecord !== false);
+        const allowedUsers = uniqueUsers.filter(u => {
+            if (!u.emailNotifications) return true;
+            if (u.emailNotifications.onlineRecordStatus !== undefined) {
+                return u.emailNotifications.onlineRecordStatus !== false;
+            }
+            if (u.emailNotifications.onlineRecord !== undefined) {
+                return u.emailNotifications.onlineRecord !== false;
+            }
+            return true;
+        });
         const bccList = allowedUsers.map(u => u.email).filter(e => !!e);
         if (bccList.length === 0) return;
 

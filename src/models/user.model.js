@@ -82,10 +82,14 @@ const userSchema = new mongoose.Schema({
     emailNotifications: {
         docNew: { type: Boolean, default: true },
         docReview: { type: Boolean, default: true },
+        replyDocSubmit: { type: Boolean, default: true },
+        replyDocStatus: { type: Boolean, default: true },
         taskAssign: { type: Boolean, default: true },
         taskReminder: { type: Boolean, default: true },
         emulationRegister: { type: Boolean, default: true },
         trainingRegister: { type: Boolean, default: true },
+        onlineRecordSubmit: { type: Boolean, default: true },
+        onlineRecordStatus: { type: Boolean, default: true },
     },
 },
 {
