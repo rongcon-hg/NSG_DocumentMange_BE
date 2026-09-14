@@ -794,7 +794,9 @@ const reportResult = async (req, res) => {
       actualFundAmount: isAttended ? Number(actualFundAmount) || 0 : 0,
       certificateNumber: isAttended ? (certificateNumber || "").trim() : "",
       issueDate: isAttended && issueDate ? new Date(issueDate) : null,
-      issuePlace: isAttended ? (issuePlace || "").trim() : "",
+      issuePlace: isAttended
+        ? ((issuePlace || "").trim() || (record.trainingLocation || "").trim())
+        : "",
       actualTrainingDuration: isAttended ? (actualTrainingDuration || "").trim() : "",
       proofFiles: isAttended && Array.isArray(proofFiles) ? proofFiles : [],
       reportedBy: req.user._id,
@@ -1407,7 +1409,7 @@ const exportExcel = async (req, res) => {
         resultDetails: r.reportResult?.resultDetails || "",
         certificateNumber: r.reportResult?.certificateNumber || "",
         issueDate: formatDateVi(r.reportResult?.issueDate),
-        issuePlace: r.reportResult?.issuePlace || "",
+        issuePlace: r.reportResult?.issuePlace || r.trainingLocation || "",
         actualTrainingDuration: r.reportResult?.actualTrainingDuration || "",
         fundingSupport: fundingText,
         actualFundAmount: r.reportResult?.actualFundAmount || 0,
