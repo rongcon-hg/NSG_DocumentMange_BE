@@ -195,23 +195,41 @@ const getRecords = async (req, res) => {
     const limitNum = isExport === "true" || isExport === true ? 10000 : parseInt(limit, 10);
     const skip = isExport === "true" || isExport === true ? 0 : (pageNum - 1) * limitNum;
 
-    const [records, total] = await Promise.all([
-      OnlineRecord.find(query)
-        .populate("category", "code name")
-        .populate("sender", "name email avatar")
-        .populate("recipients", "name email avatar position department")
-        .populate("attachedFiles.attachmentType", "name code")
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limitNum)
-        .lean(),
-      OnlineRecord.countDocuments(query),
-    ]);
+    // Base query cho thống kê: loại bỏ điều kiện status để tính số lượng theo từng trạng thái
+    const baseQuery = { ...query };
+    delete baseQuery.status;
+
+    const [records, total, pendingCount, processingCount, approvedCount, rejectedCount] =
+      await Promise.all([
+        OnlineRecord.find(query)
+          .populate("category", "code name")
+          .populate("sender", "name email avatar")
+          .populate("recipients", "name email avatar position department")
+          .populate("attachedFiles.attachmentType", "name code")
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limitNum)
+          .lean(),
+        OnlineRecord.countDocuments(query),
+        OnlineRecord.countDocuments({ ...baseQuery, status: "PENDING" }),
+        OnlineRecord.countDocuments({ ...baseQuery, status: "PROCESSING" }),
+        OnlineRecord.countDocuments({ ...baseQuery, status: "APPROVED" }),
+        OnlineRecord.countDocuments({ ...baseQuery, status: "REJECTED" }),
+      ]);
+
+    const stats = {
+      total: pendingCount + processingCount + approvedCount + rejectedCount,
+      pending: pendingCount,
+      processing: processingCount,
+      approved: approvedCount,
+      rejected: rejectedCount,
+    };
 
     res.status(200).json({
       success: true,
       data: records,
       total,
+      stats,
       pagination: {
         page: pageNum,
         limit: limitNum,
