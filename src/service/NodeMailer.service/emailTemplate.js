@@ -41,7 +41,7 @@ const NEW_DOCUMENT_EMAIL_TEMPLATE = `
   </div> 
   <div style="background-color: #F9F9F9; padding: 20px; border-radius: 0 0 5px 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);"> 
     <p>Kính chào Quý Thầy/Cô,</p> 
-    <p>Hệ thống Quản lý văn bản NSG vừa ghi nhận một văn bản mới liên quan đến Quý Thầy/Cô (được phát hành/chuyển đến bởi <strong>{senderName}</strong>):</p> 
+    <p>{systemName} vừa ghi nhận một văn bản mới liên quan đến Quý Thầy/Cô (được phát hành/chuyển đến bởi <strong>{senderName}</strong>):</p> 
     <div style="background: #fff; padding: 15px; border-left: 4px solid #4CAF50; margin: 20px 0;"> 
       <p><strong>Số/Ký hiệu:</strong> {docCode}</p> 
       <p><strong>Ngày phát hành/Ngày đến:</strong> {dateValue}</p> 
@@ -57,7 +57,7 @@ const NEW_DOCUMENT_EMAIL_TEMPLATE = `
       </ul>
     </div> 
     <p>Vui lòng đăng nhập vào hệ thống để xem chi tiết và xử lý kịp thời.</p> 
-    <p>Trân trọng,<br>Hệ thống Quản lý văn bản NSG</p> 
+    <p>Trân trọng,<br>{systemName}</p> 
   </div> 
 </body> 
 </html> 
@@ -76,7 +76,7 @@ const TASK_NOTIFICATION_EMAIL_TEMPLATE = `
   </div>
   <div style="background-color: #F9F9F9; padding: 20px; border-radius: 0 0 5px 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
     <p>Kính chào Quý Thầy/Cô,</p>
-    <p>Hệ thống Quản lý văn bản NSG vừa ghi nhận một sự kiện công việc liên quan đến Quý Thầy/Cô: <strong>{actionName}</strong></p>
+    <p>{systemName} vừa ghi nhận một sự kiện công việc liên quan đến Quý Thầy/Cô: <strong>{actionName}</strong></p>
     
     {priorityHighlightBlock}
     
@@ -95,7 +95,7 @@ const TASK_NOTIFICATION_EMAIL_TEMPLATE = `
       </ul>
     </div>
     <p>Vui lòng đăng nhập vào hệ thống để xem chi tiết và cập nhật tiến độ kịp thời.</p>
-    <p>Trân trọng,<br>Hệ thống Quản lý văn bản NSG</p>
+    <p>Trân trọng,<br>{systemName}</p>
   </div>
 </body>
 </html>
@@ -114,7 +114,7 @@ const REVIEW_NOTIFICATION_EMAIL_TEMPLATE = `
   </div>
   <div style="background-color: #F9F9F9; padding: 20px; border-radius: 0 0 5px 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
     <p>Kính chào Quý Thầy/Cô,</p>
-    <p>Hệ thống Quản lý văn bản NSG vừa ghi nhận một sự kiện xét duyệt trình ký liên quan đến Quý Thầy/Cô: <strong>{actionName}</strong></p>
+    <p>{systemName} vừa ghi nhận một sự kiện xét duyệt trình ký liên quan đến Quý Thầy/Cô: <strong>{actionName}</strong></p>
     
     <div style="background: #fff; padding: 15px; border-left: 4px solid {headerBorderColor}; margin: 20px 0;">
       <p><strong>Tiêu đề / Trích yếu:</strong> {docTitle}</p>
@@ -131,7 +131,7 @@ const REVIEW_NOTIFICATION_EMAIL_TEMPLATE = `
       </ul>
     </div>
     <p>Vui lòng đăng nhập vào hệ thống để xem chi tiết.</p>
-    <p>Trân trọng,<br>Hệ thống Quản lý văn bản NSG</p>
+    <p>Trân trọng,<br>{systemName}</p>
   </div>
 </body>
 </html>
@@ -150,7 +150,7 @@ const EMULATION_REGISTRATION_EMAIL_TEMPLATE = `
   </div>
   <div style="background-color: #f9fbfd; padding: 24px; border-radius: 0 0 8px 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid #e1e8ed; border-top: none;">
     <p>Kính chào Quý Thầy/Cô,</p>
-    <p>Hệ thống Quản lý văn bản NSG vừa ghi nhận một <strong>hồ sơ đề nghị thi đua mới</strong> được gửi lên hệ thống:</p>
+    <p>{systemName} vừa ghi nhận một <strong>hồ sơ đề nghị thi đua mới</strong> được gửi lên hệ thống:</p>
     
     <div style="background: #fff; padding: 18px; border-left: 4px solid #1890ff; margin: 20px 0; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
       <p style="margin: 6px 0;"><strong>Năm học đề nghị:</strong> <span style="color: #096dd9; font-weight: bold;">{schoolYear}</span></p>
@@ -185,10 +185,10 @@ const EMULATION_REGISTRATION_EMAIL_TEMPLATE = `
     </div>
 
     <p style="font-size: 13px; color: #666;">Vui lòng đăng nhập vào hệ thống để xem chi tiết và thực hiện các bước xét duyệt theo quy trình.</p>
-    <p style="margin-top: 20px;">Trân trọng,<br><strong>Hệ thống Quản lý văn bản NSG</strong></p>
+    <p style="margin-top: 20px;">Trân trọng,<br><strong>{systemName}</strong></p>
   </div>
   <div style="text-align: center; margin-top: 15px; color: #888; font-size: 11px;">
-    <p>Đây là email tự động từ hệ thống Quản lý văn bản NSG, vui lòng không trả lời trực tiếp email này.</p>
+    <p>Đây là email tự động từ {systemName}, vui lòng không trả lời trực tiếp email này.</p>
   </div>
 </body>
 </html>
@@ -207,7 +207,7 @@ const EMULATION_STATUS_EMAIL_TEMPLATE = `
   </div>
   <div style="background-color: #f9fbfd; padding: 24px; border-radius: 0 0 8px 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid #e1e8ed; border-top: none;">
     <p>Kính chào Quý Thầy/Cô,</p>
-    <p>Hệ thống Quản lý văn bản NSG xin thông báo về tiến độ xét duyệt hồ sơ đề nghị thi đua của Quý Thầy/Cô:</p>
+    <p>{systemName} xin thông báo về tiến độ xét duyệt hồ sơ đề nghị thi đua của Quý Thầy/Cô:</p>
     
     <div style="background: #fff; padding: 18px; border-left: 4px solid {headerBorderColor}; margin: 20px 0; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
       <p style="margin: 6px 0;"><strong>Đơn vị / Phòng ban:</strong> {departmentName}</p>
@@ -237,10 +237,10 @@ const EMULATION_STATUS_EMAIL_TEMPLATE = `
     </div>
 
     <p style="font-size: 13px; color: #666;">Vui lòng đăng nhập vào hệ thống để theo dõi hoặc điều chỉnh bổ sung theo yêu cầu (nếu có).</p>
-    <p style="margin-top: 20px;">Trân trọng,<br><strong>Hệ thống Quản lý văn bản NSG</strong></p>
+    <p style="margin-top: 20px;">Trân trọng,<br><strong>{systemName}</strong></p>
   </div>
   <div style="text-align: center; margin-top: 15px; color: #888; font-size: 11px;">
-    <p>Đây là email tự động từ hệ thống Quản lý văn bản NSG, vui lòng không trả lời trực tiếp email này.</p>
+    <p>Đây là email tự động từ {systemName}, vui lòng không trả lời trực tiếp email này.</p>
   </div>
 </body>
 </html>
@@ -259,7 +259,7 @@ const TRAINING_REGISTRATION_EMAIL_TEMPLATE = `
   </div>
   <div style="background-color: #f9fbfd; padding: 24px; border-radius: 0 0 8px 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid #e1e8ed; border-top: none;">
     <p>Kính chào Quý Thầy/Cô,</p>
-    <p>Hệ thống Quản lý văn bản NSG vừa ghi nhận <strong>kế hoạch học tập bồi dưỡng mới</strong> được đăng ký trên hệ thống:</p>
+    <p>{systemName} vừa ghi nhận <strong>kế hoạch học tập bồi dưỡng mới</strong> được đăng ký trên hệ thống:</p>
     
     <div style="background: #fff; padding: 18px; border-left: 4px solid #2563eb; margin: 20px 0; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
       <p style="margin: 6px 0;"><strong>Năm đào tạo:</strong> <span style="color: #1d4ed8; font-weight: bold;">{year}</span></p>
@@ -297,10 +297,10 @@ const TRAINING_REGISTRATION_EMAIL_TEMPLATE = `
     </div>
 
     <p style="font-size: 13px; color: #666;">Vui lòng đăng nhập vào hệ thống để xem chi tiết và thực hiện các bước xét duyệt / theo dõi.</p>
-    <p style="margin-top: 20px;">Trân trọng,<br><strong>Hệ thống Quản lý văn bản NSG</strong></p>
+    <p style="margin-top: 20px;">Trân trọng,<br><strong>{systemName}</strong></p>
   </div>
   <div style="text-align: center; margin-top: 15px; color: #888; font-size: 11px;">
-    <p>Đây là email tự động từ hệ thống Quản lý văn bản NSG, vui lòng không trả lời trực tiếp email này.</p>
+    <p>Đây là email tự động từ {systemName}, vui lòng không trả lời trực tiếp email này.</p>
   </div>
 </body>
 </html>
@@ -319,7 +319,7 @@ const TRAINING_STATUS_EMAIL_TEMPLATE = `
   </div>
   <div style="background-color: #f9fbfd; padding: 24px; border-radius: 0 0 8px 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid #e1e8ed; border-top: none;">
     <p>Kính chào Quý Thầy/Cô,</p>
-    <p>Hệ thống Quản lý văn bản NSG xin thông báo cập nhật về hồ sơ học tập bồi dưỡng:</p>
+    <p>{systemName} xin thông báo cập nhật về hồ sơ học tập bồi dưỡng:</p>
     
     <div style="background: #fff; padding: 18px; border-left: 4px solid {headerBorderColor}; margin: 20px 0; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
       <p style="margin: 6px 0;"><strong>Nhân sự bồi dưỡng:</strong> <span style="font-weight: bold;">{userName}</span> ({positionName})</p>
@@ -347,10 +347,10 @@ const TRAINING_STATUS_EMAIL_TEMPLATE = `
     </div>
 
     <p style="font-size: 13px; color: #666;">Vui lòng đăng nhập vào hệ thống để theo dõi và thực hiện các bước tiếp theo.</p>
-    <p style="margin-top: 20px;">Trân trọng,<br><strong>Hệ thống Quản lý văn bản NSG</strong></p>
+    <p style="margin-top: 20px;">Trân trọng,<br><strong>{systemName}</strong></p>
   </div>
   <div style="text-align: center; margin-top: 15px; color: #888; font-size: 11px;">
-    <p>Đây là email tự động từ hệ thống Quản lý văn bản NSG, vui lòng không trả lời trực tiếp email này.</p>
+    <p>Đây là email tự động từ {systemName}, vui lòng không trả lời trực tiếp email này.</p>
   </div>
 </body>
 </html>
@@ -369,7 +369,7 @@ const ONLINE_RECORD_SUBMIT_EMAIL_TEMPLATE = `
   </div>
   <div style="background-color: #f9fbfd; padding: 24px; border-radius: 0 0 8px 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid #e1e8ed; border-top: none;">
     <p>Kính chào Quý Thầy/Cô,</p>
-    <p>Hệ thống Quản lý văn bản NSG vừa tiếp nhận một <strong>hồ sơ trực tuyến mới</strong> được gửi đến Quý Thầy/Cô để tiếp nhận / xử lý:</p>
+    <p>{systemName} vừa tiếp nhận một <strong>hồ sơ trực tuyến mới</strong> được gửi đến Quý Thầy/Cô để tiếp nhận / xử lý:</p>
     
     <div style="background: #fff; padding: 18px; border-left: 4px solid #0d9488; margin: 20px 0; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
       <p style="margin: 6px 0;"><strong>Người gửi hồ sơ:</strong> <span style="font-weight: bold; color: #0f766e;">{senderName}</span> ({senderPosition})</p>
@@ -402,10 +402,10 @@ const ONLINE_RECORD_SUBMIT_EMAIL_TEMPLATE = `
     </div>
 
     <p style="font-size: 13px; color: #666;">Vui lòng đăng nhập vào hệ thống để xem chi tiết và tiến hành xử lý hồ sơ kịp thời.</p>
-    <p style="margin-top: 20px;">Trân trọng,<br><strong>Hệ thống Quản lý văn bản NSG</strong></p>
+    <p style="margin-top: 20px;">Trân trọng,<br><strong>{systemName}</strong></p>
   </div>
   <div style="text-align: center; margin-top: 15px; color: #888; font-size: 11px;">
-    <p>Đây là email tự động từ hệ thống Quản lý văn bản NSG, vui lòng không trả lời trực tiếp email này.</p>
+    <p>Đây là email tự động từ {systemName}, vui lòng không trả lời trực tiếp email này.</p>
   </div>
 </body>
 </html>
@@ -424,7 +424,7 @@ const ONLINE_RECORD_STATUS_EMAIL_TEMPLATE = `
   </div>
   <div style="background-color: #f9fbfd; padding: 24px; border-radius: 0 0 8px 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid #e1e8ed; border-top: none;">
     <p>Kính chào Quý Thầy/Cô,</p>
-    <p>Hệ thống Quản lý văn bản NSG xin thông báo cập nhật về trạng thái hồ sơ trực tuyến của Quý Thầy/Cô:</p>
+    <p>{systemName} xin thông báo cập nhật về trạng thái hồ sơ trực tuyến của Quý Thầy/Cô:</p>
     
     <div style="background: #fff; padding: 18px; border-left: 4px solid {headerBorderColor}; margin: 20px 0; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
       <p style="margin: 6px 0;"><strong>Tiêu đề hồ sơ:</strong> <span style="font-weight: bold; color: #1e293b;">{recordTitle}</span></p>
@@ -449,10 +449,10 @@ const ONLINE_RECORD_STATUS_EMAIL_TEMPLATE = `
     </div>
 
     <p style="font-size: 13px; color: #666;">Vui lòng đăng nhập vào hệ thống để theo dõi và thực hiện các điều chỉnh (nếu có yêu cầu).</p>
-    <p style="margin-top: 20px;">Trân trọng,<br><strong>Hệ thống Quản lý văn bản NSG</strong></p>
+    <p style="margin-top: 20px;">Trân trọng,<br><strong>{systemName}</strong></p>
   </div>
   <div style="text-align: center; margin-top: 15px; color: #888; font-size: 11px;">
-    <p>Đây là email tự động từ hệ thống Quản lý văn bản NSG, vui lòng không trả lời trực tiếp email này.</p>
+    <p>Đây là email tự động từ {systemName}, vui lòng không trả lời trực tiếp email này.</p>
   </div>
 </body>
 </html>

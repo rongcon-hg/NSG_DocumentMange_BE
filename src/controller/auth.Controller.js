@@ -214,33 +214,65 @@ const upadteInfo = async (req, res) => {
       }
   
       // Chặn người không phải admin cập nhật role
-      if (updatedData.role && !["admin", "manager"].includes(req.user.role)) {
+      if (updatedData.role && !["admin", "manager"].includes(req.user?.role)) {
         return res.status(403).json({
           success: false,
           message: "Only admin or manager can update user roles.",
         });
       }
-  
-      // Cập nhật các trường hợp lệ
-      Object.keys(updatedData).forEach((key) => {
-        if (updatedData[key] !== undefined) {
-          if (key === 'emailNotifications' && typeof updatedData[key] === 'object' && updatedData[key] !== null) {
-            user.emailNotifications = {
-              ...(user.emailNotifications?.toObject ? user.emailNotifications.toObject() : (user.emailNotifications || {})),
-              ...updatedData[key]
-            };
-          } else {
-            user[key] = updatedData[key];
-          }
+
+      // Kiểm tra trùng lặp email nếu có thay đổi email
+      if (updatedData.email && updatedData.email.trim().toLowerCase() !== user.email.toLowerCase()) {
+        const existingEmail = await User.findOne({
+          email: updatedData.email.trim().toLowerCase(),
+          _id: { $ne: userId }
+        });
+        if (existingEmail) {
+          return res.status(400).json({
+            success: false,
+            message: "Email này đã được sử dụng bởi tài khoản khác trong hệ thống."
+          });
         }
-      });
+        user.email = updatedData.email.trim().toLowerCase();
+      }
+
+      if (updatedData.name && updatedData.name.trim()) {
+        user.name = updatedData.name.trim();
+      }
+
+      if (updatedData.mobile !== undefined) {
+        user.mobile = typeof updatedData.mobile === 'string' ? updatedData.mobile.trim() : String(updatedData.mobile || '');
+      }
+
+      // Chỉ cập nhật mật khẩu khi có nhập chuỗi mật khẩu mới
+      if (updatedData.password && typeof updatedData.password === 'string' && updatedData.password.trim() !== '') {
+        user.password = updatedData.password;
+      }
+
+      // Cập nhật thông báo email
+      if (updatedData.emailNotifications && typeof updatedData.emailNotifications === 'object') {
+        user.emailNotifications = {
+          ...(user.emailNotifications?.toObject ? user.emailNotifications.toObject() : (user.emailNotifications || {})),
+          ...updatedData.emailNotifications
+        };
+      }
+
+      // Cho phép cập nhật phòng ban/chức vụ nếu là admin/manager và có truyền lên
+      if (["admin", "manager"].includes(req.user?.role)) {
+        if (updatedData.role !== undefined) user.role = updatedData.role;
+        if (updatedData.position !== undefined) user.position = updatedData.position || null;
+        if (updatedData.department !== undefined) user.department = updatedData.department || null;
+      }
   
       await user.save();
+
+      const userResponse = user.toObject();
+      delete userResponse.password;
   
       res.status(200).json({
         success: true,
         message: "User information updated successfully.",
-        data: user,
+        data: userResponse,
       });
     } catch (error) {
       console.error("Error in upadteInfo controller: ", error.message);

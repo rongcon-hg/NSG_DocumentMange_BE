@@ -27,19 +27,22 @@ const userSchema = new mongoose.Schema({
     },
     mobile: {
         type: String,
-        required: [true, "Phone number is required"],
+        default: "",
     },
-    position: 
-    {
+    position: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Position",
-        required: [true, "Position is required"],
+        required: function () {
+            return this.role !== "admin";
+        },
     },
     department: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Department",
-        required: [true, "Unit is required"],
+        required: function () {
+            return this.role !== "admin";
         },
+    },
     role: {
         type: String,
         enum: ["staff", "admin", "manager", "cappho", "chuyenvien"],

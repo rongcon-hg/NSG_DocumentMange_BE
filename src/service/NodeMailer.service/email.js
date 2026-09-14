@@ -13,7 +13,40 @@ const {
 const nodemailer = require("nodemailer");
 const dotenv = require("dotenv");
 const SmtpConfig = require("../../models/smtpConfig.model");
+const SystemConfig = require("../../models/systemConfig.model");
 dotenv.config();
+
+/**
+ * Lấy Tên trang Website (Title tab trình duyệt) từ Cấu hình đơn vị (systemconfigs)
+ */
+const getSystemBrandName = async () => {
+    try {
+        const config = await SystemConfig.findOne().lean();
+        if (config && config.siteName && config.siteName.trim()) {
+            return config.siteName.trim();
+        }
+    } catch (e) {
+        console.error("Error fetching SystemConfig siteName:", e);
+    }
+    return "Hệ thống Văn phòng số - NSG-Office";
+};
+
+/**
+ * Áp dụng tên thương hiệu phần mềm vào nội dung email HTML
+ */
+const applySystemBranding = (html, brandName) => {
+    if (!html) return html;
+    return html
+        .replace(/{systemName}/g, brandName)
+        .replace(/{brandName}/g, brandName)
+        .replace(/{siteName}/g, brandName)
+        .replace(/Hệ thống Quản lý văn bản NSG/gi, brandName)
+        .replace(/Hệ thống quản lý văn bản NSG/gi, brandName)
+        .replace(/Phần mềm quản lý văn bản NSG/gi, brandName)
+        .replace(/Phần mềm Quản lý Văn bản NSG/gi, brandName)
+        .replace(/Quản lý Văn bản NSG/gi, brandName)
+        .replace(/Quản lý văn bản NSG/gi, brandName);
+};
 
 const getTransporterAndSender = async () => {
     let host = "smtp.gmail.com";
@@ -21,7 +54,8 @@ const getTransporterAndSender = async () => {
     let secure = true;
     let user = process.env.EMAIL_USERNAME;
     let pass = process.env.EMAIL_PASSWORD;
-    let senderName = "Hệ thống quản lý văn bản NSG";
+    const brandName = await getSystemBrandName();
+    let senderName = brandName;
 
     try {
         const config = await SmtpConfig.findOne();
@@ -31,7 +65,11 @@ const getTransporterAndSender = async () => {
             secure = (port === 465);
             user = config.user;
             pass = config.pass;
-            senderName = config.senderName || senderName;
+            if (config.senderName && 
+                config.senderName !== "Hệ thống Quản lý Văn bản NSG" && 
+                config.senderName !== "Hệ thống quản lý văn bản NSG") {
+                senderName = config.senderName;
+            }
         }
     } catch (e) {
         console.error("Error fetching SMTP config for email service:", e);
@@ -46,7 +84,7 @@ const getTransporterAndSender = async () => {
 
     const sender = `"${senderName}" <${user || 'qlvb@nsgpc.edu.vn'}>`;
 
-    return { transporter, sender };
+    return { transporter, sender, brandName };
 };
 
 /**
@@ -88,14 +126,14 @@ const formatVietnamDate = (date = new Date()) => {
 
 const sentTempPassword = async (email,tempPass) => {
     try {
-        const { transporter, sender } = await getTransporterAndSender();
+        const { transporter, sender, brandName } = await getTransporterAndSender();
 
         const mailOptions = {
             from: sender, // sender address
             to: email, // list of receivers
-            subject: "OTP tạm thời", // Subject line
+            subject: `[${brandName}] Mã xác nhận khôi phục tài khoản (OTP)`, // Subject line
             text: "Mã khôi phục mật khẩu", // plain text body
-            html: TEMPPASSWORD_EMAIL_TEMPLATE.replace("{tempPass}",tempPass),
+            html: applySystemBranding(TEMPPASSWORD_EMAIL_TEMPLATE.replace("{tempPass}",tempPass), brandName),
         }
         const info = await transporter.sendMail(mailOptions);
         return info;
@@ -107,20 +145,20 @@ const sentTempPassword = async (email,tempPass) => {
 
 const sendRestoreOtpEmail = async (email, otp) => {
     try {
-        const { transporter, sender } = await getTransporterAndSender();
+        const { transporter, sender, brandName } = await getTransporterAndSender();
         const mailOptions = {
             from: sender,
             to: email,
-            subject: "Mã xác nhận Khôi phục Cơ sở dữ liệu",
+            subject: `[${brandName}] Mã xác nhận Khôi phục Cơ sở dữ liệu`,
             text: `Mã xác nhận của bạn là: ${otp}. Mã có hiệu lực trong 10 phút.`,
-            html: `
+            html: applySystemBranding(`
                 <div style="font-family: Arial, sans-serif; padding: 20px;">
                     <h2>Cảnh báo Bảo mật</h2>
                     <p>Bạn vừa yêu cầu khôi phục toàn bộ Cơ sở dữ liệu của hệ thống.</p>
                     <p>Mã xác nhận (OTP) của bạn là: <strong>${otp}</strong></p>
                     <p style="color: red;">Mã có hiệu lực trong 10 phút. <strong>LƯU Ý:</strong> Việc khôi phục sẽ ghi đè toàn bộ dữ liệu hiện tại.</p>
                 </div>
-            `,
+            `, brandName),
         }
         await transporter.sendMail(mailOptions);
         return true;
@@ -154,7 +192,7 @@ const sendNewDocumentEmail = async (uniqueUsers, docData, senderName = "Hệ th�
             ? `${docData.docNum}/${docData.docCode}` 
             : (docData.docNum || docData.docCode || "N/A");
 
-        const subject = `${fullDocCode} - ${docData.shortDescription || "N/A"}`;
+        const subject = `[${brandName} - Văn bản mới] ${fullDocCode} - ${docData.shortDescription || "N/A"}`;
 
         const allowedUsers = uniqueUsers.filter(u => !u.emailNotifications || u.emailNotifications.docNew !== false);
         const bccList = allowedUsers.map(u => u.email).filter(e => !!e);
@@ -176,7 +214,7 @@ const sendNewDocumentEmail = async (uniqueUsers, docData, senderName = "Hệ th�
             to: sender,
             bcc: bccList.join(','),
             subject: subject,
-            html: htmlContent,
+            html: applySystemBranding(htmlContent, brandName),
         }
         await transporter.sendMail(mailOptions).catch(err => console.error(`Error sending email:`, err));
 
@@ -192,22 +230,22 @@ const sendTaskReminderEmail = async (emails, taskData, reminderType) => {
         const bccList = Array.isArray(emails) ? emails : [emails];
         if (bccList.length === 0) return;
 
-        const { transporter, sender } = await getTransporterAndSender();
+        const { transporter, sender, brandName } = await getTransporterAndSender();
         
         let subject = "";
         let headerTitle = "";
         let color = "#333";
         
         if (reminderType === "near_deadline") {
-            subject = `[Nhắc nhở] Công việc sắp đến hạn: ${taskData.title}`;
+            subject = `[${brandName} - Nhắc nhở] Công việc sắp đến hạn: ${taskData.title}`;
             headerTitle = "Công việc của bạn sắp đến hạn";
             color = "#f39c12"; // Orange
         } else if (reminderType === "due_today") {
-            subject = `[Khẩn cấp] Công việc đến hạn hôm nay: ${taskData.title}`;
+            subject = `[${brandName} - Khẩn cấp] Công việc đến hạn hôm nay: ${taskData.title}`;
             headerTitle = "Công việc của bạn ĐẾN HẠN TRONG HÔM NAY";
             color = "#e74c3c"; // Red
         } else if (reminderType === "overdue") {
-            subject = `[Quá hạn] Công việc đã quá hạn: ${taskData.title}`;
+            subject = `[${brandName} - Quá hạn] Công việc đã quá hạn: ${taskData.title}`;
             headerTitle = "Công việc của bạn ĐÃ QUÁ HẠN";
             color = "#c0392b"; // Dark Red
         }
@@ -224,7 +262,7 @@ const sendTaskReminderEmail = async (emails, taskData, reminderType) => {
                 <p><strong>Nội dung:</strong> ${taskData.description || "Không có"}</p>
                 <p><strong>Hạn hoàn thành:</strong> <span style="color: ${color}; font-weight: bold;">${endDateStr}</span></p>
             </div>
-            <p style="margin-top: 20px;">Vui lòng truy cập hệ thống Quản lý Văn bản NSG để cập nhật tiến độ công việc.</p>
+            <p style="margin-top: 20px;">Vui lòng truy cập ${brandName} để cập nhật tiến độ công việc.</p>
             <p style="color: #888; font-size: 12px; margin-top: 30px; text-align: center;">Đây là email tự động từ hệ thống, vui lòng không trả lời email này.</p>
         </div>`;
 
@@ -233,7 +271,7 @@ const sendTaskReminderEmail = async (emails, taskData, reminderType) => {
             to: sender,
             bcc: bccList.join(','),
             subject: subject,
-            html: htmlContent,
+            html: applySystemBranding(htmlContent, brandName),
         }
         await transporter.sendMail(mailOptions);
         return true;
@@ -300,7 +338,7 @@ const sendTaskNotificationEmail = async (uniqueUsers, taskData, actionType) => {
         const assigneesList = (taskData.assignees || []).map(u => u.name).join(', ') || "N/A";
         const collaboratorsList = (taskData.collaborators || []).map(u => u.name).join(', ') || "N/A";
 
-        const subject = `[${actionName}] ${taskData.title}`;
+        const subject = `[${brandName} - ${actionName}] ${taskData.title}`;
 
         const allowedUsers = uniqueUsers.filter(u => !u.emailNotifications || u.emailNotifications.taskAssign !== false);
         const bccList = allowedUsers.map(u => u.email).filter(e => !!e);
@@ -326,7 +364,7 @@ const sendTaskNotificationEmail = async (uniqueUsers, taskData, actionType) => {
             to: sender,
             bcc: bccList.join(','),
             subject: subject,
-            html: htmlContent,
+            html: applySystemBranding(htmlContent, brandName),
         }
         await transporter.sendMail(mailOptions).catch(err => console.error(`Error sending email:`, err));
 
@@ -343,7 +381,7 @@ const sendReviewNotificationEmail = async (uniqueUsers, docData, actionType, not
         const bccList = allowedUsers.map(u => u.email).filter(e => !!e);
         if (bccList.length === 0) return;
 
-        const { transporter, sender } = await getTransporterAndSender();
+        const { transporter, sender, brandName } = await getTransporterAndSender();
         
         let actionName = "Cập nhật xét duyệt";
         let statusLabel = '<span style="color: #2196F3; font-weight: bold;">Chuyển BGH duyệt</span>';
@@ -418,14 +456,14 @@ const sendReviewNotificationEmail = async (uniqueUsers, docData, actionType, not
             .replace(/{headerColorEnd}/g, headerColorEnd)
             .replace(/{headerBorderColor}/g, headerBorderColor);
 
-        const subject = `[${actionName}] ${docTitle}`;
+        const subject = `[${brandName} - ${actionName}] ${docTitle}`;
 
         const mailOptions = {
             from: sender,
             to: sender,
             bcc: bccList.join(','),
             subject: subject,
-            html: htmlContent,
+            html: applySystemBranding(htmlContent, brandName),
         }
         await transporter.sendMail(mailOptions).catch(err => console.error(`Error sending email:`, err));
         return true;
@@ -441,7 +479,7 @@ const sendEmulationRegistrationEmail = async (uniqueUsers, regData, creatorName 
         const bccList = allowedUsers.map(u => u.email).filter(e => !!e);
         if (bccList.length === 0) return;
 
-        const { transporter, sender } = await getTransporterAndSender();
+        const { transporter, sender, brandName } = await getTransporterAndSender();
 
         // Danh hiệu HTML
         let titlesHtml = "";
@@ -507,7 +545,7 @@ const sendEmulationRegistrationEmail = async (uniqueUsers, regData, creatorName 
 
         const targetName = regData.name || regData.departmentName || "Đơn vị";
         const schoolYear = regData.schoolYear || "N/A";
-        const subject = `[Đề nghị thi đua] ${targetName} - Năm học ${schoolYear}`;
+        const subject = `[${brandName} - Đề nghị thi đua] ${targetName} - Năm học ${schoolYear}`;
         const createdAtStr = formatVietnamDateTime(regData.createdAt || Date.now());
 
         let htmlContent = EMULATION_REGISTRATION_EMAIL_TEMPLATE
@@ -527,7 +565,7 @@ const sendEmulationRegistrationEmail = async (uniqueUsers, regData, creatorName 
             to: sender,
             bcc: bccList.join(','),
             subject: subject,
-            html: htmlContent,
+            html: applySystemBranding(htmlContent, brandName),
         };
 
         await transporter.sendMail(mailOptions).catch(err => console.error(`Error sending emulation email:`, err));
@@ -544,7 +582,7 @@ const sendEmulationStatusEmail = async (uniqueUsers, regData, actionType, note =
         const bccList = allowedUsers.map(u => u.email).filter(e => !!e);
         if (bccList.length === 0) return;
 
-        const { transporter, sender } = await getTransporterAndSender();
+        const { transporter, sender, brandName } = await getTransporterAndSender();
 
         let actionName = "Cập nhật xét duyệt";
         let statusLabel = '<span style="color: #1890ff; font-weight: bold;">Đang xử lý</span>';
@@ -592,7 +630,7 @@ const sendEmulationStatusEmail = async (uniqueUsers, regData, actionType, note =
         const targetName = regData.name || regData.departmentName || "Đơn vị";
         const schoolYear = regData.schoolYear || "N/A";
         const actionTimeStr = formatVietnamDateTime();
-        const subject = `[${actionName}] ${targetName} - Năm học ${schoolYear}`;
+        const subject = `[${brandName} - ${actionName}] ${targetName} - Năm học ${schoolYear}`;
 
         let htmlContent = EMULATION_STATUS_EMAIL_TEMPLATE
             .replace(/{actionName}/g, actionName)
@@ -614,7 +652,7 @@ const sendEmulationStatusEmail = async (uniqueUsers, regData, actionType, note =
             to: sender,
             bcc: bccList.join(','),
             subject: subject,
-            html: htmlContent,
+            html: applySystemBranding(htmlContent, brandName),
         };
 
         await transporter.sendMail(mailOptions).catch(err => console.error(`Error sending emulation status email:`, err));
@@ -631,7 +669,7 @@ const sendTrainingRegistrationEmail = async (uniqueUsers, records, creatorName =
         const bccList = allowedUsers.map(u => u.email).filter(e => !!e);
         if (bccList.length === 0) return;
 
-        const { transporter, sender } = await getTransporterAndSender();
+        const { transporter, sender, brandName } = await getTransporterAndSender();
 
         const year = records[0]?.year || new Date().getFullYear().toString();
         const createdAtStr = formatVietnamDateTime();
@@ -663,7 +701,7 @@ const sendTrainingRegistrationEmail = async (uniqueUsers, records, creatorName =
             `;
         }
 
-        const subject = `[Đăng ký bồi dưỡng] ${creatorName} vừa gửi ${records.length} hồ sơ đăng ký mới - Năm ${year}`;
+        const subject = `[${brandName} - Đăng ký bồi dưỡng] ${creatorName} vừa gửi ${records.length} hồ sơ đăng ký mới - Năm ${year}`;
 
         let htmlContent = TRAINING_REGISTRATION_EMAIL_TEMPLATE
             .replace(/{year}/g, year)
@@ -678,7 +716,7 @@ const sendTrainingRegistrationEmail = async (uniqueUsers, records, creatorName =
             to: sender,
             bcc: bccList.join(','),
             subject: subject,
-            html: htmlContent,
+            html: applySystemBranding(htmlContent, brandName),
         };
 
         await transporter.sendMail(mailOptions).catch(err => console.error(`Error sending training registration email:`, err));
@@ -695,7 +733,7 @@ const sendTrainingStatusEmail = async (uniqueUsers, record, actionType, note = "
         const bccList = allowedUsers.map(u => u.email).filter(e => !!e);
         if (bccList.length === 0) return;
 
-        const { transporter, sender } = await getTransporterAndSender();
+        const { transporter, sender, brandName } = await getTransporterAndSender();
 
         let actionName = "Cập nhật hồ sơ bồi dưỡng";
         let statusLabel = '<span style="color: #2563eb; font-weight: bold;">Đang xử lý</span>';
@@ -759,7 +797,7 @@ const sendTrainingStatusEmail = async (uniqueUsers, record, actionType, note = "
             actionUrl = "https://qlvb.namsaigon.edu.vn/training/result-report";
         }
 
-        const subject = `[Bồi dưỡng - ${actionName}] ${record.userName} - ${record.trainingContent}`;
+        const subject = `[${brandName} - Bồi dưỡng: ${actionName}] ${record.userName} - ${record.trainingContent}`;
         const actionTime = formatVietnamDateTime();
 
         let htmlContent = TRAINING_STATUS_EMAIL_TEMPLATE
@@ -786,7 +824,7 @@ const sendTrainingStatusEmail = async (uniqueUsers, record, actionType, note = "
             to: sender,
             bcc: bccList.join(','),
             subject: subject,
-            html: htmlContent,
+            html: applySystemBranding(htmlContent, brandName),
         };
 
         await transporter.sendMail(mailOptions).catch(err => console.error(`Error sending training status email:`, err));
@@ -803,7 +841,7 @@ const sendOnlineRecordSubmitEmail = async (uniqueUsers, recordData, senderName =
         const bccList = allowedUsers.map(u => u.email).filter(e => !!e);
         if (bccList.length === 0) return;
 
-        const { transporter, sender } = await getTransporterAndSender();
+        const { transporter, sender, brandName } = await getTransporterAndSender();
 
         const createdAtStr = formatVietnamDateTime(recordData.createdAt || Date.now());
 
@@ -824,7 +862,7 @@ const sendOnlineRecordSubmitEmail = async (uniqueUsers, recordData, senderName =
             ? recordData.recipientNames.join(', ')
             : (recordData.recipients && recordData.recipients.map(r => r.name || r).join(', ')) || "Ban Giám hiệu / Quản lý";
 
-        const subject = `[Hồ sơ trực tuyến] ${senderName} vừa gửi hồ sơ: ${recordData.title || "Hồ sơ mới"}`;
+        const subject = `[${brandName} - Hồ sơ trực tuyến] ${senderName} vừa gửi hồ sơ: ${recordData.title || "Hồ sơ mới"}`;
 
         let htmlContent = ONLINE_RECORD_SUBMIT_EMAIL_TEMPLATE
             .replace(/{senderName}/g, senderName)
@@ -845,7 +883,7 @@ const sendOnlineRecordSubmitEmail = async (uniqueUsers, recordData, senderName =
             to: sender,
             bcc: bccList.join(','),
             subject: subject,
-            html: htmlContent,
+            html: applySystemBranding(htmlContent, brandName),
         };
 
         await transporter.sendMail(mailOptions).catch(err => console.error(`Error sending online record submit email:`, err));
@@ -862,7 +900,7 @@ const sendOnlineRecordStatusEmail = async (uniqueUsers, recordData, status, opin
         const bccList = allowedUsers.map(u => u.email).filter(e => !!e);
         if (bccList.length === 0) return;
 
-        const { transporter, sender } = await getTransporterAndSender();
+        const { transporter, sender, brandName } = await getTransporterAndSender();
 
         let actionName = "Cập nhật xử lý hồ sơ";
         let statusLabel = '<span style="color: #0284c7; font-weight: bold;">Đang tiếp nhận xử lý</span>';
@@ -891,7 +929,7 @@ const sendOnlineRecordStatusEmail = async (uniqueUsers, recordData, status, opin
         }
 
         const actionTime = formatVietnamDateTime();
-        const subject = `[Hồ sơ trực tuyến - ${actionName}] ${recordData.title || "Hồ sơ"}`;
+        const subject = `[${brandName} - Hồ sơ trực tuyến: ${actionName}] ${recordData.title || "Hồ sơ"}`;
 
         let htmlContent = ONLINE_RECORD_STATUS_EMAIL_TEMPLATE
             .replace(/{actionName}/g, actionName)
@@ -913,7 +951,7 @@ const sendOnlineRecordStatusEmail = async (uniqueUsers, recordData, status, opin
             to: sender,
             bcc: bccList.join(','),
             subject: subject,
-            html: htmlContent,
+            html: applySystemBranding(htmlContent, brandName),
         };
 
         await transporter.sendMail(mailOptions).catch(err => console.error(`Error sending online record status email:`, err));

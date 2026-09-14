@@ -3,6 +3,7 @@ const ChatbotConfig = require("../models/chatbotConfig.model");
 const Task = require("../models/task.model");
 const Document = require("../models/document.model");
 const User = require("../models/user.model");
+const SystemConfig = require("../models/systemConfig.model");
 
 // Hàm tạo Regex để tìm kiếm tiếng Việt không dấu/có dấu
 const createVietnameseRegex = (term) => {
@@ -145,7 +146,17 @@ const handleChat = async (req, res) => {
       ]
     }];
 
-    const systemInstruction = `Bạn là trợ lý ảo thông minh của Hệ thống Quản lý Văn bản NSG.
+    let systemBrand = "Hệ thống Văn phòng số - NSG-Office";
+    try {
+      const sys = await SystemConfig.findOne().lean();
+      if (sys && sys.siteName && sys.siteName.trim()) {
+        systemBrand = sys.siteName.trim();
+      }
+    } catch (e) {
+      console.warn("Lỗi lấy brandName trong chatbot:", e.message);
+    }
+
+    const systemInstruction = `Bạn là trợ lý ảo thông minh của ${systemBrand}.
 Nhiệm vụ của bạn là trả lời các câu hỏi dựa trên thông tin cá nhân của người dùng.
 ${userDataContext}
 Trả lời ngắn gọn, súc tích, lịch sự và chính xác. Không bịa đặt.

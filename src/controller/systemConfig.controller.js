@@ -1,6 +1,7 @@
 const { google } = require("googleapis");
 const { Readable } = require("stream");
 const SystemConfig = require("../models/systemConfig.model");
+const SmtpConfig = require("../models/smtpConfig.model");
 const { authorize, getDriveFolderId, sanitizeFileName } = require("./uploadfile.Controller");
 
 // Lấy thông tin cấu hình hệ thống (Public API)
@@ -43,7 +44,15 @@ const updateSystemConfig = async (req, res) => {
       config = new SystemConfig();
     }
 
-    if (siteName !== undefined) config.siteName = siteName.trim();
+    if (siteName !== undefined) {
+      config.siteName = siteName.trim();
+      // Đồng bộ tên người gửi email theo tên phần mềm / website
+      try {
+        await SmtpConfig.updateMany({}, { senderName: siteName.trim() });
+      } catch (errSync) {
+        console.warn("Không thể đồng bộ senderName sang SmtpConfig:", errSync.message);
+      }
+    }
     if (shortName !== undefined) config.shortName = shortName.trim();
     if (siteDescription !== undefined) config.siteDescription = siteDescription.trim();
     if (organizationName !== undefined) config.organizationName = organizationName.trim();
