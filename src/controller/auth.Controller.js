@@ -257,6 +257,14 @@ const upadteInfo = async (req, res) => {
         };
       }
 
+      // Cập nhật tùy biến giao diện màu sắc cho người dùng
+      if (updatedData.themePreference && typeof updatedData.themePreference === 'object') {
+        user.themePreference = {
+          ...(user.themePreference?.toObject ? user.themePreference.toObject() : (user.themePreference || {})),
+          ...updatedData.themePreference
+        };
+      }
+
       // Cho phép cập nhật phòng ban/chức vụ nếu là admin/manager và có truyền lên
       if (["admin", "manager"].includes(req.user?.role)) {
         if (updatedData.role !== undefined) user.role = updatedData.role;

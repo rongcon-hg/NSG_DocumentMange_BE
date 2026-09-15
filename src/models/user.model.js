@@ -91,6 +91,11 @@ const userSchema = new mongoose.Schema({
         onlineRecordSubmit: { type: Boolean, default: true },
         onlineRecordStatus: { type: Boolean, default: true },
     },
+    themePreference: {
+        preset: { type: String, default: "blue_ocean" },
+        headerBg: { type: String, default: "" },
+        sidebarBg: { type: String, default: "" },
+    },
 },
 {
   timestamps: true,
