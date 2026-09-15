@@ -96,6 +96,7 @@ const systemConfigRoutes = require("./src/routes/systemConfig.routes");
 const notificationRoutes = require("./src/routes/notification.routes");
 const trainingRegistrationRoutes = require("./src/routes/trainingRegistration.routes");
 const onlineRecordRoutes = require("./src/routes/onlineRecord.routes");
+const externalMenuRoutes = require("./src/routes/externalMenu.routes");
 
 // Ensure DB connection is established before handling requests in Vercel Serverless
 app.use(async (req, res, next) => {
@@ -135,6 +136,7 @@ app.use('/api/system-config', systemConfigRoutes);
 app.use('/notifications', notificationRoutes);
 app.use('/api/training/registrations', trainingRegistrationRoutes);
 app.use('/api/online-records', onlineRecordRoutes);
+app.use('/api/external-menus', externalMenuRoutes);
 
 // Cron endpoint for Vercel
 const cronRoutes = require('./src/routes/cronRoutes');
