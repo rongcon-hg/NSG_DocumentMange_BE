@@ -212,6 +212,16 @@ const onlineRecordSchema = new mongoose.Schema(
 
     // Lịch sử xử lý tiến trình hồ sơ
     history: [recordHistorySchema],
+
+    // Đánh dấu hồ sơ đã được ban hành văn bản chính thức
+    isIssued: {
+      type: Boolean,
+      default: false,
+    },
+    issuedDocumentId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Document",
+    },
   },
   {
     timestamps: true,

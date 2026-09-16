@@ -112,7 +112,8 @@ async function uploadToDrive(req, res) {
       executors,
       createAt,
       receivedAt,
-      repliedDocId
+      repliedDocId,
+      onlineRecordId
     } = req.body;
 
     if (!sentBy ) {
@@ -260,6 +261,19 @@ async function uploadToDrive(req, res) {
         await RepliedDoc.findByIdAndUpdate(repliedDocId, { isIssued: true });
       } catch (err) {
         console.error("Error updating RepliedDoc isIssued state:", err);
+      }
+    }
+
+    // Nếu văn bản này được phát hành từ một hồ sơ trực tuyến, cập nhật trạng thái isIssued
+    if (onlineRecordId) {
+      try {
+        const OnlineRecord = require("../models/onlineRecord.model");
+        await OnlineRecord.findByIdAndUpdate(onlineRecordId, { 
+          isIssued: true,
+          issuedDocumentId: newDocument._id
+        });
+      } catch (err) {
+        console.error("Error updating OnlineRecord isIssued state:", err);
       }
     }
 
