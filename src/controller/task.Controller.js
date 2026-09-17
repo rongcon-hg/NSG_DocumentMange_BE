@@ -472,7 +472,7 @@ const updateTask = async (req, res) => {
         // Thay đổi trạng thái
         let statusChanged = false;
         if (updates.status && updates.status !== existingTask.status) {
-            // Ràng buộc: Không thể hoàn thành công việc lớn khi còn công việc con chưa hoàn thành
+            // Ràng buộc khi chuyển sang trạng thái Hoàn thành
             if (updates.status === 'DONE') {
                 const effectiveSubtasks = updates.subtasks !== undefined ? updates.subtasks : (existingTask.subtasks || []);
                 const hasUnfinishedSubtasks = Array.isArray(effectiveSubtasks) && effectiveSubtasks.some(s => s.status !== 'DONE');
@@ -480,6 +480,36 @@ const updateTask = async (req, res) => {
                     return res.status(400).json({
                         success: false,
                         message: "Không thể hoàn thành công việc lớn khi còn công việc con chưa hoàn thành. Vui lòng hoàn thành tất cả công việc con trước."
+                    });
+                }
+
+                const effectiveTaskType = updates.taskType !== undefined ? updates.taskType : existingTask.taskType;
+                const effectiveDifficultyRate = updates.difficultyRate !== undefined ? updates.difficultyRate : existingTask.difficultyRate;
+                const effectiveOutputResult = updates.outputResult !== undefined ? updates.outputResult : existingTask.outputResult;
+                const effectiveFocusAxis = updates.focusAxis !== undefined ? updates.focusAxis : existingTask.focusAxis;
+
+                if (!effectiveTaskType) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "Vui lòng chọn Loại công việc (Phụ lục 3 & 4) khi chuyển sang trạng thái Hoàn thành."
+                    });
+                }
+                if (!effectiveDifficultyRate) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "Vui lòng chọn Hệ số độ khó (Phụ lục 3) khi chuyển sang trạng thái Hoàn thành."
+                    });
+                }
+                if (!effectiveOutputResult || (typeof effectiveOutputResult === 'string' && !effectiveOutputResult.trim())) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "Vui lòng nhập hoặc chọn Kết quả đầu ra / Sản phẩm (Phụ lục 3) khi chuyển sang trạng thái Hoàn thành."
+                    });
+                }
+                if (!effectiveFocusAxis || (typeof effectiveFocusAxis === 'string' && !effectiveFocusAxis.trim())) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "Vui lòng chọn Trục kết quả trọng tâm khi chuyển sang trạng thái Hoàn thành."
                     });
                 }
             }
