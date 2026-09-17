@@ -168,7 +168,7 @@ const getAllUser = async (req, res) => {
     }
 
     const users = await User.find(filter)
-      .select("_id name email mobile position department role")
+      .select("_id name email mobile position department role signature")
       .populate("position", "_id positionName positionCode")
       .populate("department", "_id departmentName departmentCode")
       .sort({ createdAt: -1 });

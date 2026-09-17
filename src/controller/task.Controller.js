@@ -1023,7 +1023,7 @@ const getKpiStats = async (req, res) => {
         }
 
         const users = await User.find(userFilter)
-            .select("name email department position role")
+            .select("name email department position role signature")
             .populate("department", "departmentName departmentCode")
             .populate("position", "positionName")
             .lean();
