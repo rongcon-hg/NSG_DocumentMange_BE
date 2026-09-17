@@ -293,7 +293,7 @@ async function uploadToDrive(req, res) {
 
 const getAllDocuments = async (req, res) => {
   try {
-    const { userId, page = 1, limit = 10 } = req.query; // Nhận userId, page, limit từ FE
+    const { userId, page = 1, limit = 10, signer } = req.query; // Nhận userId, page, limit từ FE
 
     if (!userId) {
       return res.status(400).json({
@@ -323,6 +323,16 @@ const getAllDocuments = async (req, res) => {
           { "assignedToUsers.userId": userId },
         ],
       };
+    }
+
+    if (signer) {
+      const signerArr = Array.isArray(signer)
+        ? signer
+        : String(signer).split(",").map(s => s.trim());
+      const validSignerIds = signerArr.filter(id => mongoose.isValidObjectId(id));
+      if (validSignerIds.length) {
+        filter.signer = { $in: validSignerIds };
+      }
     }
 
     // ===== Pagination =====
@@ -1167,6 +1177,7 @@ const searchDocuments = async(req, res) => {
       isRead,
       userId,
       unit,
+      signer,
       deadlineFrom,
       deadlineTo,
       createFrom,
@@ -1252,6 +1263,17 @@ const searchDocuments = async(req, res) => {
       }
     }
 
+    // ===== Người ký (signer: ObjectId hoặc danh sách id) =====
+    if (signer) {
+      const signerArr = Array.isArray(signer)
+        ? signer
+        : String(signer).split(",").map(s => s.trim());
+      const validSignerIds = signerArr.filter(id => mongoose.isValidObjectId(id));
+      if (validSignerIds.length) {
+        filter.signer = { $in: validSignerIds };
+      }
+    }
+
     // ===== Mức độ khẩn (urgency: "normal" | "high" | "immediately") =====
     if (urgency && ["normal", "high", "immediately"].includes(urgency)) {
       filter.urgency = urgency;
@@ -1281,7 +1303,12 @@ const searchDocuments = async(req, res) => {
 
     const [items, total] = await Promise.all([
       Document.find(filter)
-        .populate("docVariant", "unit")
+        .populate("docVariant")
+        .populate("signer", "name email")
+        .populate("position", "positionName")
+        .populate("departments", "departmentName")
+        .populate("unit", "unitName")
+        .populate("sentBy", "name")
         .sort(sort)
         .skip(Number(skip))
         .limit(Number(limit))
