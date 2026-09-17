@@ -241,6 +241,7 @@ const createTask = async (req, res) => {
         const taskType = req.body.taskType === 'URGENT' ? 'URGENT' : 'REGULAR';
         const baseScore = req.body.baseScore !== undefined ? Number(req.body.baseScore) : (taskType === 'URGENT' ? 12 : 10);
         const outputResult = req.body.outputResult ? String(req.body.outputResult).trim() : '';
+        const focusAxis = req.body.focusAxis ? String(req.body.focusAxis).trim() : '';
         const difficultyRate = req.body.difficultyRate !== undefined ? Number(req.body.difficultyRate) : 1.0;
 
         const newTask = new Task({
@@ -258,6 +259,7 @@ const createTask = async (req, res) => {
             taskType,
             baseScore,
             outputResult,
+            focusAxis,
             difficultyRate,
             createdBy,
             history: [{
@@ -646,6 +648,12 @@ const updateTask = async (req, res) => {
             updates.outputResult = String(updates.outputResult).trim();
             if (updates.outputResult !== (existingTask.outputResult || '')) {
                 changes.push(`Cập nhật kết quả đầu ra: "${updates.outputResult}"`);
+            }
+        }
+        if (updates.focusAxis !== undefined) {
+            updates.focusAxis = String(updates.focusAxis).trim();
+            if (updates.focusAxis !== (existingTask.focusAxis || '')) {
+                changes.push(`Cập nhật trục kết quả trọng tâm: "${updates.focusAxis}"`);
             }
         }
         if (updates.difficultyRate !== undefined) {

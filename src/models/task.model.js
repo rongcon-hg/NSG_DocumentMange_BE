@@ -82,6 +82,10 @@ const taskSchema = new mongoose.Schema(
       type: String,
       default: "", // Kết quả đầu ra: báo cáo, công văn, đề án, hồ sơ, dữ liệu...
     },
+    focusAxis: {
+      type: String,
+      default: "", // Trục kết quả trọng tâm (Trục 1 đến Trục 6)
+    },
     difficultyRate: {
       type: Number,
       default: 1.0, // 1.0: 100% (thông thường), 1.1: 110% (phối hợp <= 3 người), 1.2: 120% (phối hợp >= 4 người)
