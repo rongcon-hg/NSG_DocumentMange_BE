@@ -170,7 +170,7 @@ const sendRestoreOtpEmail = async (email, otp) => {
 const sendNewDocumentEmail = async (uniqueUsers, docData, senderName = "Hệ thống") => {
     try {
         if (!uniqueUsers || uniqueUsers.length === 0) return;
-        const { transporter, sender } = await getTransporterAndSender();
+        const { transporter, sender, brandName } = await getTransporterAndSender();
         
         let linksHtml = "";
         if (docData.files && docData.files.length > 0) {
@@ -283,7 +283,7 @@ const sendTaskReminderEmail = async (emails, taskData, reminderType) => {
 const sendTaskNotificationEmail = async (uniqueUsers, taskData, actionType) => {
     try {
         if (!uniqueUsers || uniqueUsers.length === 0) return;
-        const { transporter, sender } = await getTransporterAndSender();
+        const { transporter, sender, brandName } = await getTransporterAndSender();
         
         let actionName = "Cập nhật công việc";
         if (actionType === 'create') actionName = "Tạo công việc mới";
