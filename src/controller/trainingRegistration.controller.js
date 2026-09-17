@@ -498,6 +498,64 @@ const getRegistrationById = async (req, res) => {
       return res.status(404).json({ success: false, message: "Không tìm thấy hồ sơ bồi dưỡng" });
     }
 
+    // Nếu trước đây chưa có tài khoản (record.user == null) mà nay người dùng đã có tài khoản, tự động rà soát & cập nhật liên kết
+    if (!record.user && record.userName) {
+      const normalize = (s) =>
+        (s || "")
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/đ/g, "d")
+          .replace(/Đ/g, "D")
+          .toLowerCase()
+          .trim()
+          .replace(/\s+/g, " ");
+
+      const regNormName = normalize(record.userName);
+      const allUsers = await User.find({})
+        .populate("department", "departmentName departmentCode")
+        .populate("position", "positionName");
+
+      let matched = allUsers.filter((u) => u.name && normalize(u.name) === regNormName);
+      if (matched.length > 1) {
+        const regDeptStr = normalize(record.departmentName || "");
+        const disambiguated = matched.filter((u) => {
+          const uDeptName = normalize(u.department?.departmentName || "");
+          return uDeptName && (uDeptName.includes(regDeptStr) || regDeptStr.includes(uDeptName));
+        });
+        if (disambiguated.length === 1) matched = disambiguated;
+      }
+
+      if (matched.length === 1) {
+        const targetUser = matched[0];
+        record.user = targetUser._id;
+        record.userName = targetUser.name;
+        if (targetUser.department?._id) {
+          record.department = targetUser.department._id;
+          record.departmentName = targetUser.department.departmentName;
+        }
+        if (targetUser.position?._id) {
+          record.position = targetUser.position._id;
+          record.positionName = targetUser.position.positionName;
+        }
+        record.history.push({
+          action: "Cập nhật liên kết tài khoản",
+          actorName: "Hệ thống QLVB",
+          actorRole: "Hệ thống",
+          details: `Tự động cập nhật liên kết tài khoản cho nhân sự (${targetUser.name} - ${targetUser.email})`,
+          timestamp: new Date(),
+        });
+        await record.save();
+
+        record = await TrainingRegistration.findById(id)
+          .populate("user", "name email phone mobile phoneNumber department position avatar")
+          .populate("department", "departmentName departmentCode")
+          .populate("position", "positionName")
+          .populate("createdByUser", "name email")
+          .populate("managerReview.reviewedBy", "name email")
+          .populate("reportResult.reportedBy", "name email");
+      }
+    }
+
     res.status(200).json({ success: true, data: record });
   } catch (error) {
     console.error("Lỗi getRegistrationById:", error);
@@ -2361,6 +2419,86 @@ const getTrainingPendingCount = async (req, res) => {
   }
 };
 
+/**
+ * 13. RÀ SOÁT & TỰ ĐỘNG CẬP NHẬT LIÊN KẾT TÀI KHOẢN HỆ THỐNG CHO HỒ SƠ CHƯA CÓ TÀI KHOẢN
+ */
+const syncUnlinkedAccounts = async (req, res) => {
+  try {
+    const nullUserRegistrations = await TrainingRegistration.find({
+      $or: [{ user: null }, { user: { $exists: false } }],
+    });
+
+    if (nullUserRegistrations.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: "Tất cả hồ sơ bồi dưỡng đều đã được liên kết với tài khoản hệ thống.",
+        updatedCount: 0,
+      });
+    }
+
+    const allUsers = await User.find({})
+      .populate("department", "departmentName departmentCode")
+      .populate("position", "positionName");
+
+    const normalize = (s) =>
+      (s || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/đ/g, "d")
+        .replace(/Đ/g, "D")
+        .toLowerCase()
+        .trim()
+        .replace(/\s+/g, " ");
+
+    let updatedCount = 0;
+    for (const reg of nullUserRegistrations) {
+      const regNormName = normalize(reg.userName);
+      let matched = allUsers.filter((u) => u.name && normalize(u.name) === regNormName);
+
+      if (matched.length > 1) {
+        const regDeptStr = normalize(reg.departmentName || "");
+        const disambiguated = matched.filter((u) => {
+          const uDeptName = normalize(u.department?.departmentName || "");
+          return uDeptName && (uDeptName.includes(regDeptStr) || regDeptStr.includes(uDeptName));
+        });
+        if (disambiguated.length === 1) matched = disambiguated;
+      }
+
+      if (matched.length === 1) {
+        const targetUser = matched[0];
+        reg.user = targetUser._id;
+        reg.userName = targetUser.name;
+        if (targetUser.department?._id) {
+          reg.department = targetUser.department._id;
+          reg.departmentName = targetUser.department.departmentName;
+        }
+        if (targetUser.position?._id) {
+          reg.position = targetUser.position._id;
+          reg.positionName = targetUser.position.positionName;
+        }
+        reg.history.push({
+          action: "Cập nhật liên kết tài khoản",
+          actorName: req?.user?.name || "Hệ thống QLVB",
+          actorRole: req?.user?.role || "Hệ thống",
+          details: `Rà soát và tự động cập nhật liên kết tài khoản cho nhân sự (${targetUser.name} - ${targetUser.email})`,
+          timestamp: new Date(),
+        });
+        await reg.save();
+        updatedCount++;
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Đã rà soát và cập nhật liên kết tài khoản thành công cho ${updatedCount} hồ sơ bồi dưỡng!`,
+      updatedCount,
+    });
+  } catch (error) {
+    console.error("Lỗi syncUnlinkedAccounts:", error);
+    res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });
+  }
+};
+
 module.exports = {
   createRegistrations,
   getRegistrations,
@@ -2380,4 +2518,5 @@ module.exports = {
   getReportResultTemplateExcel,
   importReportResults,
   getTrainingPendingCount,
+  syncUnlinkedAccounts,
 };
