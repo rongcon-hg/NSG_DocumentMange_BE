@@ -1345,6 +1345,28 @@ const getUnreadDocCount = async (req, res) => {
     }
 }
 
+const { summarizeDocumentWithAI } = require('../service/documentSummarizer.service');
+
+const summarizeDocument = async (req, res) => {
+    try {
+        const { documentId } = req.params;
+        const { forceRefresh } = req.body;
+        const result = await summarizeDocumentWithAI(documentId, forceRefresh);
+        res.status(200).json({
+            success: true,
+            message: result.isCached ? "Lấy tóm tắt AI từ bộ nhớ đệm" : "Tóm tắt văn bản bằng AI thành công",
+            data: result.aiSummary,
+            isCached: result.isCached
+        });
+    } catch (error) {
+        console.error("Lỗi tóm tắt văn bản bằng AI:", error);
+        res.status(500).json({
+            success: false,
+            message: error.message || "Lỗi máy chủ khi tóm tắt văn bản bằng AI"
+        });
+    }
+};
+
 module.exports = { 
     uploadToDrive,
     getAllDocuments,
@@ -1365,5 +1387,6 @@ module.exports = {
     authorize,
     getDriveFolderId,
     getOrCreateMonthFolder,
-    sanitizeFileName
+    sanitizeFileName,
+    summarizeDocument
  };

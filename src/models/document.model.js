@@ -138,6 +138,14 @@ const documentSchema = new mongoose.Schema(
         ref: "User",
       }
     ],
+    aiSummary: {
+      summaryText: { type: String, default: "" },
+      keyPoints: [{ type: String }],
+      suggestedDepartments: [{ type: String }],
+      deadlineNote: { type: String, default: "" },
+      recommendedActions: [{ type: String }],
+      generatedAt: { type: Date }
+    },
     history: [
       {
         action: { type: String, enum: ["Issued", "Forwarded"] },

@@ -17,6 +17,7 @@ router.get("/deadline-notifications", verifyToken, uploadFile.getDeadlineStatusC
 router.delete("/:documentId/:userID",verifyManager,uploadFile.deleteDocument);
 router.put("/:documentId", verifyToken,upload.array("files"), uploadFile.updateDocument);
 router.get("/:documentId",verifyToken,uploadFile.getDocumentById);
+router.post("/:documentId/ai-summarize", verifyToken, uploadFile.summarizeDocument);
 router.get("/totalDocNum/:docVariantId/:year",verifyToken, uploadFile.getTotalDocNum);
 router.post("/isRead",verifyToken,uploadFile.isRead);
 
