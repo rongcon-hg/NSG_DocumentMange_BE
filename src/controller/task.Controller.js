@@ -909,12 +909,28 @@ const evaluateTask = async (req, res) => {
         const populatedTask = await Task.findById(taskId)
             .populate("assignees", "name email emailNotifications")
             .populate("collaborators", "name email emailNotifications")
-            .populate("createdBy", "name email")
+            .populate("createdBy", "name email emailNotifications")
             .populate("history.user", "name email")
             .populate("evaluation.evaluatedBy", "name email")
             .populate("relatedDocument", "docCode docNum shortDescription title files docVariant sentBy")
             .populate("subtasks.assignee", "name email")
             .populate("subtasks.createdBy", "name email");
+
+        try {
+            const uniqueUsersMap = new Map();
+            if (populatedTask.assignees) populatedTask.assignees.forEach(u => uniqueUsersMap.set(u._id.toString(), u));
+            if (populatedTask.collaborators) populatedTask.collaborators.forEach(u => uniqueUsersMap.set(u._id.toString(), u));
+            if (populatedTask.createdBy) {
+                uniqueUsersMap.set(populatedTask.createdBy._id.toString(), populatedTask.createdBy);
+            }
+            const uniqueUsers = Array.from(uniqueUsersMap.values());
+            const { sendTaskNotificationEmail } = require('../service/NodeMailer.service/email');
+            if (uniqueUsers.length > 0) {
+                sendTaskNotificationEmail(uniqueUsers, populatedTask, 'evaluated');
+            }
+        } catch (emailErr) {
+            console.error("Lỗi gửi email đánh giá task:", emailErr);
+        }
 
         res.status(200).json({ success: true, message: "Đánh giá công việc thành công", data: populatedTask });
     } catch (error) {

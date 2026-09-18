@@ -292,6 +292,7 @@ const sendTaskNotificationEmail = async (uniqueUsers, taskData, actionType) => {
         let actionName = "Cập nhật công việc";
         if (actionType === 'create') actionName = "Tạo công việc mới";
         if (actionType === 'status_change') actionName = "Thay đổi trạng thái công việc";
+        if (actionType === 'evaluated') actionName = "Đánh giá kết quả công việc";
 
         let linksHtml = "";
         if (taskData.files && taskData.files.length > 0) {
@@ -578,15 +579,16 @@ const sendEmulationRegistrationEmail = async (uniqueUsers, regData, creatorName 
             .replace(/{notes}/g, regData.notes || "Không có")
             .replace(/{linksHtml}/g, linksHtml);
 
+        const recipientEmails = Array.from(new Set(bccList));
         const mailOptions = {
             from: sender,
-            to: sender,
-            bcc: bccList.join(','),
+            to: recipientEmails.join(', '),
             subject: subject,
             html: applySystemBranding(htmlContent, brandName),
         };
 
-        await transporter.sendMail(mailOptions).catch(err => console.error(`Error sending emulation email:`, err));
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`[Email] Đã gửi thông báo đề nghị thi đua "${targetName}" tới:`, recipientEmails.join(', '), info?.messageId);
         return true;
     } catch (error) {
         console.error("Error in sendEmulationRegistrationEmail:", error);
@@ -621,41 +623,35 @@ const sendEmulationStatusEmail = async (uniqueUsers, regData, actionType, note =
             headerColorEnd = "#cf1322";
             headerBorderColor = "#f5222d";
         } else if (actionType === 'BGH_APPROVE') {
-            actionName = "Hiệu trưởng đã phê duyệt công nhận danh hiệu thi đua";
-            statusLabel = '<span style="color: #52c41a; font-weight: bold;">Hiệu trưởng Phê duyệt Đạt</span>';
+            actionName = "Ban Giám hiệu đã phê duyệt đề nghị thi đua";
+            statusLabel = '<span style="color: #52c41a; font-weight: bold;">Ban Giám hiệu Phê duyệt</span>';
             headerColorStart = "#52c41a";
             headerColorEnd = "#389e0d";
             headerBorderColor = "#52c41a";
         } else if (actionType === 'BGH_REJECT') {
-            actionName = "Hiệu trưởng từ chối công nhận danh hiệu thi đua";
-            statusLabel = '<span style="color: #f5222d; font-weight: bold;">Hiệu trưởng Từ chối công nhận</span>';
+            actionName = "Ban Giám hiệu từ chối đề nghị thi đua";
+            statusLabel = '<span style="color: #f5222d; font-weight: bold;">Ban Giám hiệu Từ chối</span>';
             headerColorStart = "#f5222d";
             headerColorEnd = "#cf1322";
             headerBorderColor = "#f5222d";
         }
 
-        // Danh hiệu HTML
+        const targetName = regData.name || regData.departmentName || "Đơn vị";
+        const subject = `[${brandName} - Thi đua: ${actionName}] ${targetName}`;
+        const actionTimeStr = formatVietnamDateTime();
+
         let titlesHtml = "";
         if (regData.titles && regData.titles.length > 0) {
-            titlesHtml = regData.titles.map(t => {
-                const name = typeof t === "object" ? t.name : t;
-                return `<span style="display: inline-block; margin: 2px 4px; padding: 2px 8px; background: #fffbe6; border: 1px solid #ffe58f; border-radius: 4px; color: #b78103; font-size: 12px; font-weight: 600;">🏆 ${name}</span>`;
-            }).join('');
+            titlesHtml = regData.titles.map(t => `<li style="margin: 4px 0; font-weight: 500;">🏆 ${t.titleName || t}</li>`).join('');
         } else {
-            titlesHtml = "<i>Không có</i>";
+            titlesHtml = "<li>Không có danh hiệu cụ thể</li>";
         }
-
-        const targetName = regData.name || regData.departmentName || "Đơn vị";
-        const schoolYear = regData.schoolYear || "N/A";
-        const actionTimeStr = formatVietnamDateTime();
-        const subject = `[${brandName} - ${actionName}] ${targetName} - Năm học ${schoolYear}`;
 
         let htmlContent = EMULATION_STATUS_EMAIL_TEMPLATE
             .replace(/{actionName}/g, actionName)
-            .replace(/{departmentName}/g, regData.departmentName || "Ban Giám hiệu / Nhà trường")
-            .replace(/{targetName}/g, targetName)
-            .replace(/{schoolYear}/g, schoolYear)
             .replace(/{statusLabel}/g, statusLabel)
+            .replace(/{targetName}/g, targetName)
+            .replace(/{schoolYear}/g, regData.schoolYear || "N/A")
             .replace(/{actorName}/g, actorName)
             .replace(/{actorRole}/g, actorRole)
             .replace(/{actionTime}/g, actionTimeStr)
@@ -665,15 +661,16 @@ const sendEmulationStatusEmail = async (uniqueUsers, regData, actionType, note =
             .replace(/{headerColorEnd}/g, headerColorEnd)
             .replace(/{headerBorderColor}/g, headerBorderColor);
 
+        const recipientEmails = Array.from(new Set(bccList));
         const mailOptions = {
             from: sender,
-            to: sender,
-            bcc: bccList.join(','),
+            to: recipientEmails.join(', '),
             subject: subject,
             html: applySystemBranding(htmlContent, brandName),
         };
 
-        await transporter.sendMail(mailOptions).catch(err => console.error(`Error sending emulation status email:`, err));
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`[Email] Đã gửi thông báo trạng thái thi đua "${targetName}" (${actionName}) tới:`, recipientEmails.join(', '), info?.messageId);
         return true;
     } catch (error) {
         console.error("Error in sendEmulationStatusEmail:", error);
@@ -729,15 +726,16 @@ const sendTrainingRegistrationEmail = async (uniqueUsers, records, creatorName =
             .replace(/{recordsTableRows}/g, rows)
             .replace(/{notesBlock}/g, notesBlock);
 
+        const recipientEmails = Array.from(new Set(bccList));
         const mailOptions = {
             from: sender,
-            to: sender,
-            bcc: bccList.join(','),
+            to: recipientEmails.join(', '),
             subject: subject,
             html: applySystemBranding(htmlContent, brandName),
         };
 
-        await transporter.sendMail(mailOptions).catch(err => console.error(`Error sending training registration email:`, err));
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`[Email] Đã gửi thông báo đăng ký bồi dưỡng (${records.length} hồ sơ) tới:`, recipientEmails.join(', '), info?.messageId);
         return true;
     } catch (error) {
         console.error("Error in sendTrainingRegistrationEmail:", error);
@@ -778,8 +776,8 @@ const sendTrainingStatusEmail = async (uniqueUsers, record, actionType, note = "
         } else if (actionType === 'REPORT_SUBMITTED') {
             actionName = "Đã nộp báo cáo kết quả bồi dưỡng";
             const attended = record.reportResult?.attended !== false;
-            statusLabel = attended
-                ? '<span style="color: #0284c7; font-weight: bold;">✓ Đã hoàn thành khóa học & nộp báo cáo</span>'
+            statusLabel = attended 
+                ? '<span style="color: #0284c7; font-weight: bold;">✓ Đã hoàn thành khóa học & nộp báo cáo</span>' 
                 : '<span style="color: #e11d48; font-weight: bold;">Không tham gia học</span>';
             headerColorStart = "#0284c7";
             headerColorEnd = "#38bdf8";
@@ -837,15 +835,16 @@ const sendTrainingStatusEmail = async (uniqueUsers, record, actionType, note = "
             .replace(/{extraDetailsHtml}/g, extraDetailsHtml)
             .replace(/{notes}/g, note || "Không có ghi chú thêm.");
 
+        const recipientEmails = Array.from(new Set(bccList));
         const mailOptions = {
             from: sender,
-            to: sender,
-            bcc: bccList.join(','),
+            to: recipientEmails.join(', '),
             subject: subject,
             html: applySystemBranding(htmlContent, brandName),
         };
 
-        await transporter.sendMail(mailOptions).catch(err => console.error(`Error sending training status email:`, err));
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`[Email] Đã gửi thông báo trạng thái bồi dưỡng "${record.userName}" (${actionName}) tới:`, recipientEmails.join(', '), info?.messageId);
         return true;
     } catch (error) {
         console.error("Error in sendTrainingStatusEmail:", error);
@@ -905,15 +904,16 @@ const sendOnlineRecordSubmitEmail = async (uniqueUsers, recordData, senderName =
             .replace(/{filesCount}/g, files.length)
             .replace(/{linksHtml}/g, linksHtml);
 
+        const recipientEmails = Array.from(new Set(bccList));
         const mailOptions = {
             from: sender,
-            to: sender,
-            bcc: bccList.join(','),
+            to: recipientEmails.join(', '),
             subject: subject,
             html: applySystemBranding(htmlContent, brandName),
         };
 
-        await transporter.sendMail(mailOptions).catch(err => console.error(`Error sending online record submit email:`, err));
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`[Email] Đã gửi thông báo nộp hồ sơ trực tuyến "${recordData.title}" tới:`, recipientEmails.join(', '), info?.messageId);
         return true;
     } catch (error) {
         console.error("Error in sendOnlineRecordSubmitEmail:", error);
@@ -982,15 +982,16 @@ const sendOnlineRecordStatusEmail = async (uniqueUsers, recordData, status, opin
             .replace(/{actionTime}/g, actionTime)
             .replace(/{opinion}/g, opinion || "Không có ý kiến bổ sung.");
 
+        const recipientEmails = Array.from(new Set(bccList));
         const mailOptions = {
             from: sender,
-            to: sender,
-            bcc: bccList.join(','),
+            to: recipientEmails.join(', '),
             subject: subject,
             html: applySystemBranding(htmlContent, brandName),
         };
 
-        await transporter.sendMail(mailOptions).catch(err => console.error(`Error sending online record status email:`, err));
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`[Email] Đã gửi thông báo trạng thái hồ sơ trực tuyến "${recordData.title}" (${actionName}) tới:`, recipientEmails.join(', '), info?.messageId);
         return true;
     } catch (error) {
         console.error("Error in sendOnlineRecordStatusEmail:", error);
