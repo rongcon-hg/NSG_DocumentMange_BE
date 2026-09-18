@@ -31,11 +31,22 @@ const getDriveAuth = async () => {
     throw new Error("Chưa cấu hình Google Drive Service Account");
 };
 
-// Danh sách các model Gemini theo thứ tự ưu tiên (Tự động fallback khi model gặp sự cố)
+// Danh sách tất cả các model Gemini theo thứ tự từ mới nhất đến các model dự phòng:
+// Hệ thống sẽ bắt đầu từ model mới nhất (gemini-3.8-flash), nếu model bận, quá tải hoặc chưa mở cho key sẽ tự động chuyển sang model kế tiếp.
 const GEMINI_MODELS = [
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3-flash-preview",
+    "gemini-flash-latest",
+    "gemini-flash-lite-latest",
     "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
     "gemini-2.0-flash",
     "gemini-1.5-flash",
+    "gemini-1.5-flash-8b",
     "gemini-1.5-pro"
 ];
 
