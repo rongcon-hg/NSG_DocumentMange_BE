@@ -85,6 +85,7 @@ const createRecurringTask = async (req, res) => {
             frequency,
             repeatDaysOfWeek,
             repeatDayOfMonth,
+            repeatMonthOfYear,
             times,
             durationDays
         } = req.body;
@@ -111,6 +112,7 @@ const createRecurringTask = async (req, res) => {
             frequency: frequency || 'WEEKLY',
             repeatDaysOfWeek: Array.isArray(repeatDaysOfWeek) ? repeatDaysOfWeek : [1],
             repeatDayOfMonth: repeatDayOfMonth !== undefined ? Number(repeatDayOfMonth) : 1,
+            repeatMonthOfYear: repeatMonthOfYear !== undefined ? Number(repeatMonthOfYear) : 1,
             times: Array.isArray(times) && times.length >= 2 ? times : ['08:00', '17:00'],
             durationDays: durationDays !== undefined ? Number(durationDays) : 3,
             isActive: true
@@ -149,7 +151,7 @@ const updateRecurringTask = async (req, res) => {
             'title', 'description', 'notes', 'taskType', 'baseScore', 'outputResult',
             'focusAxis', 'difficultyRate', 'priority', 'assignees', 'collaborators',
             'department', 'subtasks', 'frequency', 'repeatDaysOfWeek', 'repeatDayOfMonth',
-            'times', 'durationDays', 'isActive'
+            'repeatMonthOfYear', 'times', 'durationDays', 'isActive'
         ];
 
         allowedFields.forEach(field => {

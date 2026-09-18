@@ -68,10 +68,10 @@ const recurringTaskSchema = new mongoose.Schema(
         assignee: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
       },
     ],
-    // Chu kỳ lặp: DAILY (Hàng ngày), WEEKLY (Hàng tuần), MONTHLY (Hàng tháng), SEMESTER (Học kỳ)
+    // Chu kỳ lặp: DAILY (Hàng ngày), WEEKLY (Hàng tuần), MONTHLY (Hàng tháng), SEMESTER (Học kỳ), YEARLY (Hàng năm)
     frequency: {
       type: String,
-      enum: ["DAILY", "WEEKLY", "MONTHLY", "SEMESTER"],
+      enum: ["DAILY", "WEEKLY", "MONTHLY", "SEMESTER", "YEARLY"],
       default: "WEEKLY",
       required: true,
     },
@@ -80,10 +80,15 @@ const recurringTaskSchema = new mongoose.Schema(
       type: [Number],
       default: [1], // Mặc định Thứ 2 hàng tuần
     },
-    // Ngày trong tháng (1 - 31) đối với MONTHLY
+    // Ngày trong tháng (1 - 31) đối với MONTHLY và YEARLY
     repeatDayOfMonth: {
       type: Number,
-      default: 1, // Mặc định ngày 1 hàng tháng
+      default: 1, // Mặc định ngày 1
+    },
+    // Tháng trong năm (1 - 12) đối với YEARLY
+    repeatMonthOfYear: {
+      type: Number,
+      default: 1, // Mặc định Tháng 1
     },
     // Giờ bắt đầu & kết thúc mặc định trong ngày: ['08:00', '17:00']
     times: {

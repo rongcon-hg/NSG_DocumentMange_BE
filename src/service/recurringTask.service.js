@@ -40,10 +40,39 @@ const calculateNextRunDate = (recTask, baseDate = new Date()) => {
 
     if (freq === 'MONTHLY') {
         const targetDay = recTask.repeatDayOfMonth || 1;
-        let nextMonth = new Date(d);
-        nextMonth.setMonth(nextMonth.getMonth() + 1);
-        nextMonth.setDate(targetDay);
-        return nextMonth;
+        let candidate = new Date(d);
+        candidate.setDate(targetDay);
+        candidate.setHours(8, 0, 0, 0);
+
+        const dZero = new Date(d);
+        dZero.setHours(0, 0, 0, 0);
+        const candidateZero = new Date(candidate);
+        candidateZero.setHours(0, 0, 0, 0);
+
+        if (candidateZero.getTime() <= dZero.getTime()) {
+            candidate.setMonth(candidate.getMonth() + 1);
+        }
+        return candidate;
+    }
+
+    if (freq === 'YEARLY') {
+        const targetMonth = (recTask.repeatMonthOfYear || 1) - 1; // 0 - 11 in JS
+        const targetDay = recTask.repeatDayOfMonth || 1;
+
+        let candidate = new Date(d);
+        candidate.setMonth(targetMonth);
+        candidate.setDate(targetDay);
+        candidate.setHours(8, 0, 0, 0);
+
+        const dZero = new Date(d);
+        dZero.setHours(0, 0, 0, 0);
+        const candidateZero = new Date(candidate);
+        candidateZero.setHours(0, 0, 0, 0);
+
+        if (candidateZero.getTime() <= dZero.getTime()) {
+            candidate.setFullYear(candidate.getFullYear() + 1);
+        }
+        return candidate;
     }
 
     if (freq === 'SEMESTER') {
@@ -201,6 +230,13 @@ const executeRecurringTasksGeneration = async () => {
             } else if (freq === 'MONTHLY') {
                 const targetDay = recTask.repeatDayOfMonth || 1;
                 if (currentDayOfMonth === targetDay) {
+                    shouldRun = true;
+                }
+            } else if (freq === 'YEARLY') {
+                const targetMonth = recTask.repeatMonthOfYear || 1;
+                const targetDay = recTask.repeatDayOfMonth || 1;
+                const currentMonth = today.getMonth() + 1; // 1 - 12
+                if (currentMonth === targetMonth && currentDayOfMonth === targetDay) {
                     shouldRun = true;
                 }
             } else if (freq === 'SEMESTER') {
