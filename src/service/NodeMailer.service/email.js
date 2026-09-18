@@ -80,6 +80,9 @@ const getTransporterAndSender = async () => {
         port,
         secure,
         auth: { user, pass },
+        connectionTimeout: 15000,
+        greetingTimeout: 15000,
+        socketTimeout: 30000,
     });
 
     const sender = `"${senderName}" <${user || 'qlvb@nsgpc.edu.vn'}>`;
@@ -209,15 +212,15 @@ const sendNewDocumentEmail = async (uniqueUsers, docData, senderName = "Hệ th�
             .replace("{deadlineDay}", deadlineValue)
             .replace("{linksHtml}", linksHtml);
 
+        const recipientEmails = Array.from(new Set(bccList));
         const mailOptions = {
             from: sender,
-            to: sender,
-            bcc: bccList.join(','),
+            to: recipientEmails.join(', '),
             subject: subject,
             html: applySystemBranding(htmlContent, brandName),
-        }
-        await transporter.sendMail(mailOptions).catch(err => console.error(`Error sending email:`, err));
-
+        };
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`[Email] Đã gửi thông báo văn bản "${fullDocCode}" tới:`, recipientEmails.join(', '), info?.messageId);
         return true;
     } catch (error) {
         console.error("Error sending document notification to email:", error);
@@ -266,14 +269,15 @@ const sendTaskReminderEmail = async (emails, taskData, reminderType) => {
             <p style="color: #888; font-size: 12px; margin-top: 30px; text-align: center;">Đây là email tự động từ hệ thống, vui lòng không trả lời email này.</p>
         </div>`;
 
+        const recipientEmails = Array.from(new Set(bccList));
         const mailOptions = {
             from: sender,
-            to: sender,
-            bcc: bccList.join(','),
+            to: recipientEmails.join(', '),
             subject: subject,
             html: applySystemBranding(htmlContent, brandName),
-        }
-        await transporter.sendMail(mailOptions);
+        };
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`[Email] Đã gửi nhắc nhở công việc "${taskData.title}" tới:`, recipientEmails.join(', '), info?.messageId);
         return true;
     } catch (error) {
         console.error("Error sending task reminder email:", error);
@@ -359,15 +363,15 @@ const sendTaskNotificationEmail = async (uniqueUsers, taskData, actionType) => {
             .replace(/{headerColorEnd}/g, headerColorEnd)
             .replace(/{headerBorderColor}/g, headerBorderColor);
 
+        const recipientEmails = Array.from(new Set(bccList));
         const mailOptions = {
             from: sender,
-            to: sender,
-            bcc: bccList.join(','),
+            to: recipientEmails.join(', '),
             subject: subject,
             html: applySystemBranding(htmlContent, brandName),
-        }
-        await transporter.sendMail(mailOptions).catch(err => console.error(`Error sending email:`, err));
-
+        };
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`[Email] Đã gửi thông báo công việc "${taskData.title}" (${actionName}) tới:`, recipientEmails.join(', '), info?.messageId);
         return true;
     } catch (error) {
         console.error("Error sending task notification to email:", error);
@@ -471,14 +475,15 @@ const sendReviewNotificationEmail = async (uniqueUsers, docData, actionType, not
 
         const subject = `[${brandName} - ${actionName}] ${docTitle}`;
 
+        const recipientEmails = Array.from(new Set(bccList));
         const mailOptions = {
             from: sender,
-            to: sender,
-            bcc: bccList.join(','),
+            to: recipientEmails.join(', '),
             subject: subject,
             html: applySystemBranding(htmlContent, brandName),
-        }
-        await transporter.sendMail(mailOptions).catch(err => console.error(`Error sending email:`, err));
+        };
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`[Email] Đã gửi thông báo trình ký "${docTitle}" (${actionName}) tới:`, recipientEmails.join(', '), info?.messageId);
         return true;
     } catch (error) {
         console.error("Error sending review notification to email:", error);

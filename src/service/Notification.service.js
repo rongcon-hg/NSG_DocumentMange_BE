@@ -27,7 +27,13 @@ const triggerDocumentNotifications = async (document) => {
         let senderUser = null;
         if (document.sentBy || document.sender) {
             senderUser = await User.findById(document.sentBy || document.sender);
-            if (senderUser) senderName = senderUser.name;
+            if (senderUser) {
+                senderName = senderUser.name;
+                // Thêm người gửi vào danh sách để nhận bản sao thông báo ban hành
+                if (!uniqueUsers.some(u => u._id.toString() === senderUser._id.toString())) {
+                    uniqueUsers.push(senderUser);
+                }
+            }
         }
 
         // 1. Send Email notification
@@ -43,6 +49,12 @@ const triggerDocumentNotifications = async (document) => {
                 .map(u => (u.userId._id || u.userId).toString());
             
             let taskUsers = uniqueUsers.filter(u => chuTriIds.includes(u._id.toString()));
+
+            // Nếu không có ai có onTime !== null (ví dụ gán theo phòng ban), fallback sang toàn bộ người nhận
+            if (taskUsers.length === 0 && uniqueUsers.length > 0) {
+                taskUsers = uniqueUsers.filter(u => !senderUser || u._id.toString() !== senderUser._id.toString());
+                if (taskUsers.length === 0) taskUsers = uniqueUsers;
+            }
 
             if (taskUsers.length > 0) {
                 await createTasksAndSyncGoogleCalendar(document, taskUsers);

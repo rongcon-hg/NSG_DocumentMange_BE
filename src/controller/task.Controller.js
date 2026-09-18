@@ -735,7 +735,7 @@ const updateTask = async (req, res) => {
         const populatedTask = await Task.findById(updatedTask._id)
             .populate("assignees", "name email emailNotifications")
             .populate("collaborators", "name email emailNotifications")
-            .populate("createdBy", "name email")
+            .populate("createdBy", "name email emailNotifications")
             .populate("history.user", "name email")
             .populate("evaluation.evaluatedBy", "name email")
             .populate("relatedDocument", "docCode docNum shortDescription title files docVariant sentBy")
@@ -743,11 +743,13 @@ const updateTask = async (req, res) => {
             .populate("subtasks.createdBy", "name email");
 
         try {
-            const uniqueUsers = [...(populatedTask.assignees || []), ...(populatedTask.collaborators || [])].filter((user, index, self) => 
-                index === self.findIndex((t) => (
-                    t._id.toString() === user._id.toString()
-                ))
-            );
+            const uniqueUsersMap = new Map();
+            if (populatedTask.assignees) populatedTask.assignees.forEach(u => uniqueUsersMap.set(u._id.toString(), u));
+            if (populatedTask.collaborators) populatedTask.collaborators.forEach(u => uniqueUsersMap.set(u._id.toString(), u));
+            if (populatedTask.createdBy) {
+                uniqueUsersMap.set(populatedTask.createdBy._id.toString(), populatedTask.createdBy);
+            }
+            const uniqueUsers = Array.from(uniqueUsersMap.values());
             
             let actionType = 'update';
             if (statusChanged) {
