@@ -31,8 +31,8 @@ const getDriveAuth = async () => {
     throw new Error("Chưa cấu hình Google Drive Service Account");
 };
 
-// Danh sách tất cả các model Gemini theo thứ tự từ mới nhất đến các model dự phòng:
-// Hệ thống sẽ bắt đầu từ model mới nhất (gemini-3.8-flash), nếu model bận, quá tải hoặc chưa mở cho key sẽ tự động chuyển sang model kế tiếp.
+// Danh sách tất cả các model Gemini khả dụng được Google hỗ trợ cho phương thức generateContent:
+// Bắt đầu từ model mới nhất gemini-3.8-flash, tự động fallback xuống các model ổn định cao.
 const GEMINI_MODELS = [
     "gemini-3.8-flash",
     "gemini-3.7-flash",
@@ -40,14 +40,12 @@ const GEMINI_MODELS = [
     "gemini-3.5-flash",
     "gemini-3.5-flash-lite",
     "gemini-3-flash-preview",
+    "gemini-3.1-flash-lite",
     "gemini-flash-latest",
     "gemini-flash-lite-latest",
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
-    "gemini-2.0-flash",
-    "gemini-1.5-flash",
-    "gemini-1.5-flash-8b",
-    "gemini-1.5-pro"
+    "gemini-2.5-pro"
 ];
 
 /**
@@ -259,6 +257,24 @@ Hãy phân tích và trả về định dạng JSON thuần túy (không dùng m
             } catch (modelErr) {
                 console.warn(`[AI Summarizer] Model ${modelName} gặp lỗi: ${modelErr.message}. Đang chuyển sang model tiếp theo...`);
                 lastError = modelErr;
+            }
+        }
+
+        // Nếu tất cả model đều lỗi khi gửi kèm file (ví dụ lỗi 503 do lưu lượng mạng hoặc file lớn), tự động dự phòng gửi bằng prompt metadata
+        if (!responseText && filePart) {
+            console.warn("[AI Summarizer] Thử nghiệm lại với metadata do gửi kèm file bị quá tải...");
+            for (const modelName of ["gemini-3.5-flash-lite", "gemini-flash-latest", "gemini-2.5-flash"]) {
+                try {
+                    const model = genAI.getGenerativeModel({ model: modelName });
+                    const result = await model.generateContent([prompt]);
+                    const response = await result.response;
+                    responseText = response.text().trim();
+                    usedModel = modelName;
+                    analyzedFile = ""; // Fallback sang metadata
+                    break;
+                } catch (retryErr) {
+                    lastError = retryErr;
+                }
             }
         }
 
