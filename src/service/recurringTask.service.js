@@ -55,6 +55,36 @@ const calculateNextRunDate = (recTask, baseDate = new Date()) => {
         return candidate;
     }
 
+    if (freq === 'QUARTERLY') {
+        const offset = Math.max(0, Math.min(2, (recTask.repeatQuarterMonth || 1) - 1)); // 0 (đầu), 1 (giữa), 2 (cuối)
+        const targetDay = recTask.repeatDayOfMonth || 1;
+        const validMonths = [0 + offset, 3 + offset, 6 + offset, 9 + offset]; // Tháng 0-indexed trong năm
+
+        const dZero = new Date(d);
+        dZero.setHours(0, 0, 0, 0);
+
+        for (const m of validMonths) {
+            let candidate = new Date(d);
+            candidate.setMonth(m);
+            candidate.setDate(targetDay);
+            candidate.setHours(8, 0, 0, 0);
+
+            let candidateZero = new Date(candidate);
+            candidateZero.setHours(0, 0, 0, 0);
+
+            if (candidateZero.getTime() > dZero.getTime()) {
+                return candidate;
+            }
+        }
+
+        let nextYearCandidate = new Date(d);
+        nextYearCandidate.setFullYear(nextYearCandidate.getFullYear() + 1);
+        nextYearCandidate.setMonth(validMonths[0]);
+        nextYearCandidate.setDate(targetDay);
+        nextYearCandidate.setHours(8, 0, 0, 0);
+        return nextYearCandidate;
+    }
+
     if (freq === 'YEARLY') {
         const targetMonth = (recTask.repeatMonthOfYear || 1) - 1; // 0 - 11 in JS
         const targetDay = recTask.repeatDayOfMonth || 1;
@@ -132,6 +162,7 @@ const generateSingleTaskFromRecurring = async (recTask, triggeredBy = null) => {
             endDate,
             assignees: recTask.assignees || [],
             collaborators: recTask.collaborators || [],
+            files: recTask.files || [],
             subtasks,
             priority: recTask.priority || 'NORMAL',
             taskType: recTask.taskType || 'REGULAR',
@@ -230,6 +261,14 @@ const executeRecurringTasksGeneration = async () => {
             } else if (freq === 'MONTHLY') {
                 const targetDay = recTask.repeatDayOfMonth || 1;
                 if (currentDayOfMonth === targetDay) {
+                    shouldRun = true;
+                }
+            } else if (freq === 'QUARTERLY') {
+                const offset = Math.max(0, Math.min(2, (recTask.repeatQuarterMonth || 1) - 1));
+                const validMonths = [0 + offset, 3 + offset, 6 + offset, 9 + offset];
+                const targetDay = recTask.repeatDayOfMonth || 1;
+                const currentMonth0 = today.getMonth(); // 0 - 11
+                if (validMonths.includes(currentMonth0) && currentDayOfMonth === targetDay) {
                     shouldRun = true;
                 }
             } else if (freq === 'YEARLY') {

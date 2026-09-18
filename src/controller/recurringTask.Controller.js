@@ -60,6 +60,18 @@ const getRecurringTaskById = async (req, res) => {
     }
 };
 
+const { google } = require("googleapis");
+const { Readable } = require("stream");
+const { authorize, getOrCreateMonthFolder, sanitizeFileName } = require("./uploadfile.Controller");
+
+const parseJSON = (data, fallback = []) => {
+    try {
+        return typeof data === "string" ? JSON.parse(data) : (data || fallback);
+    } catch (e) {
+        return fallback;
+    }
+};
+
 // Tạo mới một mẫu công việc định kỳ
 const createRecurringTask = async (req, res) => {
     try {
@@ -78,20 +90,61 @@ const createRecurringTask = async (req, res) => {
             focusAxis,
             difficultyRate,
             priority,
-            assignees,
-            collaborators,
             department,
-            subtasks,
             frequency,
-            repeatDaysOfWeek,
             repeatDayOfMonth,
+            repeatQuarterMonth,
             repeatMonthOfYear,
-            times,
             durationDays
         } = req.body;
 
         if (!title || !title.trim()) {
             return res.status(400).json({ success: false, message: 'Tiêu đề mẫu công việc không được để trống' });
+        }
+
+        const assignees = parseJSON(req.body.assignees, []);
+        const collaborators = parseJSON(req.body.collaborators, []);
+        const subtasks = parseJSON(req.body.subtasks, []);
+        const repeatDaysOfWeek = parseJSON(req.body.repeatDaysOfWeek, [1]);
+        const times = parseJSON(req.body.times, ['08:00', '17:00']);
+
+        let uploadedFiles = [];
+        if (req.body.uploadedFiles) {
+            uploadedFiles = parseJSON(req.body.uploadedFiles, []);
+        } else if (req.body.files) {
+            uploadedFiles = parseJSON(req.body.files, []);
+        }
+
+        if (req.files && req.files.length > 0) {
+            try {
+                const auth = await authorize();
+                const drive = google.drive({ version: "v3", auth });
+                const monthFolderId = await getOrCreateMonthFolder(drive);
+
+                for (const file of req.files) {
+                    const fileMetadata = {
+                        name: sanitizeFileName(file.originalname),
+                        parents: [monthFolderId],
+                    };
+                    const media = {
+                        mimeType: file.mimetype,
+                        body: Readable.from(file.buffer),
+                    };
+                    const response = await drive.files.create({
+                        requestBody: fileMetadata,
+                        media: media,
+                        fields: "id, name, mimeType, size",
+                        supportsAllDrives: true
+                    });
+                    uploadedFiles.push({
+                        fileId: response.data.id,
+                        fileName: response.data.name,
+                        fileMimeType: response.data.mimeType,
+                    });
+                }
+            } catch (driveErr) {
+                console.warn("[RecurringTask] Lỗi tải file lên Drive:", driveErr.message);
+            }
         }
 
         const newRecTask = new RecurringTask({
@@ -104,17 +157,19 @@ const createRecurringTask = async (req, res) => {
             focusAxis: focusAxis ? String(focusAxis).trim() : '',
             difficultyRate: difficultyRate !== undefined ? Number(difficultyRate) : 1.0,
             priority: priority || 'NORMAL',
-            assignees: Array.isArray(assignees) ? assignees : [],
-            collaborators: Array.isArray(collaborators) ? collaborators : [],
+            assignees,
+            collaborators,
             department: department || undefined,
             createdBy,
-            subtasks: Array.isArray(subtasks) ? subtasks : [],
+            subtasks,
             frequency: frequency || 'WEEKLY',
-            repeatDaysOfWeek: Array.isArray(repeatDaysOfWeek) ? repeatDaysOfWeek : [1],
+            repeatDaysOfWeek,
             repeatDayOfMonth: repeatDayOfMonth !== undefined ? Number(repeatDayOfMonth) : 1,
+            repeatQuarterMonth: repeatQuarterMonth !== undefined ? Number(repeatQuarterMonth) : 1,
             repeatMonthOfYear: repeatMonthOfYear !== undefined ? Number(repeatMonthOfYear) : 1,
             times: Array.isArray(times) && times.length >= 2 ? times : ['08:00', '17:00'],
             durationDays: durationDays !== undefined ? Number(durationDays) : 3,
+            files: uploadedFiles,
             isActive: true
         });
 
@@ -149,9 +204,8 @@ const updateRecurringTask = async (req, res) => {
 
         const allowedFields = [
             'title', 'description', 'notes', 'taskType', 'baseScore', 'outputResult',
-            'focusAxis', 'difficultyRate', 'priority', 'assignees', 'collaborators',
-            'department', 'subtasks', 'frequency', 'repeatDaysOfWeek', 'repeatDayOfMonth',
-            'repeatMonthOfYear', 'times', 'durationDays', 'isActive'
+            'focusAxis', 'difficultyRate', 'priority', 'department', 'frequency',
+            'repeatDayOfMonth', 'repeatQuarterMonth', 'repeatMonthOfYear', 'durationDays', 'isActive'
         ];
 
         allowedFields.forEach(field => {
@@ -159,6 +213,52 @@ const updateRecurringTask = async (req, res) => {
                 recTask[field] = req.body[field];
             }
         });
+
+        if (req.body.assignees !== undefined) recTask.assignees = parseJSON(req.body.assignees, []);
+        if (req.body.collaborators !== undefined) recTask.collaborators = parseJSON(req.body.collaborators, []);
+        if (req.body.subtasks !== undefined) recTask.subtasks = parseJSON(req.body.subtasks, []);
+        if (req.body.repeatDaysOfWeek !== undefined) recTask.repeatDaysOfWeek = parseJSON(req.body.repeatDaysOfWeek, [1]);
+        if (req.body.times !== undefined) recTask.times = parseJSON(req.body.times, ['08:00', '17:00']);
+
+        let uploadedFiles = recTask.files || [];
+        if (req.body.uploadedFiles !== undefined) {
+            uploadedFiles = parseJSON(req.body.uploadedFiles, []);
+        } else if (req.body.files !== undefined) {
+            uploadedFiles = parseJSON(req.body.files, []);
+        }
+
+        if (req.files && req.files.length > 0) {
+            try {
+                const auth = await authorize();
+                const drive = google.drive({ version: "v3", auth });
+                const monthFolderId = await getOrCreateMonthFolder(drive);
+
+                for (const file of req.files) {
+                    const fileMetadata = {
+                        name: sanitizeFileName(file.originalname),
+                        parents: [monthFolderId],
+                    };
+                    const media = {
+                        mimeType: file.mimetype,
+                        body: Readable.from(file.buffer),
+                    };
+                    const response = await drive.files.create({
+                        requestBody: fileMetadata,
+                        media: media,
+                        fields: "id, name, mimeType, size",
+                        supportsAllDrives: true
+                    });
+                    uploadedFiles.push({
+                        fileId: response.data.id,
+                        fileName: response.data.name,
+                        fileMimeType: response.data.mimeType,
+                    });
+                }
+            } catch (driveErr) {
+                console.warn("[RecurringTask] Lỗi tải file lên Drive:", driveErr.message);
+            }
+        }
+        recTask.files = uploadedFiles;
 
         // Tính lại ngày chạy tiếp theo
         recTask.nextRunDate = calculateNextRunDate(recTask);

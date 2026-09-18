@@ -68,10 +68,10 @@ const recurringTaskSchema = new mongoose.Schema(
         assignee: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
       },
     ],
-    // Chu kỳ lặp: DAILY (Hàng ngày), WEEKLY (Hàng tuần), MONTHLY (Hàng tháng), SEMESTER (Học kỳ), YEARLY (Hàng năm)
+    // Chu kỳ lặp: DAILY (Hàng ngày), WEEKLY (Hàng tuần), MONTHLY (Hàng tháng), QUARTERLY (Hàng quý), SEMESTER (Học kỳ), YEARLY (Hàng năm)
     frequency: {
       type: String,
-      enum: ["DAILY", "WEEKLY", "MONTHLY", "SEMESTER", "YEARLY"],
+      enum: ["DAILY", "WEEKLY", "MONTHLY", "QUARTERLY", "SEMESTER", "YEARLY"],
       default: "WEEKLY",
       required: true,
     },
@@ -80,16 +80,29 @@ const recurringTaskSchema = new mongoose.Schema(
       type: [Number],
       default: [1], // Mặc định Thứ 2 hàng tuần
     },
-    // Ngày trong tháng (1 - 31) đối với MONTHLY và YEARLY
+    // Ngày trong tháng (1 - 31) đối với MONTHLY, QUARTERLY và YEARLY
     repeatDayOfMonth: {
       type: Number,
       default: 1, // Mặc định ngày 1
+    },
+    // Tháng trong quý (1: Tháng đầu, 2: Tháng giữa, 3: Tháng cuối) đối với QUARTERLY
+    repeatQuarterMonth: {
+      type: Number,
+      default: 1, // Mặc định tháng đầu quý (Tháng 1, 4, 7, 10)
     },
     // Tháng trong năm (1 - 12) đối với YEARLY
     repeatMonthOfYear: {
       type: Number,
       default: 1, // Mặc định Tháng 1
     },
+    // Tệp đính kèm mẫu (được sao chép sang Task khi tự động sinh việc)
+    files: [
+      {
+        fileId: { type: String },
+        fileName: { type: String },
+        fileMimeType: { type: String },
+      },
+    ],
     // Giờ bắt đầu & kết thúc mặc định trong ngày: ['08:00', '17:00']
     times: {
       type: [String],

@@ -3,6 +3,8 @@ const User = require('../models/user.model');
 const Document = require('../models/document.model');
 const EmulationAchievement = require('../models/emulationAchievement.model');
 const TrainingRegistration = require('../models/trainingRegistration.model');
+require('../models/department.model');
+require('../models/position.model');
 const ExcelJS = require('exceljs');
 
 /**
@@ -13,7 +15,17 @@ const parseDateRange = (year, customFromDate, customToDate) => {
         return {
             startDate: new Date(customFromDate),
             endDate: new Date(customToDate),
-            label: `Từ ${new Date(customFromDate).toLocaleDateString('vi-VN')} đến ${new Date(customToDate).toLocaleDateString('vi-VN')}`
+            label: `Từ ${new Date(customFromDate).toLocaleDateString('vi-VN')} đến ${new Date(customToDate).toLocaleDateString('vi-VN')}`,
+            isAll: false
+        };
+    }
+
+    if (year === 'ALL') {
+        return {
+            startDate: null,
+            endDate: null,
+            label: 'Tất cả thời gian',
+            isAll: true
         };
     }
 
@@ -29,7 +41,8 @@ const parseDateRange = (year, customFromDate, customToDate) => {
             return {
                 startDate: start,
                 endDate: end,
-                label: `Năm học ${targetYearStr}`
+                label: `Năm học ${targetYearStr}`,
+                isAll: false
             };
         }
     }
@@ -38,7 +51,8 @@ const parseDateRange = (year, customFromDate, customToDate) => {
     return {
         startDate: new Date(singleYear, 0, 1, 0, 0, 0),
         endDate: new Date(singleYear, 11, 31, 23, 59, 59),
-        label: `Năm ${singleYear}`
+        label: `Năm ${singleYear}`,
+        isAll: false
     };
 };
 
@@ -56,18 +70,31 @@ const getStaffScorecardData = async ({ userId, year, fromDate, toDate }) => {
         }
 
         const dateRange = parseDateRange(year, fromDate, toDate);
-        const { startDate, endDate } = dateRange;
+        const { startDate, endDate, isAll } = dateRange;
 
         // 1. TỔNG HỢP CÔNG VIỆC & ĐÁNH GIÁ KPI
-        const taskQuery = {
+        // Cán bộ là người nhận việc (assignee), phối hợp (collaborator) hoặc thực hiện việc con (subtask)
+        const userCondition = {
             $or: [
                 { assignees: userId },
                 { collaborators: userId },
-                { createdBy: userId },
                 { "subtasks.assignee": userId }
-            ],
-            createdAt: { $gte: startDate, $lte: endDate }
+            ]
         };
+
+        const queryParts = [userCondition];
+
+        if (!isAll && startDate && endDate) {
+            queryParts.push({
+                $or: [
+                    { createdAt: { $gte: startDate, $lte: endDate } },
+                    { startDate: { $gte: startDate, $lte: endDate } },
+                    { endDate: { $gte: startDate, $lte: endDate } }
+                ]
+            });
+        }
+
+        const taskQuery = { $and: queryParts };
 
         const tasks = await Task.find(taskQuery)
             .populate('assignees', 'name')
@@ -141,13 +168,15 @@ const getStaffScorecardData = async ({ userId, year, fromDate, toDate }) => {
         // 2. TỔNG HỢP THI ĐUA KHEN THƯỞNG
         let emulationAchievements = [];
         try {
-            emulationAchievements = await EmulationAchievement.find({
-                user: userId,
-                $or: [
+            const emQuery = { user: userId };
+            if (!isAll && startDate && endDate) {
+                emQuery.$or = [
                     { createdAt: { $gte: startDate, $lte: endDate } },
+                    { decisionDate: { $gte: startDate, $lte: endDate } },
                     { schoolYear: String(year) }
-                ]
-            }).sort({ createdAt: -1 });
+                ];
+            }
+            emulationAchievements = await EmulationAchievement.find(emQuery).sort({ createdAt: -1 });
         } catch (emErr) {
             console.warn('[StaffScorecard] Không lấy được thi đua:', emErr.message);
         }
@@ -155,13 +184,16 @@ const getStaffScorecardData = async ({ userId, year, fromDate, toDate }) => {
         // 3. TỔNG HỢP HỌC TẬP BỒI DƯỠNG
         let trainingCourses = [];
         try {
-            trainingCourses = await TrainingRegistration.find({
-                user: userId,
-                $or: [
+            const trQuery = { user: userId };
+            if (!isAll && startDate && endDate) {
+                trQuery.$or = [
                     { createdAt: { $gte: startDate, $lte: endDate } },
+                    { startDate: { $gte: startDate, $lte: endDate } },
+                    { endDate: { $gte: startDate, $lte: endDate } },
                     { year: String(year) }
-                ]
-            }).sort({ createdAt: -1 });
+                ];
+            }
+            trainingCourses = await TrainingRegistration.find(trQuery).sort({ createdAt: -1 });
         } catch (trErr) {
             console.warn('[StaffScorecard] Không lấy được bồi dưỡng:', trErr.message);
         }
@@ -170,14 +202,14 @@ const getStaffScorecardData = async ({ userId, year, fromDate, toDate }) => {
         let sentDocsCount = 0;
         let signedDocsCount = 0;
         try {
-            sentDocsCount = await Document.countDocuments({
-                sentBy: userId,
-                createdAt: { $gte: startDate, $lte: endDate }
-            });
-            signedDocsCount = await Document.countDocuments({
-                signer: userId,
-                createdAt: { $gte: startDate, $lte: endDate }
-            });
+            const docSentQuery = { sentBy: userId };
+            const docSignQuery = { signer: userId };
+            if (!isAll && startDate && endDate) {
+                docSentQuery.createdAt = { $gte: startDate, $lte: endDate };
+                docSignQuery.createdAt = { $gte: startDate, $lte: endDate };
+            }
+            sentDocsCount = await Document.countDocuments(docSentQuery);
+            signedDocsCount = await Document.countDocuments(docSignQuery);
         } catch (docErr) {
             console.warn('[StaffScorecard] Không đếm được văn bản:', docErr.message);
         }
@@ -195,6 +227,8 @@ const getStaffScorecardData = async ({ userId, year, fromDate, toDate }) => {
             overallGrade = "Không hoàn thành nhiệm vụ";
             gradeBadgeColor = "red";
         }
+
+        const doneTasks = tasks.filter(t => t.status === 'DONE');
 
         return {
             user: {
@@ -233,23 +267,40 @@ const getStaffScorecardData = async ({ userId, year, fromDate, toDate }) => {
             },
             emulationAchievements: emulationAchievements.map(e => ({
                 _id: e._id,
-                titleName: e.titleName || e.decisionNumber || "Danh hiệu thi đua",
+                titleName: e.titleName || e.achievementContent || e.decisionNumber || "Danh hiệu thi đua",
                 targetType: e.targetType,
-                rewardLevel: e.rewardLevel,
-                decisionNumber: e.decisionNumber,
+                rewardLevel: e.decisionAgency || e.rewardLevel || (e.targetType === 'TAP_THE' ? 'Tập thể' : 'Cá nhân'),
+                decisionNumber: e.decisionNumber || '—',
                 decisionDate: e.decisionDate,
-                status: e.status
+                status: 'Đã công nhận'
             })),
             trainingCourses: trainingCourses.map(t => ({
                 _id: t._id,
-                trainingContent: t.trainingContent,
-                trainingLocation: t.trainingLocation,
-                status: t.status,
-                startDate: t.startDate,
-                endDate: t.endDate
+                courseName: t.trainingContent || "Khóa bồi dưỡng nghiệp vụ",
+                organizer: t.trainingLocation || "Nhà trường",
+                completionDate: t.endDate || t.startDate || t.createdAt,
+                result: t.status === 'APPROVED' ? 'Đạt yêu cầu' : (t.status === 'PENDING' ? 'Chờ duyệt' : 'Hoàn thành')
             })),
-            topTasks: tasks
-                .filter(t => t.status === 'DONE')
+            keyCompletedTasks: doneTasks
+                .sort((a, b) => new Date(b.completedAt || b.updatedAt) - new Date(a.completedAt || a.updatedAt))
+                .map(t => ({
+                    _id: t._id,
+                    title: t.title,
+                    taskType: t.taskType,
+                    difficultyRate: t.difficultyRate,
+                    outputResult: t.outputResult,
+                    completedAt: t.completedAt || t.updatedAt,
+                    evaluation: t.evaluation ? {
+                        score: t.evaluation.score,
+                        rating: t.evaluation.rating,
+                        bonusScore: t.evaluation.bonusScore,
+                        evaluatedBy: t.evaluation.evaluatedBy ? {
+                            _id: t.evaluation.evaluatedBy._id,
+                            name: t.evaluation.evaluatedBy.name
+                        } : null
+                    } : null
+                })),
+            topTasks: doneTasks
                 .sort((a, b) => (b.evaluation?.score || 0) - (a.evaluation?.score || 0))
                 .slice(0, 10)
                 .map(t => ({
@@ -330,7 +381,7 @@ const exportStaffScorecardToExcel = async (scorecardData) => {
         sheet.addRow([rowIndex++, 'Thi đua', e.titleName, e.decisionNumber || 'N/A', e.status || 'Công nhận']);
     });
     trainingCourses.forEach(t => {
-        sheet.addRow([rowIndex++, 'Bồi dưỡng', t.trainingContent, t.trainingLocation || 'N/A', t.status || 'Hoàn thành']);
+        sheet.addRow([rowIndex++, 'Bồi dưỡng', t.courseName || t.trainingContent, t.organizer || t.trainingLocation || 'N/A', t.result || t.status || 'Hoàn thành']);
     });
 
     if (emulationAchievements.length === 0 && trainingCourses.length === 0) {
