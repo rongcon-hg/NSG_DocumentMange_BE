@@ -1,6 +1,10 @@
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const Document = require("../models/document.model");
 const ChatbotConfig = require("../models/chatbotConfig.model");
+require("../models/docVariant.model");
+require("../models/unit.model");
+require("../models/user.model");
+require("../models/department.model");
 const { google } = require("googleapis");
 const unzipper = require("unzipper");
 const DriveConfig = require("../models/driveConfig.model");
