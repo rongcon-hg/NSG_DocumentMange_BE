@@ -58,7 +58,10 @@ const calculateNextRunDate = (recTask, baseDate = new Date()) => {
     if (freq === 'QUARTERLY') {
         const offset = Math.max(0, Math.min(2, (recTask.repeatQuarterMonth || 1) - 1)); // 0 (đầu), 1 (giữa), 2 (cuối)
         const targetDay = recTask.repeatDayOfMonth || 1;
-        const validMonths = [0 + offset, 3 + offset, 6 + offset, 9 + offset]; // Tháng 0-indexed trong năm
+        const quarters = (Array.isArray(recTask.repeatQuarters) && recTask.repeatQuarters.length > 0)
+            ? recTask.repeatQuarters
+            : [1, 2, 3, 4];
+        const validMonths = quarters.map(q => (q - 1) * 3 + offset).sort((a, b) => a - b);
 
         const dZero = new Date(d);
         dZero.setHours(0, 0, 0, 0);
@@ -79,7 +82,7 @@ const calculateNextRunDate = (recTask, baseDate = new Date()) => {
 
         let nextYearCandidate = new Date(d);
         nextYearCandidate.setFullYear(nextYearCandidate.getFullYear() + 1);
-        nextYearCandidate.setMonth(validMonths[0]);
+        nextYearCandidate.setMonth(validMonths[0] !== undefined ? validMonths[0] : offset);
         nextYearCandidate.setDate(targetDay);
         nextYearCandidate.setHours(8, 0, 0, 0);
         return nextYearCandidate;
@@ -265,7 +268,10 @@ const executeRecurringTasksGeneration = async () => {
                 }
             } else if (freq === 'QUARTERLY') {
                 const offset = Math.max(0, Math.min(2, (recTask.repeatQuarterMonth || 1) - 1));
-                const validMonths = [0 + offset, 3 + offset, 6 + offset, 9 + offset];
+                const quarters = (Array.isArray(recTask.repeatQuarters) && recTask.repeatQuarters.length > 0)
+                    ? recTask.repeatQuarters
+                    : [1, 2, 3, 4];
+                const validMonths = quarters.map(q => (q - 1) * 3 + offset);
                 const targetDay = recTask.repeatDayOfMonth || 1;
                 const currentMonth0 = today.getMonth(); // 0 - 11
                 if (validMonths.includes(currentMonth0) && currentDayOfMonth === targetDay) {

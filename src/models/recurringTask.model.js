@@ -88,7 +88,12 @@ const recurringTaskSchema = new mongoose.Schema(
     // Tháng trong quý (1: Tháng đầu, 2: Tháng giữa, 3: Tháng cuối) đối với QUARTERLY
     repeatQuarterMonth: {
       type: Number,
-      default: 1, // Mặc định tháng đầu quý (Tháng 1, 4, 7, 10)
+      default: 3, // Mặc định tháng cuối quý (Tháng 3, 6, 9, 12)
+    },
+    // Các quý áp dụng đối với QUARTERLY: [1, 2, 3, 4]
+    repeatQuarters: {
+      type: [Number],
+      default: [1, 2, 3, 4],
     },
     // Tháng trong năm (1 - 12) đối với YEARLY
     repeatMonthOfYear: {

@@ -106,6 +106,7 @@ const createRecurringTask = async (req, res) => {
         const collaborators = parseJSON(req.body.collaborators, []);
         const subtasks = parseJSON(req.body.subtasks, []);
         const repeatDaysOfWeek = parseJSON(req.body.repeatDaysOfWeek, [1]);
+        const repeatQuarters = parseJSON(req.body.repeatQuarters, [1, 2, 3, 4]);
         const times = parseJSON(req.body.times, ['08:00', '17:00']);
 
         let uploadedFiles = [];
@@ -164,6 +165,7 @@ const createRecurringTask = async (req, res) => {
             subtasks,
             frequency: frequency || 'WEEKLY',
             repeatDaysOfWeek,
+            repeatQuarters,
             repeatDayOfMonth: repeatDayOfMonth !== undefined ? Number(repeatDayOfMonth) : 1,
             repeatQuarterMonth: repeatQuarterMonth !== undefined ? Number(repeatQuarterMonth) : 1,
             repeatMonthOfYear: repeatMonthOfYear !== undefined ? Number(repeatMonthOfYear) : 1,
@@ -218,6 +220,7 @@ const updateRecurringTask = async (req, res) => {
         if (req.body.collaborators !== undefined) recTask.collaborators = parseJSON(req.body.collaborators, []);
         if (req.body.subtasks !== undefined) recTask.subtasks = parseJSON(req.body.subtasks, []);
         if (req.body.repeatDaysOfWeek !== undefined) recTask.repeatDaysOfWeek = parseJSON(req.body.repeatDaysOfWeek, [1]);
+        if (req.body.repeatQuarters !== undefined) recTask.repeatQuarters = parseJSON(req.body.repeatQuarters, [1, 2, 3, 4]);
         if (req.body.times !== undefined) recTask.times = parseJSON(req.body.times, ['08:00', '17:00']);
 
         let uploadedFiles = recTask.files || [];
