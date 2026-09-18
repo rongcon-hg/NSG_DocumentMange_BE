@@ -139,6 +139,8 @@ app.use('/api/training/registrations', trainingRegistrationRoutes);
 app.use('/api/online-records', onlineRecordRoutes);
 app.use('/api/external-menus', externalMenuRoutes);
 app.use('/api/focus-axes', focusAxisRoutes);
+const recurringTaskRoutes = require('./src/routes/recurringTaskRoutes');
+app.use('/api/recurring-tasks', recurringTaskRoutes);
 
 // Cron endpoint for Vercel
 const cronRoutes = require('./src/routes/cronRoutes');
@@ -165,13 +167,21 @@ app.get("/test", (req, res) => {
 // --- RUN CRON JOBS LOCALLY ON VPS ---
 const cron = require('node-cron');
 const { executeTaskReminders, executeAutoBackup } = require('./src/service/TaskCron.service');
+const { executeRecurringTasksGeneration } = require('./src/service/recurringTask.service');
 
-// Chạy hàng ngày vào lúc 00:05
+// Chạy hàng ngày vào lúc 00:05 (Nhắc việc & Sao lưu)
 cron.schedule('5 0 * * *', async () => {
     console.log('--- Bắt đầu chạy Cron Jobs (Nhắc nhở & Backup) ---');
     await executeTaskReminders();
     await executeAutoBackup();
     console.log('--- Hoàn tất Cron Jobs ---');
+});
+
+// Chạy hàng ngày vào lúc 06:30 sáng (Tự động sinh Công việc Định kỳ)
+cron.schedule('30 6 * * *', async () => {
+    console.log('--- Bắt đầu quét & sinh Công việc định kỳ hàng ngày (06:30) ---');
+    await executeRecurringTasksGeneration();
+    console.log('--- Hoàn tất sinh Công việc định kỳ ---');
 });
 
 module.exports = app;
