@@ -111,15 +111,30 @@ const getStaffScorecardData = async ({ userId, year, fromDate, toDate }) => {
         let totalRating = 0;
         let evaluatedCount = 0;
         let bonusScoreTotal = 0;
+        let totalConvertedScore = 0; // Điểm quy đổi theo hệ số độ khó
         let regularCount = 0;
         let urgentCount = 0;
-        let focusAxisMap = {};
-        let difficultyMap = { '1.0': 0, '1.1': 0, '1.2': 0 };
+
+        let focusAxisMap = {
+            'TRUC_1': 0,
+            'TRUC_2': 0,
+            'TRUC_3': 0,
+            'TRUC_4': 0
+        };
+
+        let difficultyMap = {
+            '1.0': 0,
+            '1.1': 0,
+            '1.2': 0
+        };
 
         tasks.forEach(t => {
-            if (t.status === 'DONE') {
+            const isDone = t.status === 'DONE';
+            const isInProgress = t.status === 'IN_PROGRESS';
+
+            if (isDone) {
                 completedTasks++;
-                // Kiểm tra hoàn thành đúng hạn
+                // Kiểm tra hoàn thành đúng hạn (cho phép ân hạn đến hết ngày deadline)
                 if (t.endDate) {
                     const deadline = new Date(t.endDate);
                     const finishDate = t.completedAt ? new Date(t.completedAt) : new Date(t.updatedAt);
@@ -137,43 +152,77 @@ const getStaffScorecardData = async ({ userId, year, fromDate, toDate }) => {
                     totalScore += t.evaluation.score;
                     totalRating += (t.evaluation.rating || 4);
                     bonusScoreTotal += (t.evaluation.bonusScore || 0);
+
+                    const base = t.baseScore || (t.taskType === 'URGENT' ? 12 : 10);
+                    const diff = Number(t.difficultyRate || 1.0);
+                    const convScore = (base * (t.evaluation.score / 100) * diff) + (t.evaluation.bonusScore || 0);
+                    totalConvertedScore += convScore;
+
                     evaluatedCount++;
                 }
-            } else if (t.status === 'IN_PROGRESS') {
+            } else if (isInProgress) {
                 inProgressTasks++;
+                // Kiểm tra nếu việc đang làm đã quá hạn
+                if (t.endDate && new Date(t.endDate).getTime() < Date.now()) {
+                    lateTasks++;
+                }
             } else {
                 todoTasks++;
+                if (t.endDate && new Date(t.endDate).getTime() < Date.now()) {
+                    lateTasks++;
+                }
             }
 
             if (t.taskType === 'URGENT') urgentCount++;
             else regularCount++;
 
+            // Phân loại vào 4 Trục trọng tâm
             if (t.focusAxis) {
-                focusAxisMap[t.focusAxis] = (focusAxisMap[t.focusAxis] || 0) + 1;
+                const axisStr = String(t.focusAxis).toUpperCase();
+                if (axisStr.includes('TRỤC 1') || axisStr.includes('TRUC_1') || axisStr.includes('TRUC 1') || axisStr.startsWith('1') || axisStr.includes('KINH TẾ') || axisStr.includes('CHÍNH TRỊ')) {
+                    focusAxisMap['TRUC_1']++;
+                } else if (axisStr.includes('TRỤC 2') || axisStr.includes('TRUC_2') || axisStr.includes('TRUC 2') || axisStr.startsWith('2') || axisStr.includes('THỂ CHẾ') || axisStr.includes('PHÂN CẤP')) {
+                    focusAxisMap['TRUC_2']++;
+                } else if (axisStr.includes('TRỤC 3') || axisStr.includes('TRUC_3') || axisStr.includes('TRUC 3') || axisStr.startsWith('3') || axisStr.includes('KHOA HỌC') || axisStr.includes('CÔNG NGHỆ') || axisStr.includes('ĐỔI MỚI SÁNG TẠO') || axisStr.includes('CHUYỂN ĐỔI SỐ')) {
+                    focusAxisMap['TRUC_3']++;
+                } else if (axisStr.includes('TRỤC 4') || axisStr.includes('TRUC_4') || axisStr.includes('TRUC 4') || axisStr.startsWith('4') || axisStr.includes('HẠ TẦNG') || axisStr.includes('ĐÔ THỊ') || axisStr.includes('GIÁO DỤC')) {
+                    focusAxisMap['TRUC_4']++;
+                }
             }
 
-            const diffKey = String(t.difficultyRate || 1.0);
-            if (difficultyMap[diffKey] !== undefined) {
-                difficultyMap[diffKey]++;
-            } else {
-                difficultyMap[diffKey] = 1;
+            // Chuẩn hóa Độ khó (1.0, 1.1, 1.2)
+            const rate = Number(t.difficultyRate !== undefined && t.difficultyRate !== null ? t.difficultyRate : 1.0);
+            let diffKey = rate.toFixed(1);
+            if (!['1.0', '1.1', '1.2'].includes(diffKey)) {
+                diffKey = '1.0';
             }
+            difficultyMap[diffKey] = (difficultyMap[diffKey] || 0) + 1;
         });
 
         const onTimeRate = completedTasks > 0 ? Math.round((onTimeTasks / completedTasks) * 100) : 100;
         const completionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
         const avgKpiScore = evaluatedCount > 0 ? +(totalScore / evaluatedCount).toFixed(1) : 0;
         const avgRating = evaluatedCount > 0 ? +(totalRating / evaluatedCount).toFixed(1) : 0;
+        const avgConvertedScore = evaluatedCount > 0 ? +(totalConvertedScore / evaluatedCount).toFixed(1) : 0;
 
         // 2. TỔNG HỢP THI ĐUA KHEN THƯỞNG
         let emulationAchievements = [];
         try {
-            const emQuery = { user: userId };
+            const userFilter = [{ user: userId }];
+            if (user.name) {
+                userFilter.push({ fullName: new RegExp('^' + user.name.trim() + '$', 'i') });
+            }
+
+            const emQuery = { $or: userFilter };
             if (!isAll && startDate && endDate) {
-                emQuery.$or = [
-                    { createdAt: { $gte: startDate, $lte: endDate } },
-                    { decisionDate: { $gte: startDate, $lte: endDate } },
-                    { schoolYear: String(year) }
+                emQuery.$and = [
+                    {
+                        $or: [
+                            { createdAt: { $gte: startDate, $lte: endDate } },
+                            { decisionDate: { $gte: startDate, $lte: endDate } },
+                            { schoolYear: String(year) }
+                        ]
+                    }
                 ];
             }
             emulationAchievements = await EmulationAchievement.find(emQuery).sort({ createdAt: -1 });
@@ -184,13 +233,22 @@ const getStaffScorecardData = async ({ userId, year, fromDate, toDate }) => {
         // 3. TỔNG HỢP HỌC TẬP BỒI DƯỠNG
         let trainingCourses = [];
         try {
-            const trQuery = { user: userId };
+            const trUserFilter = [{ user: userId }];
+            if (user.name) {
+                trUserFilter.push({ userName: new RegExp('^' + user.name.trim() + '$', 'i') });
+            }
+
+            const trQuery = { $or: trUserFilter };
             if (!isAll && startDate && endDate) {
-                trQuery.$or = [
-                    { createdAt: { $gte: startDate, $lte: endDate } },
-                    { startDate: { $gte: startDate, $lte: endDate } },
-                    { endDate: { $gte: startDate, $lte: endDate } },
-                    { year: String(year) }
+                trQuery.$and = [
+                    {
+                        $or: [
+                            { createdAt: { $gte: startDate, $lte: endDate } },
+                            { startDate: { $gte: startDate, $lte: endDate } },
+                            { endDate: { $gte: startDate, $lte: endDate } },
+                            { year: String(year) }
+                        ]
+                    }
                 ];
             }
             trainingCourses = await TrainingRegistration.find(trQuery).sort({ createdAt: -1 });
@@ -214,18 +272,45 @@ const getStaffScorecardData = async ({ userId, year, fromDate, toDate }) => {
             console.warn('[StaffScorecard] Không đếm được văn bản:', docErr.message);
         }
 
-        // 5. XẾP LOẠI TỔNG THỂ (Staff Grade)
+        // 5. XẾP LOẠI TỔNG THỂ (Staff Grade - Chuẩn hóa theo thực tế công tác)
         let overallGrade = "Hoàn thành nhiệm vụ";
         let gradeBadgeColor = "blue";
-        if (completionRate >= 90 && onTimeRate >= 90 && (avgKpiScore >= 85 || evaluatedCount === 0)) {
-            overallGrade = "Hoàn thành xuất sắc nhiệm vụ";
-            gradeBadgeColor = "gold";
-        } else if (completionRate >= 80 && onTimeRate >= 80) {
-            overallGrade = "Hoàn thành tốt nhiệm vụ";
-            gradeBadgeColor = "green";
-        } else if (completionRate < 60 || onTimeRate < 60) {
-            overallGrade = "Không hoàn thành nhiệm vụ";
-            gradeBadgeColor = "red";
+
+        if (totalTasks === 0) {
+            overallGrade = "Chưa phát sinh nhiệm vụ";
+            gradeBadgeColor = "default";
+        } else if (completedTasks === 0) {
+            if (lateTasks > 0) {
+                overallGrade = "Chậm tiến độ thực hiện";
+                gradeBadgeColor = "orange";
+            } else {
+                overallGrade = "Đang thực hiện nhiệm vụ";
+                gradeBadgeColor = "blue";
+            }
+        } else {
+            // Đã có công việc hoàn thành
+            const effectiveScore = evaluatedCount > 0 ? avgKpiScore : 85;
+
+            // Xuất sắc: Hoàn thành đúng hạn 100% (hoặc onTimeRate >= 95%), không có việc trễ hạn, điểm KPI >= 85
+            if (lateTasks === 0 && onTimeRate >= 95 && effectiveScore >= 85) {
+                overallGrade = "Hoàn thành xuất sắc nhiệm vụ";
+                gradeBadgeColor = "gold";
+            }
+            // Tốt: Tỷ lệ đúng hạn >= 80%, điểm KPI >= 70, số việc trễ hạn <= 1
+            else if (onTimeRate >= 80 && effectiveScore >= 70 && lateTasks <= 1) {
+                overallGrade = "Hoàn thành tốt nhiệm vụ";
+                gradeBadgeColor = "green";
+            }
+            // Không hoàn thành: Trễ hạn nhiều (onTimeRate < 60% và có từ 2 việc trễ trở lên) hoặc điểm KPI < 50
+            else if ((onTimeRate < 60 && lateTasks >= 2) || (evaluatedCount > 0 && avgKpiScore < 50)) {
+                overallGrade = "Không hoàn thành nhiệm vụ";
+                gradeBadgeColor = "red";
+            }
+            // Mặc định còn lại: Hoàn thành nhiệm vụ
+            else {
+                overallGrade = "Hoàn thành nhiệm vụ";
+                gradeBadgeColor = "blue";
+            }
         }
 
         const doneTasks = tasks.filter(t => t.status === 'DONE');
@@ -253,7 +338,9 @@ const getStaffScorecardData = async ({ userId, year, fromDate, toDate }) => {
                 onTimeRate,
                 avgKpiScore,
                 avgRating,
+                avgConvertedScore,
                 evaluatedCount,
+                unEvaluatedCount: Math.max(0, completedTasks - evaluatedCount),
                 bonusScoreTotal,
                 sentDocsCount,
                 signedDocsCount,
