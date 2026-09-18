@@ -144,6 +144,8 @@ const documentSchema = new mongoose.Schema(
       suggestedDepartments: [{ type: String }],
       deadlineNote: { type: String, default: "" },
       recommendedActions: [{ type: String }],
+      analyzedFile: { type: String, default: "" },
+      usedModel: { type: String, default: "" },
       generatedAt: { type: Date }
     },
     history: [
