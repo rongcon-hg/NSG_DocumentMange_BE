@@ -141,8 +141,10 @@ app.use('/api/external-menus', externalMenuRoutes);
 app.use('/api/focus-axes', focusAxisRoutes);
 const recurringTaskRoutes = require('./src/routes/recurringTaskRoutes');
 app.use('/api/recurring-tasks', recurringTaskRoutes);
+app.use('/recurring-tasks', recurringTaskRoutes);
 const staffScorecardRoutes = require('./src/routes/staffScorecard.routes');
 app.use('/api/staff-scorecard', staffScorecardRoutes);
+app.use('/staff-scorecard', staffScorecardRoutes);
 
 // Cron endpoint for Vercel
 const cronRoutes = require('./src/routes/cronRoutes');
