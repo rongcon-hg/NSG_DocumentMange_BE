@@ -718,7 +718,7 @@ exports.approveWorkSchedule = async (req, res) => {
             0,
             60
           )}..." đã được Ban Giám Hiệu phê duyệt.`,
-          link: "/work-schedule",
+          link: "/work-schedule?tab=my_registered",
           isRead: false,
           isPopupShown: false,
         });
@@ -793,7 +793,7 @@ exports.rejectWorkSchedule = async (req, res) => {
             0,
             50
           )}..." đã bị từ chối. Lý do: ${reason}`,
-          link: "/work-schedule?tab=pending",
+          link: "/work-schedule?tab=my_registered",
           isRead: false,
           isPopupShown: false,
         });
