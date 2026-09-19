@@ -405,14 +405,15 @@ exports.createWorkSchedule = async (req, res) => {
     const currentUser = req.user;
     const roleInfo = await checkUserRole(currentUser);
 
-    // Kiểm tra quyền
-    if (!roleInfo.canRegister) {
+    // Kiểm tra quyền: Cho phép người có quyền Ban hành trực tiếp (Hiệu trưởng, Manager, Admin) hoặc người có quyền Đăng ký (Phó Hiệu trưởng, Cấp trưởng, Cấp phó)
+    if (!roleInfo.canDirectAdd && !roleInfo.canRegister) {
       return res.status(403).json({
         success: false,
         message:
-          "Bạn không có quyền đăng ký lịch công tác. Tính năng chỉ dành cho Ban Giám Hiệu, Manager và Cấp trưởng.",
+          "Bạn không có quyền đăng ký hoặc ban hành lịch công tác. Tính năng chỉ dành cho Ban Giám Hiệu, Manager và Cấp trưởng.",
       });
     }
+
 
     const {
       startDate,
