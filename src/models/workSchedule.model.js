@@ -64,6 +64,10 @@ const workScheduleSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
     },
+    targetApprover: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
     approvedAt: {
       type: Date,
     },

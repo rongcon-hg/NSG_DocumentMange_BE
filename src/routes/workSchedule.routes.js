@@ -9,6 +9,9 @@ router.get("/", verifyToken, workScheduleController.getWorkSchedules);
 // Lấy số lượng lịch chờ duyệt
 router.get("/pending-count", verifyToken, workScheduleController.getPendingCount);
 
+// Lấy danh sách thành viên Ban Giám Hiệu để chọn người duyệt
+router.get("/bgh-list", verifyToken, workScheduleController.getBghUsers);
+
 // Thêm / Đăng ký lịch công tác (BGH/Manager thêm trực tiếp, Cấp trưởng đăng ký gửi duyệt)
 router.post("/", verifyToken, workScheduleController.createWorkSchedule);
 

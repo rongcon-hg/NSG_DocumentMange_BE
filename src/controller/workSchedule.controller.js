@@ -159,25 +159,36 @@ exports.getWorkSchedules = async (req, res) => {
       if (status) {
         filter.status = status;
       }
-    } else if (roleInfo.isCapTruong) {
-      // Cấp trưởng: Xem các lịch APPROVED của trường, cộng với lịch của chính mình (kể cả PENDING / REJECTED)
+    } else {
+      // Cấp trưởng, Cấp phó, GV/CV: Không có quyền phê duyệt
       if (tab === "pending") {
+        return res.status(200).json({
+          success: true,
+          data: [],
+          userRoleInfo: roleInfo,
+          meta: { today: startOfToday.toISOString(), total: 0 },
+        });
+      }
+
+      if (tab === "my_registered") {
         filter.createdBy = currentUser._id;
-        filter.status = "PENDING";
-      } else if (status) {
-        filter.status = status;
-        if (status !== "APPROVED") {
-          filter.createdBy = currentUser._id;
+      } else if (roleInfo.isCapTruong) {
+        // Cấp trưởng: Xem lịch APPROVED hoặc lịch của chính mình
+        if (status) {
+          filter.status = status;
+          if (status !== "APPROVED") {
+            filter.createdBy = currentUser._id;
+          }
+        } else {
+          filter.$or = [
+            { status: "APPROVED" },
+            { createdBy: currentUser._id },
+          ];
         }
       } else {
-        filter.$or = [
-          { status: "APPROVED" },
-          { createdBy: currentUser._id },
-        ];
+        // Tất cả đối tượng khác: CHỈ xem lịch APPROVED
+        filter.status = "APPROVED";
       }
-    } else {
-      // Tất cả đối tượng khác (Cấp phó, GV/CV): CHỈ xem lịch APPROVED
-      filter.status = "APPROVED";
     }
 
     // 2. Lọc theo Tab thời gian
@@ -195,6 +206,11 @@ exports.getWorkSchedules = async (req, res) => {
       }
     } else if (tab === "pending") {
       filter.status = "PENDING";
+    } else if (tab === "my_registered") {
+      // Tab lịch tôi đã đăng ký: xem toàn bộ trạng thái lịch của chính mình
+      filter.createdBy = currentUser._id;
+      delete filter.status;
+      if (status) filter.status = status;
     }
 
     // 3. Lọc theo khoảng ngày người dùng chọn (nếu có)
@@ -229,15 +245,19 @@ exports.getWorkSchedules = async (req, res) => {
     // 5. Xác định thứ tự sắp xếp
     // Với tab 'upcoming': sắp xếp startDate tăng dần, startTime tăng dần (ngày hiện tại sẽ lên trên cùng)
     // Với tab 'past': sắp xếp startDate giảm dần, startTime giảm dần
+    // Với tab 'my_registered': sắp xếp mới nhất lên trước
     let sortOption = { startDate: 1, startTime: 1 };
     if (tab === "past") {
       sortOption = { startDate: -1, startTime: -1 };
+    } else if (tab === "my_registered") {
+      sortOption = { createdAt: -1, startDate: -1 };
     }
 
     const schedules = await WorkSchedule.find(filter)
       .populate("createdBy", "name email avatar")
       .populate("department", "departmentName departmentCode")
       .populate("approvedBy", "name email")
+      .populate("targetApprover", "name email avatar")
       .sort(sortOption)
       .lean();
 
@@ -272,11 +292,6 @@ exports.getPendingCount = async (req, res) => {
     let count = 0;
     if (roleInfo.isBGH || roleInfo.isManager) {
       count = await WorkSchedule.countDocuments({ status: "PENDING" });
-    } else if (roleInfo.isCapTruong) {
-      count = await WorkSchedule.countDocuments({
-        status: "PENDING",
-        createdBy: currentUser._id,
-      });
     }
 
     return res.status(200).json({
@@ -287,6 +302,57 @@ exports.getPendingCount = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Lỗi khi lấy số lượng lịch chờ duyệt",
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * [GET] /api/work-schedules/bgh-list
+ * Lấy danh sách thành viên Ban Giám Hiệu để cấp trưởng chọn người duyệt
+ */
+exports.getBghUsers = async (req, res) => {
+  try {
+    const bghDepts = await Department.find({
+      $or: [
+        { departmentCode: "BGH" },
+        { departmentName: { $regex: /ban giám hiệu/i } },
+      ],
+    }).select("_id");
+    const bghDeptIds = bghDepts.map((d) => d._id);
+
+    const bghPositions = await Position.find({
+      $or: [
+        { abbreviation: { $in: ["HT", "PHT", "NHT"] } },
+        { code: { $in: ["HT", "PHT", "NHT"] } },
+        { positionName: { $regex: /hiệu trưởng/i } },
+      ],
+    }).select("_id");
+    const bghPosIds = bghPositions.map((p) => p._id);
+
+    const users = await User.find({
+      $or: [
+        { department: { $in: bghDeptIds } },
+        { position: { $in: bghPosIds } },
+        { role: { $in: ["admin", "manager"] } },
+      ],
+      isActive: { $ne: false },
+    })
+      .select("name email avatar position department role")
+      .populate("position", "positionName abbreviation code")
+      .populate("department", "departmentName departmentCode")
+      .sort({ "position.code": 1, name: 1 })
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      data: users,
+    });
+  } catch (error) {
+    console.error("Lỗi khi lấy danh sách BGH:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi hệ thống khi lấy danh sách Ban Giám Hiệu",
       error: error.message,
     });
   }
@@ -321,6 +387,7 @@ exports.createWorkSchedule = async (req, res) => {
       notes = "",
       host = "",
       department,
+      targetApprover,
       attachments = [],
     } = req.body;
 
@@ -349,6 +416,7 @@ exports.createWorkSchedule = async (req, res) => {
       notes: notes.trim(),
       host: host.trim(),
       department: department || currentUser.department,
+      targetApprover: targetApprover || null,
       createdBy: currentUser._id,
       status: scheduleStatus,
       approvedBy: isDirectAdd ? currentUser._id : null,
@@ -362,15 +430,19 @@ exports.createWorkSchedule = async (req, res) => {
     if (!isDirectAdd) {
       try {
         const bghAndMgrIds = await getBghAndManagerUserIds();
+        const allRecipientIds = [...new Set([...bghAndMgrIds, targetApprover].filter(Boolean))];
 
-        const notifyPromises = bghAndMgrIds
+        const notifyPromises = allRecipientIds
           .filter((id) => id !== currentUser._id.toString())
-          .map((recipientId) =>
-            Notification.create({
+          .map((recipientId) => {
+            const isSpecific = targetApprover && recipientId === targetApprover.toString();
+            return Notification.create({
               recipient: recipientId,
               sender: currentUser._id,
               type: "GENERAL",
-              title: "Lịch công tác mới chờ Ban Giám Hiệu phê duyệt",
+              title: isSpecific
+                ? "Lịch công tác gửi Thầy/Cô Ban Giám Hiệu phê duyệt"
+                : "Lịch công tác mới chờ Ban Giám Hiệu phê duyệt",
               message: `${currentUser.name} vừa đăng ký lịch công tác: "${content.substring(
                 0,
                 70
@@ -378,8 +450,8 @@ exports.createWorkSchedule = async (req, res) => {
               link: "/work-schedule?tab=pending",
               isRead: false,
               isPopupShown: false,
-            })
-          );
+            });
+          });
         await Promise.allSettled(notifyPromises);
       } catch (notifyErr) {
         console.warn("Không thể gửi thông báo duyệt lịch:", notifyErr.message);
@@ -389,7 +461,8 @@ exports.createWorkSchedule = async (req, res) => {
     const populated = await WorkSchedule.findById(newSchedule._id)
       .populate("createdBy", "name email avatar")
       .populate("department", "departmentName departmentCode")
-      .populate("approvedBy", "name email");
+      .populate("approvedBy", "name email")
+      .populate("targetApprover", "name email avatar");
 
     return res.status(201).json({
       success: true,
@@ -451,6 +524,7 @@ exports.updateWorkSchedule = async (req, res) => {
       notes,
       host,
       department,
+      targetApprover,
       attachments,
     } = req.body;
 
@@ -464,6 +538,7 @@ exports.updateWorkSchedule = async (req, res) => {
     if (notes !== undefined) schedule.notes = notes.trim();
     if (host !== undefined) schedule.host = host.trim();
     if (department !== undefined) schedule.department = department;
+    if (targetApprover !== undefined) schedule.targetApprover = targetApprover || null;
     if (attachments !== undefined) schedule.attachments = attachments;
 
     let isResubmitted = false;
@@ -480,14 +555,18 @@ exports.updateWorkSchedule = async (req, res) => {
     if (isResubmitted) {
       try {
         const bghAndMgrIds = await getBghAndManagerUserIds();
-        const notifyPromises = bghAndMgrIds
+        const allRecipientIds = [...new Set([...bghAndMgrIds, schedule.targetApprover].filter(Boolean))];
+        const notifyPromises = allRecipientIds
           .filter((id) => id !== currentUser._id.toString())
-          .map((recipientId) =>
-            Notification.create({
+          .map((recipientId) => {
+            const isSpecific = schedule.targetApprover && recipientId === schedule.targetApprover.toString();
+            return Notification.create({
               recipient: recipientId,
               sender: currentUser._id,
               type: "GENERAL",
-              title: "Lịch công tác đã cập nhật - chờ Ban Giám Hiệu duyệt lại",
+              title: isSpecific
+                ? "Lịch công tác đã cập nhật - gửi Thầy/Cô duyệt lại"
+                : "Lịch công tác đã cập nhật - chờ Ban Giám Hiệu duyệt lại",
               message: `${currentUser.name} đã cập nhật lịch công tác: "${schedule.content.substring(
                 0,
                 70
@@ -495,8 +574,8 @@ exports.updateWorkSchedule = async (req, res) => {
               link: "/work-schedule?tab=pending",
               isRead: false,
               isPopupShown: false,
-            })
-          );
+            });
+          });
         await Promise.allSettled(notifyPromises);
       } catch (notifyErr) {
         console.warn("Không thể gửi thông báo duyệt lại:", notifyErr.message);
@@ -506,7 +585,8 @@ exports.updateWorkSchedule = async (req, res) => {
     const populated = await WorkSchedule.findById(schedule._id)
       .populate("createdBy", "name email avatar")
       .populate("department", "departmentName departmentCode")
-      .populate("approvedBy", "name email");
+      .populate("approvedBy", "name email")
+      .populate("targetApprover", "name email avatar");
 
     return res.status(200).json({
       success: true,
@@ -628,7 +708,8 @@ exports.approveWorkSchedule = async (req, res) => {
     const populated = await WorkSchedule.findById(schedule._id)
       .populate("createdBy", "name email avatar")
       .populate("department", "departmentName departmentCode")
-      .populate("approvedBy", "name email");
+      .populate("approvedBy", "name email")
+      .populate("targetApprover", "name email avatar");
 
     return res.status(200).json({
       success: true,
@@ -702,7 +783,8 @@ exports.rejectWorkSchedule = async (req, res) => {
     const populated = await WorkSchedule.findById(schedule._id)
       .populate("createdBy", "name email avatar")
       .populate("department", "departmentName departmentCode")
-      .populate("approvedBy", "name email");
+      .populate("approvedBy", "name email")
+      .populate("targetApprover", "name email avatar");
 
     return res.status(200).json({
       success: true,
