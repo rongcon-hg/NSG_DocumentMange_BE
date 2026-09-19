@@ -3,6 +3,8 @@ const router = express.Router();
 const { verifyToken } = require("../middleware/authMiddleware");
 const workScheduleController = require("../controller/workSchedule.controller");
 
+const upload = require("../middleware/multer");
+
 // Lấy danh sách lịch công tác (Tất cả người dùng đều có thể xem theo phân quyền)
 router.get("/", verifyToken, workScheduleController.getWorkSchedules);
 
@@ -14,6 +16,9 @@ router.get("/bgh-list", verifyToken, workScheduleController.getBghUsers);
 
 // Thêm / Đăng ký lịch công tác (BGH/Manager thêm trực tiếp, Cấp trưởng đăng ký gửi duyệt)
 router.post("/", verifyToken, workScheduleController.createWorkSchedule);
+
+// Import lịch công tác từ Excel (Hiệu trưởng / Manager / Admin)
+router.post("/import", verifyToken, upload.single("file"), workScheduleController.importWorkSchedules);
 
 // Cập nhật lịch công tác
 router.put("/:id", verifyToken, workScheduleController.updateWorkSchedule);
@@ -28,3 +33,4 @@ router.patch("/:id/approve", verifyToken, workScheduleController.approveWorkSche
 router.patch("/:id/reject", verifyToken, workScheduleController.rejectWorkSchedule);
 
 module.exports = router;
+

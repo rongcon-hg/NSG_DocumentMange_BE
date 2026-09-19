@@ -841,3 +841,200 @@ exports.rejectWorkSchedule = async (req, res) => {
     });
   }
 };
+
+/**
+ * [POST] /api/work-schedules/import
+ * Import danh sách lịch công tác từ file Excel (.xlsx)
+ * Chỉ dành cho Hiệu trưởng, BGH, Manager, Admin
+ */
+exports.importWorkSchedules = async (req, res) => {
+  try {
+    const currentUser = req.user;
+    const roleInfo = await checkUserRole(currentUser);
+
+    // Quyền: Chỉ canDirectAdd (Hiệu trưởng, BGH, Manager, Admin)
+    if (!roleInfo.canDirectAdd) {
+      return res.status(403).json({
+        success: false,
+        message: "Bạn không có quyền import lịch công tác. Tính năng chỉ dành cho Hiệu trưởng và Manager.",
+      });
+    }
+
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({
+        success: false,
+        message: "Vui lòng đính kèm file Excel (.xlsx) hợp lệ.",
+      });
+    }
+
+    const ExcelJS = require("exceljs");
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(req.file.buffer);
+
+    const worksheet = workbook.worksheets[0];
+    if (!worksheet) {
+      return res.status(400).json({
+        success: false,
+        message: "File Excel không có dữ liệu (sheet trống).",
+      });
+    }
+
+    const schedulesToInsert = [];
+    const errors = [];
+    let lastValidDate = null; // Hỗ trợ trường hợp gộp ô ngày
+
+    // Duyệt qua các dòng (bắt đầu từ dòng 2, dòng 1 là tiêu đề cột)
+    worksheet.eachRow((row, rowNumber) => {
+      if (rowNumber === 1) return; // Bỏ qua header
+
+      // Đọc các cột:
+      // Cột 1: Ngày (DD/MM/YYYY)
+      // Cột 2: Giờ bắt đầu (HH:mm)
+      // Cột 3: Giờ kết thúc (HH:mm)
+      // Cột 4: Nội dung công tác (*)
+      // Cột 5: Thành phần tham dự
+      // Cột 6: Địa điểm
+      // Cột 7: Chủ trì
+      // Cột 8: Ghi chú
+      const rawDate = row.getCell(1).value;
+      const rawStartTime = row.getCell(2).value;
+      const rawEndTime = row.getCell(3).value;
+      const rawContent = row.getCell(4).value;
+      const rawParticipants = row.getCell(5).value;
+      const rawLocation = row.getCell(6).value;
+      const rawHost = row.getCell(7).value;
+      const rawNotes = row.getCell(8).value;
+
+      const parseCellText = (val) => {
+        if (val === null || val === undefined) return "";
+        if (typeof val === "object") {
+          if (val.richText) {
+            return val.richText.map((t) => t.text).join("").trim();
+          }
+          if (val.text) return String(val.text).trim();
+          if (val instanceof Date) return val;
+        }
+        return String(val).trim();
+      };
+
+      const content = parseCellText(rawContent);
+      if (!content && !rawDate) {
+        // Dòng trống
+        return;
+      }
+
+      if (!content) {
+        errors.push(`Dòng ${rowNumber}: Thiếu nội dung công tác.`);
+        return;
+      }
+
+      // Xử lý ngày
+      let parsedDate = null;
+      let dateVal = parseCellText(rawDate);
+
+      if (rawDate instanceof Date) {
+        parsedDate = rawDate;
+      } else if (typeof dateVal === "string" && dateVal) {
+        // Hỗ trợ format DD/MM/YYYY hoặc YYYY-MM-DD
+        const parts = dateVal.split(/[\/\-\.]/);
+        if (parts.length === 3) {
+          let day, month, year;
+          if (parts[0].length === 4) {
+            // YYYY-MM-DD
+            year = parseInt(parts[0], 10);
+            month = parseInt(parts[1], 10) - 1;
+            day = parseInt(parts[2], 10);
+          } else {
+            // DD/MM/YYYY
+            day = parseInt(parts[0], 10);
+            month = parseInt(parts[1], 10) - 1;
+            year = parseInt(parts[2], 10);
+          }
+          if (!isNaN(day) && !isNaN(month) && !isNaN(year)) {
+            parsedDate = new Date(Date.UTC(year, month, day));
+          }
+        }
+      }
+
+      if (!parsedDate && lastValidDate) {
+        parsedDate = lastValidDate;
+      }
+
+      if (!parsedDate) {
+        errors.push(`Dòng ${rowNumber}: Định dạng ngày không hợp lệ hoặc để trống (yêu cầu DD/MM/YYYY).`);
+        return;
+      }
+
+      lastValidDate = parsedDate;
+
+      // Xử lý giờ
+      const formatTime = (tVal) => {
+        const str = parseCellText(tVal);
+        if (!str) return "";
+        // Nếu là dạng HH:mm
+        const timeMatch = str.match(/(\d{1,2})[:hH](\d{2})?/);
+        if (timeMatch) {
+          const hh = timeMatch[1].padStart(2, "0");
+          const mm = timeMatch[2] ? timeMatch[2].padStart(2, "0") : "00";
+          return `${hh}:${mm}`;
+        }
+        return str;
+      };
+
+      const startTime = formatTime(rawStartTime);
+      const endTime = formatTime(rawEndTime);
+      const participants = parseCellText(rawParticipants);
+      const location = parseCellText(rawLocation);
+      const host = parseCellText(rawHost);
+      const notes = parseCellText(rawNotes);
+
+      // Chuẩn hóa ngày bắt đầu và kết thúc (00:00:00 và 23:59:59 VN time)
+      const dateIso = parsedDate.toISOString().split("T")[0];
+      const startDateTime = new Date(`${dateIso}T00:00:00+07:00`);
+      const endDateTime = new Date(`${dateIso}T23:59:59+07:00`);
+
+      schedulesToInsert.push({
+        startDate: startDateTime,
+        endDate: endDateTime,
+        startTime,
+        endTime,
+        content,
+        participants,
+        location,
+        host,
+        notes,
+        department: currentUser.department || null,
+        createdBy: currentUser._id,
+        status: "APPROVED", // Ban hành trực tiếp
+        approvedBy: currentUser._id,
+        approvedAt: new Date(),
+      });
+    });
+
+    if (schedulesToInsert.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: errors.length > 0 ? errors.join("; ") : "Không tìm thấy dòng dữ liệu hợp lệ nào để import.",
+      });
+    }
+
+    const inserted = await WorkSchedule.insertMany(schedulesToInsert);
+
+    return res.status(200).json({
+      success: true,
+      message: `Đã import thành công ${inserted.length} lịch công tác!`,
+      data: {
+        totalImported: inserted.length,
+        errors: errors.length > 0 ? errors : undefined,
+      },
+    });
+  } catch (error) {
+    console.error("Lỗi khi import lịch công tác:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi hệ thống khi import lịch công tác",
+      error: error.message,
+    });
+  }
+};
+
