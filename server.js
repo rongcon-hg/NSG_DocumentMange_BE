@@ -142,6 +142,9 @@ app.use('/api/focus-axes', focusAxisRoutes);
 const recurringTaskRoutes = require('./src/routes/recurringTaskRoutes');
 app.use('/api/recurring-tasks', recurringTaskRoutes);
 app.use('/recurring-tasks', recurringTaskRoutes);
+const workScheduleRoutes = require('./src/routes/workSchedule.routes');
+app.use('/api/work-schedules', workScheduleRoutes);
+app.use('/work-schedules', workScheduleRoutes);
 
 // Cron endpoint for Vercel
 const cronRoutes = require('./src/routes/cronRoutes');
