@@ -65,7 +65,8 @@ const checkUserRole = async (user) => {
   let isBGH = false;
   let isHieuTruong = false;
   let isPhoHieuTruong = false;
-  const isManager = ["admin", "manager"].includes(role);
+  const isAdmin = role === "admin";
+  const isManager = role === "manager";
 
   // Lấy chức vụ nếu có
   let posDoc = null;
@@ -113,26 +114,28 @@ const checkUserRole = async (user) => {
 
   const isCapTruong =
     !isBGH &&
+    !isAdmin &&
     !isManager &&
     (role === "captruong" || role === "staff" || pName.includes("trưởng"));
   const isCapPho =
-    !isBGH && !isManager && !isCapTruong && (role === "cappho" || pName.includes("phó"));
-  const isGvCv = !isBGH && !isManager && !isCapTruong && !isCapPho;
+    !isBGH && !isAdmin && !isManager && !isCapTruong && (role === "cappho" || pName.includes("phó"));
+  const isGvCv = !isBGH && !isAdmin && !isManager && !isCapTruong && !isCapPho;
 
   return {
+    isAdmin,
+    isManager,
     isBGH,
     isHieuTruong,
     isPhoHieuTruong,
-    isManager,
     isCapTruong,
     isCapPho,
     isGvCv,
-    // Chỉ Hiệu trưởng và Manager mới được Ban hành lịch trực tiếp (canDirectAdd)
-    canDirectAdd: isHieuTruong || isManager,
-    // Cả Hiệu trưởng, Manager, Phó Hiệu trưởng, Cấp trưởng, Cấp phó đều có thể Đăng ký lịch
-    canRegister: isBGH || isManager || isCapTruong || isCapPho,
-    // Quyền duyệt: BGH (cả HT và PHT) và Manager
-    canApprove: isBGH || isManager,
+    // Hiệu trưởng, Admin và Manager được Ban hành lịch trực tiếp (canDirectAdd)
+    canDirectAdd: isHieuTruong || isAdmin || isManager,
+    // Phó Hiệu trưởng, Cấp trưởng, Cấp phó (và Admin) có quyền Đăng ký lịch. Manager không đăng ký lịch
+    canRegister: isPhoHieuTruong || isCapTruong || isCapPho || isAdmin,
+    // Quyền duyệt: Admin và BGH (Manager không duyệt lịch)
+    canApprove: isAdmin || isBGH,
   };
 };
 
@@ -183,7 +186,23 @@ exports.getWorkSchedules = async (req, res) => {
           meta: { today: startOfToday.toISOString(), total: 0 },
         });
       }
-      filter.status = "PENDING";
+      // Đối với tài khoản admin: hiển thị tất cả các lịch của Phó Hiệu trưởng và Cấp trưởng đăng ký
+      if (roleInfo.isAdmin) {
+        if (status && status !== "ALL") {
+          filter.status = status;
+        } else {
+          filter.status = { $in: ["PENDING", "APPROVED", "REJECTED"] };
+        }
+      } else {
+        // Đối với BGH:
+        if (status && status !== "ALL") {
+          filter.status = status;
+        } else if (status === "ALL") {
+          filter.status = { $in: ["PENDING", "APPROVED", "REJECTED"] };
+        } else {
+          filter.status = "PENDING";
+        }
+      }
     } else if (tab === "my_registered") {
       // Tab lịch tôi đã đăng ký: xem toàn bộ trạng thái lịch của chính mình
       filter.createdBy = currentUser._id;
@@ -283,7 +302,7 @@ exports.getPendingCount = async (req, res) => {
     const roleInfo = await checkUserRole(currentUser);
 
     let count = 0;
-    if (roleInfo.isBGH || roleInfo.isManager) {
+    if (roleInfo.isBGH || roleInfo.isAdmin) {
       count = await WorkSchedule.countDocuments({ status: "PENDING" });
     }
 
@@ -518,8 +537,8 @@ exports.updateWorkSchedule = async (req, res) => {
       });
     }
 
-    // Kiểm tra quyền sửa: Manager và Ban Giám Hiệu được quyền sửa cả lịch đã duyệt và chờ duyệt
-    const isManagerOrBGH = roleInfo.isBGH || roleInfo.isManager;
+    // Kiểm tra quyền sửa: Admin, Manager và Ban Giám Hiệu được quyền sửa cả lịch đã duyệt và chờ duyệt
+    const isManagerOrBGH = roleInfo.isBGH || roleInfo.isManager || roleInfo.isAdmin;
     const isOwner = schedule.createdBy.toString() === currentUser._id.toString();
     const canEdit =
       isManagerOrBGH ||
@@ -643,8 +662,8 @@ exports.deleteWorkSchedule = async (req, res) => {
       });
     }
 
-    // Kiểm tra quyền xóa: Manager và Ban Giám Hiệu được quyền xóa cả lịch đã duyệt và chờ duyệt
-    const isManagerOrBGH = roleInfo.isBGH || roleInfo.isManager;
+    // Kiểm tra quyền xóa: Admin, Manager và Ban Giám Hiệu được quyền xóa cả lịch đã duyệt và chờ duyệt
+    const isManagerOrBGH = roleInfo.isBGH || roleInfo.isManager || roleInfo.isAdmin;
     const isOwner = schedule.createdBy.toString() === currentUser._id.toString();
     const canDelete =
       isManagerOrBGH ||
