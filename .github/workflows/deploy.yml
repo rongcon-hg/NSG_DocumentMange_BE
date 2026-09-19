@@ -26,4 +26,8 @@ jobs:
             git pull origin main
             pm2 restart all || pm2 restart nsg-be
             pm2 save
+            echo "=== PM2 SHOW ==="
+            pm2 show nsg-be
+            echo "=== NGINX SITES ==="
+            cat /etc/nginx/sites-enabled/*
 
