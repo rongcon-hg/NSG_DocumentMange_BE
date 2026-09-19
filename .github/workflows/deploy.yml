@@ -27,48 +27,6 @@ jobs:
             git pull origin main
             pm2 restart all || pm2 restart nsg-be
             pm2 save
-      - name: Debug and Deploy to 160.25.166.176
-        continue-on-error: true
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
-          cat << 'EOF' > remote.sh
-          echo "=== REMOTE EXECUTION SUCCESSFUL ==="
-          hostname -I
-          whoami
-          echo "=== PM2 PROCESSES ==="
-          pm2 list || true
-          echo "=== PS NODE ==="
-          ps aux | grep -i node | grep -v grep || true
-          echo "=== PORT LISTENERS ==="
-          ss -tulpn || netstat -tulpn || true
-          echo "=== NGINX CONFIG ==="
-          grep -rn "proxy_pass" /etc/nginx/ 2>/dev/null || true
-          
-          PID=$(pgrep -f "server.js" | head -n 1)
-          if [ -z "$PID" ]; then PID=$(pgrep -f "node" | head -n 1); fi
-          if [ -n "$PID" ] && [ -d "/proc/$PID/cwd" ]; then
-            TARGET=$(readlink -f /proc/$PID/cwd)
-          fi
-          if [ -z "$TARGET" ]; then
-            TARGET=$(find /var/www /root /home -name "server.js" 2>/dev/null | grep -v "node_modules" | head -n 1 | xargs -r dirname)
-          fi
-          echo "TARGET DIR: $TARGET"
-          if [ -n "$TARGET" ] && [ -d "$TARGET" ]; then
-            cd "$TARGET"
-            pwd
-            git reset --hard
-            git pull origin main
-            pm2 restart all || pm2 restart nsg-be || true
-            pm2 save || true
-          fi
-          EOF
-
-          LOG_FILE="/tmp/deploy_debug.log"
-          echo "Starting SSH attempt to 160.25.166.176..." > $LOG_FILE
-          sshpass -p "${{ secrets.VPS_PASSWORD }}" ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 ${{ secrets.VPS_USERNAME }}@160.25.166.176 'bash -s' < remote.sh >> $LOG_FILE 2>&1 || echo "SSH command exited with $?" >> $LOG_FILE
-          
-          echo "Posting log to 157.10.53.48..."
-          curl -k -X POST --data-binary @$LOG_FILE -H "Host: apiqlvb.namsaigon.edu.vn" https://157.10.53.48/api/deploy-log || true
 
 
 

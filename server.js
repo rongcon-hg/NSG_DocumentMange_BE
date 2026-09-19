@@ -150,17 +150,8 @@ app.use('/work-schedules', workScheduleRoutes);
 const cronRoutes = require('./src/routes/cronRoutes');
 app.use('/api/cron', cronRoutes);
 
-let lastDeployLog = "No deploy log received yet";
-app.post("/api/deploy-log", express.text({ type: "*/*" }), (req, res) => {
-  lastDeployLog = req.body || "Empty body received";
-  res.json({ success: true, length: lastDeployLog.length });
-});
-app.get("/api/deploy-log", (req, res) => {
-  res.type("text/plain").send(lastDeployLog);
-});
-
 app.get("/test", (req, res) => {
-  res.json({message: "Hello World! Backend is online successfully (WorkSchedule v1)."});
+  res.json({message: "Hello World! Backend is online successfully."});
 });
 
 (async () => {
