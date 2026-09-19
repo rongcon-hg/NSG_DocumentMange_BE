@@ -5,6 +5,44 @@ const Position = require("../models/position.model");
 const Notification = require("../models/notification.model");
 
 /**
+ * Helper: Lấy danh sách ID người dùng thuộc Ban Giám Hiệu và Manager/Admin
+ */
+const getBghAndManagerUserIds = async () => {
+  try {
+    const bghDepts = await Department.find({
+      $or: [
+        { departmentCode: "BGH" },
+        { departmentName: { $regex: /ban giám hiệu/i } },
+      ],
+    }).select("_id");
+    const bghDeptIds = bghDepts.map((d) => d._id);
+
+    const bghPositions = await Position.find({
+      $or: [
+        { abbreviation: { $in: ["HT", "PHT", "NHT"] } },
+        { code: { $in: ["HT", "PHT", "NHT"] } },
+        { positionName: { $regex: /hiệu trưởng/i } },
+      ],
+    }).select("_id");
+    const bghPosIds = bghPositions.map((p) => p._id);
+
+    const users = await User.find({
+      $or: [
+        { role: { $in: ["admin", "manager"] } },
+        { department: { $in: bghDeptIds } },
+        { position: { $in: bghPosIds } },
+      ],
+    }).select("_id");
+
+    return [...new Set(users.map((u) => u._id.toString()))];
+  } catch (err) {
+    console.warn("Lỗi tìm BGH/Manager users:", err.message);
+    const fallback = await User.find({ role: { $in: ["admin", "manager"] } }).select("_id");
+    return fallback.map((u) => u._id.toString());
+  }
+};
+
+/**
  * Helper: Kiểm tra vai trò của người dùng
  */
 const checkUserRole = async (user) => {
@@ -323,28 +361,25 @@ exports.createWorkSchedule = async (req, res) => {
     // Nếu là Cấp trưởng đăng ký: Gửi thông báo đến BGH và Manager
     if (!isDirectAdd) {
       try {
-        const managersAndBGH = await User.find({
-          $or: [
-            { role: { $in: ["admin", "manager"] } },
-            { department: currentUser.department }, // nếu có
-          ],
-        }).select("_id");
+        const bghAndMgrIds = await getBghAndManagerUserIds();
 
-        const notifyPromises = managersAndBGH.map((mgr) =>
-          Notification.create({
-            recipient: mgr._id,
-            sender: currentUser._id,
-            type: "GENERAL",
-            title: "Lịch công tác mới chờ duyệt",
-            message: `${currentUser.name} vừa đăng ký lịch công tác: "${content.substring(
-              0,
-              60
-            )}..."`,
-            link: "/work-schedule?tab=pending",
-            isRead: false,
-            isPopupShown: false,
-          })
-        );
+        const notifyPromises = bghAndMgrIds
+          .filter((id) => id !== currentUser._id.toString())
+          .map((recipientId) =>
+            Notification.create({
+              recipient: recipientId,
+              sender: currentUser._id,
+              type: "GENERAL",
+              title: "Lịch công tác mới chờ Ban Giám Hiệu phê duyệt",
+              message: `${currentUser.name} vừa đăng ký lịch công tác: "${content.substring(
+                0,
+                70
+              )}..."`,
+              link: "/work-schedule?tab=pending",
+              isRead: false,
+              isPopupShown: false,
+            })
+          );
         await Promise.allSettled(notifyPromises);
       } catch (notifyErr) {
         console.warn("Không thể gửi thông báo duyệt lịch:", notifyErr.message);
@@ -431,13 +466,42 @@ exports.updateWorkSchedule = async (req, res) => {
     if (department !== undefined) schedule.department = department;
     if (attachments !== undefined) schedule.attachments = attachments;
 
+    let isResubmitted = false;
     // Nếu Cấp trưởng sửa lịch bị từ chối trước đó -> Đưa về PENDING để duyệt lại
     if (roleInfo.isCapTruong && schedule.status === "REJECTED") {
       schedule.status = "PENDING";
       schedule.rejectionReason = "";
+      isResubmitted = true;
     }
 
     await schedule.save();
+
+    // Nếu gửi duyệt lại: Bắn thông báo cho BGH & Manager
+    if (isResubmitted) {
+      try {
+        const bghAndMgrIds = await getBghAndManagerUserIds();
+        const notifyPromises = bghAndMgrIds
+          .filter((id) => id !== currentUser._id.toString())
+          .map((recipientId) =>
+            Notification.create({
+              recipient: recipientId,
+              sender: currentUser._id,
+              type: "GENERAL",
+              title: "Lịch công tác đã cập nhật - chờ Ban Giám Hiệu duyệt lại",
+              message: `${currentUser.name} đã cập nhật lịch công tác: "${schedule.content.substring(
+                0,
+                70
+              )}..." và gửi lại chờ phê duyệt.`,
+              link: "/work-schedule?tab=pending",
+              isRead: false,
+              isPopupShown: false,
+            })
+          );
+        await Promise.allSettled(notifyPromises);
+      } catch (notifyErr) {
+        console.warn("Không thể gửi thông báo duyệt lại:", notifyErr.message);
+      }
+    }
 
     const populated = await WorkSchedule.findById(schedule._id)
       .populate("createdBy", "name email avatar")
@@ -446,7 +510,9 @@ exports.updateWorkSchedule = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Cập nhật lịch công tác thành công.",
+      message: isResubmitted
+        ? "Đã cập nhật và gửi lại lịch công tác cho Ban Giám Hiệu duyệt."
+        : "Cập nhật lịch công tác thành công.",
       data: populated,
     });
   } catch (error) {
