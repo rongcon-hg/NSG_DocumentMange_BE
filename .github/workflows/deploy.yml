@@ -36,15 +36,32 @@ jobs:
           password: ${{ secrets.VPS_PASSWORD }}
           port: 22
           script: |
-            if [ -d "/var/www/nsg-be" ]; then
-              cd /var/www/nsg-be
-            elif [ -d "/var/www/NSG_DocumentMange_BE" ]; then
-              cd /var/www/NSG_DocumentMange_BE
+            TARGET_DIR=""
+            if command -v pm2 &> /dev/null; then
+              PM2_DIR=$(pm2 jlist 2>/dev/null | grep -o '"pm_cwd":"[^"]*"' | head -n 1 | cut -d'"' -f4)
+              if [ -n "$PM2_DIR" ] && [ -d "$PM2_DIR" ]; then
+                TARGET_DIR="$PM2_DIR"
+              fi
             fi
-            pwd
-            git reset --hard
-            git pull origin main
-            pm2 restart all
-            pm2 save
+            if [ -z "$TARGET_DIR" ]; then
+              for dir in /var/www/nsg-be /var/www/NSG_DocumentMange_BE /var/www/* /root/* /home/*/*; do
+                if [ -d "$dir/.git" ] && [ -f "$dir/server.js" ]; then
+                  TARGET_DIR="$dir"
+                  break
+                fi
+              done
+            fi
+            echo "TARGET_DIR is: $TARGET_DIR"
+            if [ -n "$TARGET_DIR" ] && [ -d "$TARGET_DIR" ]; then
+              cd "$TARGET_DIR"
+              pwd
+              git reset --hard
+              git pull origin main
+              pm2 restart all || pm2 restart nsg-be
+              pm2 save
+            else
+              echo "Directory not found, searching with find..."
+              find / -maxdepth 4 -name "server.js" 2>/dev/null
+            fi
 
 
