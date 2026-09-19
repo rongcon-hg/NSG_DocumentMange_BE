@@ -60,7 +60,7 @@ const checkUserRole = async (user) => {
   }
 
   const role = user.role;
-  let isBGH = ["admin", "manager"].includes(role);
+  let isBGH = false;
   const isManager = ["admin", "manager"].includes(role);
 
   // Kiểm tra phòng ban BGH
@@ -99,10 +99,11 @@ const checkUserRole = async (user) => {
   const posName = (user.position?.positionName || "").toLowerCase();
   const isCapTruong =
     !isBGH &&
+    !isManager &&
     (role === "captruong" || role === "staff" || posName.includes("trưởng"));
   const isCapPho =
-    !isBGH && !isCapTruong && (role === "cappho" || posName.includes("phó"));
-  const isGvCv = !isBGH && !isCapTruong && !isCapPho;
+    !isBGH && !isManager && !isCapTruong && (role === "cappho" || posName.includes("phó"));
+  const isGvCv = !isBGH && !isManager && !isCapTruong && !isCapPho;
 
   return {
     isBGH,
@@ -111,7 +112,7 @@ const checkUserRole = async (user) => {
     isCapPho,
     isGvCv,
     canDirectAdd: isBGH || isManager,
-    canRegister: isBGH || isManager || isCapTruong,
+    canRegister: isBGH || isManager || isCapTruong || isCapPho,
     canApprove: isBGH || isManager,
   };
 };
@@ -172,8 +173,8 @@ exports.getWorkSchedules = async (req, res) => {
 
       if (tab === "my_registered") {
         filter.createdBy = currentUser._id;
-      } else if (roleInfo.isCapTruong) {
-        // Cấp trưởng: Xem lịch APPROVED hoặc lịch của chính mình
+      } else if (roleInfo.isCapTruong || roleInfo.isCapPho) {
+        // Cấp trưởng & Cấp phó: Xem lịch APPROVED hoặc lịch của chính mình
         if (status) {
           filter.status = status;
           if (status !== "APPROVED") {
@@ -195,13 +196,13 @@ exports.getWorkSchedules = async (req, res) => {
     if (tab === "upcoming") {
       // Lịch hiện tại và tương lai (ngày kết thúc >= bắt đầu ngày hôm nay)
       filter.endDate = { $gte: startOfToday };
-      if (!filter.status && !roleInfo.isCapTruong) {
+      if (!filter.status && !roleInfo.isCapTruong && !roleInfo.isCapPho) {
         filter.status = "APPROVED";
       }
     } else if (tab === "past") {
       // Những ngày đã qua (ngày kết thúc < hôm nay)
       filter.endDate = { $lt: startOfToday };
-      if (!filter.status && !roleInfo.isCapTruong) {
+      if (!filter.status && !roleInfo.isCapTruong && !roleInfo.isCapPho) {
         filter.status = "APPROVED";
       }
     } else if (tab === "pending") {
@@ -330,23 +331,49 @@ exports.getBghUsers = async (req, res) => {
     }).select("_id");
     const bghPosIds = bghPositions.map((p) => p._id);
 
+    // CHỈ lấy người dùng thuộc phòng ban BGH hoặc có chức vụ Hiệu trưởng / Phó hiệu trưởng
     const users = await User.find({
       $or: [
         { department: { $in: bghDeptIds } },
         { position: { $in: bghPosIds } },
-        { role: { $in: ["admin", "manager"] } },
       ],
       isActive: { $ne: false },
     })
       .select("name email avatar position department role")
       .populate("position", "positionName abbreviation code")
       .populate("department", "departmentName departmentCode")
-      .sort({ "position.code": 1, name: 1 })
       .lean();
+
+    // Lọc lại nghiêm ngặt để đảm bảo 100% thuộc Ban Giám Hiệu
+    const filteredUsers = users.filter((u) => {
+      const dCode = (u.department?.departmentCode || "").toUpperCase();
+      const dName = (u.department?.departmentName || "").toLowerCase();
+      const pName = (u.position?.positionName || "").toLowerCase();
+      const pCode = (u.position?.abbreviation || u.position?.code || "").toUpperCase();
+
+      return (
+        dCode === "BGH" ||
+        dName.includes("ban giám hiệu") ||
+        ["HT", "PHT", "NHT"].includes(pCode) ||
+        pName.includes("hiệu trưởng") ||
+        pName.includes("phó hiệu trưởng")
+      );
+    });
+
+    // Sắp xếp: Hiệu trưởng lên đầu, sau đó đến Phó hiệu trưởng
+    filteredUsers.sort((a, b) => {
+      const aPos = (a.position?.positionName || "").toLowerCase();
+      const bPos = (b.position?.positionName || "").toLowerCase();
+      const aIsHT = aPos.includes("hiệu trưởng") && !aPos.includes("phó");
+      const bIsHT = bPos.includes("hiệu trưởng") && !bPos.includes("phó");
+      if (aIsHT && !bIsHT) return -1;
+      if (!aIsHT && bIsHT) return 1;
+      return (a.name || "").localeCompare(b.name || "", "vi");
+    });
 
     return res.status(200).json({
       success: true,
-      data: users,
+      data: filteredUsers,
     });
   } catch (error) {
     console.error("Lỗi khi lấy danh sách BGH:", error);
