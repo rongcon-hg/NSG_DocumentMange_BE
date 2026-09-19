@@ -266,22 +266,43 @@ exports.getWorkSchedules = async (req, res) => {
     }
 
     const schedules = await WorkSchedule.find(filter)
-      .populate("createdBy", "name email avatar")
+      .populate("createdBy", "name email avatar role position")
       .populate("department", "departmentName departmentCode")
-      .populate("approvedBy", "name email")
+      .populate("approvedBy", "name email role")
       .populate("targetApprover", "name email avatar")
       .sort(sortOption)
       .lean();
 
+    // Đối với những lịch do Manager ban hành trực tiếp (hoặc import):
+    // Không hiển thị thông tin "Đã duyệt bởi..." (chỉ lịch do Cấp trưởng đăng ký gửi BGH duyệt thì mới có Đã duyệt bởi BGH)
+    const sanitizedSchedules = schedules.map((s) => {
+      const creatorRole = s.createdBy?.role;
+      const isCreatorManager = creatorRole === "manager";
+      const isSelfApprovedManager =
+        isCreatorManager &&
+        (!s.targetApprover || s.approvedBy?._id?.toString() === s.createdBy?._id?.toString());
+
+      if (isCreatorManager || isSelfApprovedManager) {
+        return {
+          ...s,
+          isDirectIssuedByManager: true,
+          approvedBy: null,
+          approvedAt: null,
+        };
+      }
+      return s;
+    });
+
     return res.status(200).json({
       success: true,
-      data: schedules,
+      data: sanitizedSchedules,
       userRoleInfo: roleInfo,
       meta: {
         today: startOfToday.toISOString(),
-        total: schedules.length,
+        total: sanitizedSchedules.length,
       },
     });
+
   } catch (error) {
     console.error("Lỗi khi lấy danh sách lịch công tác:", error);
     return res.status(500).json({
@@ -458,12 +479,13 @@ exports.createWorkSchedule = async (req, res) => {
       targetApprover: targetApprover || null,
       createdBy: currentUser._id,
       status: scheduleStatus,
-      approvedBy: isDirectAdd ? currentUser._id : null,
+      approvedBy: isDirectAdd && !roleInfo.isManager ? currentUser._id : null,
       approvedAt: isDirectAdd ? new Date() : null,
       attachments,
     });
 
     await newSchedule.save();
+
 
     // Nếu là Cấp trưởng đăng ký: Gửi thông báo đến BGH và Manager
     if (!isDirectAdd) {
@@ -1007,9 +1029,10 @@ exports.importWorkSchedules = async (req, res) => {
         department: currentUser.department || null,
         createdBy: currentUser._id,
         status: "APPROVED", // Ban hành trực tiếp
-        approvedBy: currentUser._id,
+        approvedBy: roleInfo.isManager ? null : currentUser._id,
         approvedAt: new Date(),
       });
+
     });
 
     if (schedulesToInsert.length === 0) {
