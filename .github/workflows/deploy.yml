@@ -11,6 +11,7 @@ jobs:
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
+        continue-on-error: true
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USERNAME }}
@@ -21,17 +22,11 @@ jobs:
               sudo apt-get update
               sudo apt-get install -y libreoffice
             fi
-            echo "=== SERVER IP ==="
-            curl -s ifconfig.me || curl -s icanhazip.com
-            echo ""
-            hostname -I
             cd /var/www/nsg-be
             git reset --hard
             git pull origin main
             pm2 restart all || pm2 restart nsg-be
             pm2 save
-            echo "=== PORT 8888 LISTENERS ==="
-            sudo lsof -i :8888 || sudo ss -tlpn | grep 8888
       - name: Deploy to VPS 160.25.166.176 via SSH
         uses: appleboy/ssh-action@v1.0.3
         continue-on-error: true
