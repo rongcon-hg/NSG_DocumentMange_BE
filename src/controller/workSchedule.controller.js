@@ -154,15 +154,9 @@ exports.getWorkSchedules = async (req, res) => {
 
     const filter = {};
 
-    // 1. Phân quyền dữ liệu theo vai trò
-    if (roleInfo.isBGH || roleInfo.isManager) {
-      // BGH và Manager được xem toàn bộ lịch
-      if (status) {
-        filter.status = status;
-      }
-    } else {
-      // Cấp trưởng, Cấp phó, GV/CV: Không có quyền phê duyệt
-      if (tab === "pending") {
+    // 1. Phân quyền dữ liệu theo vai trò & Tab
+    if (tab === "pending") {
+      if (!roleInfo.canApprove) {
         return res.status(200).json({
           success: true,
           data: [],
@@ -170,49 +164,33 @@ exports.getWorkSchedules = async (req, res) => {
           meta: { today: startOfToday.toISOString(), total: 0 },
         });
       }
-
-      if (tab === "my_registered") {
-        filter.createdBy = currentUser._id;
-      } else {
-        // Luôn xem lịch APPROVED của trường HOẶC lịch do chính mình đã đăng ký
-        if (status) {
-          filter.status = status;
-          if (status !== "APPROVED") {
-            filter.createdBy = currentUser._id;
-          }
-        } else {
-          filter.$or = [
-            { status: "APPROVED" },
-            { createdBy: currentUser._id },
-          ];
-        }
-      }
-    }
-
-    // 2. Lọc theo Tab thời gian
-    if (tab === "upcoming") {
-      // Lịch hiện tại và tương lai (ngày kết thúc >= bắt đầu ngày hôm nay)
-      filter.endDate = { $gte: startOfToday };
-    } else if (tab === "past") {
-      // Những ngày đã qua (ngày kết thúc < hôm nay)
-      filter.endDate = { $lt: startOfToday };
-    } else if (tab === "pending") {
       filter.status = "PENDING";
     } else if (tab === "my_registered") {
       // Tab lịch tôi đã đăng ký: xem toàn bộ trạng thái lịch của chính mình
       filter.createdBy = currentUser._id;
-      delete filter.status;
       if (status) filter.status = status;
+    } else {
+      // Tab xem chung ("upcoming", "past") hoặc in/xuất:
+      // Yêu cầu: Những lịch nào đang gửi duyệt mà chưa được duyệt thì KHÔNG hiển thị, khi nào được duyệt mới hiển thị
+      filter.status = "APPROVED";
+      if (tab === "upcoming") {
+        filter.endDate = { $gte: startOfToday };
+      } else if (tab === "past") {
+        filter.endDate = { $lt: startOfToday };
+      }
     }
 
     // 3. Lọc theo khoảng ngày người dùng chọn (nếu có)
     if (startDate || endDate) {
-      filter.startDate = filter.startDate || {};
-      if (startDate) {
-        filter.startDate.$gte = new Date(`${startDate}T00:00:00+07:00`);
-      }
-      if (endDate) {
-        filter.startDate.$lte = new Date(`${endDate}T23:59:59+07:00`);
+      if (startDate && endDate) {
+        // Sự kiện giao thoa với khoảng [startDate, endDate]:
+        // startDate <= target_endDate VÀ endDate >= target_startDate
+        filter.startDate = { $lte: new Date(`${endDate}T23:59:59+07:00`) };
+        filter.endDate = { $gte: new Date(`${startDate}T00:00:00+07:00`) };
+      } else if (startDate) {
+        filter.endDate = { $gte: new Date(`${startDate}T00:00:00+07:00`) };
+      } else if (endDate) {
+        filter.startDate = { $lte: new Date(`${endDate}T23:59:59+07:00`) };
       }
     }
 
