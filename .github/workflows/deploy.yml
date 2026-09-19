@@ -32,7 +32,24 @@ jobs:
             pm2 save
             echo "=== PORT 8888 LISTENERS ==="
             sudo lsof -i :8888 || sudo ss -tlpn | grep 8888
-            echo "=== PM2 LOGS ==="
-            pm2 logs nsg-be --lines 40 --nostream
+      - name: Deploy to VPS 160.25.166.176 via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        continue-on-error: true
+        with:
+          host: 160.25.166.176
+          username: ${{ secrets.VPS_USERNAME }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          port: 22
+          script: |
+            if [ -d "/var/www/nsg-be" ]; then
+              cd /var/www/nsg-be
+            elif [ -d "/var/www/NSG_DocumentMange_BE" ]; then
+              cd /var/www/NSG_DocumentMange_BE
+            fi
+            pwd
+            git reset --hard
+            git pull origin main
+            pm2 restart all
+            pm2 save
 
 
