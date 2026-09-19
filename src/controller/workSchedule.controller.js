@@ -173,8 +173,8 @@ exports.getWorkSchedules = async (req, res) => {
 
       if (tab === "my_registered") {
         filter.createdBy = currentUser._id;
-      } else if (roleInfo.isCapTruong || roleInfo.isCapPho) {
-        // Cấp trưởng & Cấp phó: Xem lịch APPROVED hoặc lịch của chính mình
+      } else {
+        // Luôn xem lịch APPROVED của trường HOẶC lịch do chính mình đã đăng ký
         if (status) {
           filter.status = status;
           if (status !== "APPROVED") {
@@ -186,9 +186,6 @@ exports.getWorkSchedules = async (req, res) => {
             { createdBy: currentUser._id },
           ];
         }
-      } else {
-        // Tất cả đối tượng khác: CHỈ xem lịch APPROVED
-        filter.status = "APPROVED";
       }
     }
 
@@ -196,15 +193,9 @@ exports.getWorkSchedules = async (req, res) => {
     if (tab === "upcoming") {
       // Lịch hiện tại và tương lai (ngày kết thúc >= bắt đầu ngày hôm nay)
       filter.endDate = { $gte: startOfToday };
-      if (!filter.status && !roleInfo.isCapTruong && !roleInfo.isCapPho) {
-        filter.status = "APPROVED";
-      }
     } else if (tab === "past") {
       // Những ngày đã qua (ngày kết thúc < hôm nay)
       filter.endDate = { $lt: startOfToday };
-      if (!filter.status && !roleInfo.isCapTruong && !roleInfo.isCapPho) {
-        filter.status = "APPROVED";
-      }
     } else if (tab === "pending") {
       filter.status = "PENDING";
     } else if (tab === "my_registered") {
@@ -526,17 +517,17 @@ exports.updateWorkSchedule = async (req, res) => {
       });
     }
 
-    // Kiểm tra quyền sửa
+    // Kiểm tra quyền sửa: Lịch đã duyệt CHỈ Ban Giám Hiệu mới được sửa
     const isOwner = schedule.createdBy.toString() === currentUser._id.toString();
     const canEdit =
-      roleInfo.canDirectAdd ||
-      (roleInfo.isCapTruong && isOwner && schedule.status !== "APPROVED");
+      roleInfo.isBGH ||
+      (isOwner && schedule.status !== "APPROVED");
 
     if (!canEdit) {
       return res.status(403).json({
         success: false,
         message:
-          "Bạn không có quyền chỉnh sửa lịch này (lịch đã duyệt hoặc không thuộc quyền quản lý của bạn).",
+          "Bạn không có quyền chỉnh sửa lịch này. Lịch đã được duyệt chỉ Ban Giám Hiệu mới có thể điều chỉnh.",
       });
     }
 
@@ -650,16 +641,17 @@ exports.deleteWorkSchedule = async (req, res) => {
       });
     }
 
+    // Kiểm tra quyền xóa: Lịch đã duyệt CHỈ Ban Giám Hiệu mới được xóa
     const isOwner = schedule.createdBy.toString() === currentUser._id.toString();
     const canDelete =
-      roleInfo.canDirectAdd ||
-      (roleInfo.isCapTruong && isOwner && schedule.status !== "APPROVED");
+      roleInfo.isBGH ||
+      (isOwner && schedule.status !== "APPROVED");
 
     if (!canDelete) {
       return res.status(403).json({
         success: false,
         message:
-          "Bạn không có quyền xóa lịch này (lịch đã duyệt hoặc không thuộc quyền quản lý của bạn).",
+          "Bạn không có quyền xóa lịch này. Lịch đã được duyệt chỉ Ban Giám Hiệu mới có thể xóa.",
       });
     }
 
