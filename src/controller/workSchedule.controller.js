@@ -164,11 +164,20 @@ exports.getWorkSchedules = async (req, res) => {
           meta: { today: startOfToday.toISOString(), total: 0 },
         });
       }
-      filter.status = "PENDING";
+      if (status && status !== "ALL") {
+        filter.status = status;
+      } else {
+        // Mặc định hoặc ALL: xem toàn bộ các lịch chưa duyệt, đã duyệt và từ chối
+        delete filter.status;
+      }
     } else if (tab === "my_registered") {
       // Tab lịch tôi đã đăng ký: xem toàn bộ trạng thái lịch của chính mình
       filter.createdBy = currentUser._id;
-      if (status) filter.status = status;
+      if (status && status !== "ALL") {
+        filter.status = status;
+      } else {
+        delete filter.status;
+      }
     } else {
       // Tab xem chung ("upcoming", "past") hoặc in/xuất:
       // Yêu cầu: Những lịch nào đang gửi duyệt mà chưa được duyệt thì KHÔNG hiển thị, khi nào được duyệt mới hiển thị
@@ -215,11 +224,11 @@ exports.getWorkSchedules = async (req, res) => {
     // 5. Xác định thứ tự sắp xếp
     // Với tab 'upcoming': sắp xếp startDate tăng dần, startTime tăng dần (ngày hiện tại sẽ lên trên cùng)
     // Với tab 'past': sắp xếp startDate giảm dần, startTime giảm dần
-    // Với tab 'my_registered': sắp xếp mới nhất lên trước
+    // Với tab 'my_registered' hoặc 'pending': sắp xếp mới nhất lên trước
     let sortOption = { startDate: 1, startTime: 1 };
     if (tab === "past") {
       sortOption = { startDate: -1, startTime: -1 };
-    } else if (tab === "my_registered") {
+    } else if (tab === "my_registered" || tab === "pending") {
       sortOption = { createdAt: -1, startDate: -1 };
     }
 
