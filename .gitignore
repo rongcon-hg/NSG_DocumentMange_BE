@@ -13,5 +13,7 @@ fix_positions.js
 import_db.js
 reset_password.js
 deploy_vps.js
+deploy*.js
+run-vps.js
 *.sh
 *.tmp
