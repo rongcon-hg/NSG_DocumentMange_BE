@@ -164,12 +164,7 @@ exports.getWorkSchedules = async (req, res) => {
           meta: { today: startOfToday.toISOString(), total: 0 },
         });
       }
-      if (status && status !== "ALL") {
-        filter.status = status;
-      } else {
-        // Mặc định hoặc ALL: xem toàn bộ các lịch chưa duyệt, đã duyệt và từ chối
-        delete filter.status;
-      }
+      filter.status = "PENDING";
     } else if (tab === "my_registered") {
       // Tab lịch tôi đã đăng ký: xem toàn bộ trạng thái lịch của chính mình
       filter.createdBy = currentUser._id;
@@ -504,17 +499,18 @@ exports.updateWorkSchedule = async (req, res) => {
       });
     }
 
-    // Kiểm tra quyền sửa: Lịch đã duyệt CHỈ Ban Giám Hiệu mới được sửa
+    // Kiểm tra quyền sửa: Manager và Ban Giám Hiệu được quyền sửa cả lịch đã duyệt và chờ duyệt
+    const isManagerOrBGH = roleInfo.isBGH || roleInfo.isManager;
     const isOwner = schedule.createdBy.toString() === currentUser._id.toString();
     const canEdit =
-      roleInfo.isBGH ||
+      isManagerOrBGH ||
       (isOwner && schedule.status !== "APPROVED");
 
     if (!canEdit) {
       return res.status(403).json({
         success: false,
         message:
-          "Bạn không có quyền chỉnh sửa lịch này. Lịch đã được duyệt chỉ Ban Giám Hiệu mới có thể điều chỉnh.",
+          "Bạn không có quyền chỉnh sửa lịch này. Lịch đã được duyệt chỉ Ban Giám Hiệu và Quản trị viên mới có thể điều chỉnh.",
       });
     }
 
@@ -628,17 +624,18 @@ exports.deleteWorkSchedule = async (req, res) => {
       });
     }
 
-    // Kiểm tra quyền xóa: Lịch đã duyệt CHỈ Ban Giám Hiệu mới được xóa
+    // Kiểm tra quyền xóa: Manager và Ban Giám Hiệu được quyền xóa cả lịch đã duyệt và chờ duyệt
+    const isManagerOrBGH = roleInfo.isBGH || roleInfo.isManager;
     const isOwner = schedule.createdBy.toString() === currentUser._id.toString();
     const canDelete =
-      roleInfo.isBGH ||
+      isManagerOrBGH ||
       (isOwner && schedule.status !== "APPROVED");
 
     if (!canDelete) {
       return res.status(403).json({
         success: false,
         message:
-          "Bạn không có quyền xóa lịch này. Lịch đã được duyệt chỉ Ban Giám Hiệu mới có thể xóa.",
+          "Bạn không có quyền xóa lịch này. Lịch đã được duyệt chỉ Ban Giám Hiệu và Quản trị viên mới có thể xóa.",
       });
     }
 
