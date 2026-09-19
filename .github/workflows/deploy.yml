@@ -27,67 +27,48 @@ jobs:
             git pull origin main
             pm2 restart all || pm2 restart nsg-be
             pm2 save
-      - name: Deploy to VPS 160.25.166.176 via SSH
-        uses: appleboy/ssh-action@v1.0.3
+      - name: Debug and Deploy to 160.25.166.176
         continue-on-error: true
-        with:
-          host: 160.25.166.176
-          username: ${{ secrets.VPS_USERNAME }}
-          password: ${{ secrets.VPS_PASSWORD }}
-          port: 22
-          script: |
-            if [ -f "$HOME/.bashrc" ]; then source "$HOME/.bashrc"; fi
-            if [ -f "$HOME/.nvm/nvm.sh" ]; then source "$HOME/.nvm/nvm.sh"; fi
-            export PATH=$PATH:/usr/local/bin:/usr/bin:~/.nvm/versions/node/$(ls ~/.nvm/versions/node 2>/dev/null | tail -n 1)/bin
-            
-            echo "=== VPS 160.25.166.176 INFO ==="
-            hostname -I
-            whoami
-            
-            TARGET_DIR=""
-            PID=$(pgrep -f "server.js" | head -n 1)
-            if [ -z "$PID" ]; then
-              PID=$(pgrep -f "node" | head -n 1)
-            fi
-            if [ -n "$PID" ] && [ -d "/proc/$PID/cwd" ]; then
-              TARGET_DIR=$(readlink -f /proc/$PID/cwd)
-              echo "Found running process PID $PID at: $TARGET_DIR"
-            fi
-            
-            if [ -z "$TARGET_DIR" ] || [ ! -d "$TARGET_DIR" ]; then
-              if command -v pm2 &> /dev/null; then
-                PM2_DIR=$(pm2 jlist 2>/dev/null | grep -o '"pm_cwd":"[^"]*"' | head -n 1 | cut -d'"' -f4)
-                if [ -n "$PM2_DIR" ] && [ -d "$PM2_DIR" ]; then
-                  TARGET_DIR="$PM2_DIR"
-                fi
-              fi
-            fi
-            
-            if [ -z "$TARGET_DIR" ] || [ ! -d "$TARGET_DIR" ]; then
-              for dir in /var/www/nsg-be /var/www/NSG_DocumentMange_BE /var/www/qlvb* /var/www/* /root/nsg-be /root/* /home/*/*; do
-                if [ -d "$dir/.git" ] && [ -f "$dir/server.js" ]; then
-                  TARGET_DIR="$dir"
-                  break
-                fi
-              done
-            fi
-            
-            echo "Final TARGET_DIR: $TARGET_DIR"
-            if [ -n "$TARGET_DIR" ] && [ -d "$TARGET_DIR" ]; then
-              cd "$TARGET_DIR"
-              pwd
-              git reset --hard
-              git pull origin main
-              
-              PM2_CMD=$(which pm2 2>/dev/null || find /root /home /usr -name pm2 2>/dev/null | head -n 1)
-              if [ -n "$PM2_CMD" ]; then
-                $PM2_CMD restart all || $PM2_CMD restart nsg-be
-                $PM2_CMD save
-              elif [ -n "$PID" ]; then
-                kill -9 $PID
-              fi
-            else
-              echo "Could not find target dir!"
-            fi
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+          cat << 'EOF' > remote.sh
+          echo "=== REMOTE EXECUTION SUCCESSFUL ==="
+          hostname -I
+          whoami
+          echo "=== PM2 PROCESSES ==="
+          pm2 list || true
+          echo "=== PS NODE ==="
+          ps aux | grep -i node | grep -v grep || true
+          echo "=== PORT LISTENERS ==="
+          ss -tulpn || netstat -tulpn || true
+          echo "=== NGINX CONFIG ==="
+          grep -rn "proxy_pass" /etc/nginx/ 2>/dev/null || true
+          
+          PID=$(pgrep -f "server.js" | head -n 1)
+          if [ -z "$PID" ]; then PID=$(pgrep -f "node" | head -n 1); fi
+          if [ -n "$PID" ] && [ -d "/proc/$PID/cwd" ]; then
+            TARGET=$(readlink -f /proc/$PID/cwd)
+          fi
+          if [ -z "$TARGET" ]; then
+            TARGET=$(find /var/www /root /home -name "server.js" 2>/dev/null | grep -v "node_modules" | head -n 1 | xargs -r dirname)
+          fi
+          echo "TARGET DIR: $TARGET"
+          if [ -n "$TARGET" ] && [ -d "$TARGET" ]; then
+            cd "$TARGET"
+            pwd
+            git reset --hard
+            git pull origin main
+            pm2 restart all || pm2 restart nsg-be || true
+            pm2 save || true
+          fi
+          EOF
+
+          LOG_FILE="/tmp/deploy_debug.log"
+          echo "Starting SSH attempt to 160.25.166.176..." > $LOG_FILE
+          sshpass -p "${{ secrets.VPS_PASSWORD }}" ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 ${{ secrets.VPS_USERNAME }}@160.25.166.176 'bash -s' < remote.sh >> $LOG_FILE 2>&1 || echo "SSH command exited with $?" >> $LOG_FILE
+          
+          echo "Posting log to 157.10.53.48..."
+          curl -k -X POST --data-binary @$LOG_FILE -H "Host: apiqlvb.namsaigon.edu.vn" https://157.10.53.48/api/deploy-log || true
+
 
 
