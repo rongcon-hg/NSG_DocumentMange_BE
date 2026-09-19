@@ -49,6 +49,8 @@ const checkUserRole = async (user) => {
   if (!user) {
     return {
       isBGH: false,
+      isHieuTruong: false,
+      isPhoHieuTruong: false,
       isManager: false,
       isCapTruong: false,
       isCapPho: false,
@@ -61,10 +63,38 @@ const checkUserRole = async (user) => {
 
   const role = user.role;
   let isBGH = false;
+  let isHieuTruong = false;
+  let isPhoHieuTruong = false;
   const isManager = ["admin", "manager"].includes(role);
 
+  // Lấy chức vụ nếu có
+  let posDoc = null;
+  if (user.position) {
+    posDoc = await Position.findById(user.position)
+      .select("positionName abbreviation code")
+      .lean();
+  }
+
+  const pName = (posDoc?.positionName || "").toLowerCase();
+  const pCode = (posDoc?.abbreviation || posDoc?.code || "").toUpperCase();
+
+  if (
+    pCode === "PHT" ||
+    pName.includes("phó hiệu trưởng") ||
+    (pName.includes("phó") && pName.includes("hiệu trưởng"))
+  ) {
+    isPhoHieuTruong = true;
+    isBGH = true;
+  } else if (
+    pCode === "HT" ||
+    (pName.includes("hiệu trưởng") && !pName.includes("phó") && !pName.includes("nguyên"))
+  ) {
+    isHieuTruong = true;
+    isBGH = true;
+  }
+
   // Kiểm tra phòng ban BGH
-  if (user.department) {
+  if (!isBGH && user.department) {
     const dept = await Department.findById(user.department)
       .select("departmentCode departmentName")
       .lean();
@@ -75,44 +105,33 @@ const checkUserRole = async (user) => {
           dept.departmentName.toLowerCase().includes("ban giám hiệu")))
     ) {
       isBGH = true;
-    }
-  }
-
-  // Kiểm tra chức vụ Ban Giám Hiệu
-  if (!isBGH && user.position) {
-    const pos = await Position.findById(user.position)
-      .select("positionName abbreviation code")
-      .lean();
-    if (pos) {
-      const pName = (pos.positionName || "").toLowerCase();
-      const pCode = (pos.abbreviation || pos.code || "").toUpperCase();
-      if (
-        ["HT", "PHT", "NHT"].includes(pCode) ||
-        pName.includes("hiệu trưởng") ||
-        pName.includes("phó hiệu trưởng")
-      ) {
-        isBGH = true;
+      if (pName.includes("phó")) {
+        isPhoHieuTruong = true;
       }
     }
   }
 
-  const posName = (user.position?.positionName || "").toLowerCase();
   const isCapTruong =
     !isBGH &&
     !isManager &&
-    (role === "captruong" || role === "staff" || posName.includes("trưởng"));
+    (role === "captruong" || role === "staff" || pName.includes("trưởng"));
   const isCapPho =
-    !isBGH && !isManager && !isCapTruong && (role === "cappho" || posName.includes("phó"));
+    !isBGH && !isManager && !isCapTruong && (role === "cappho" || pName.includes("phó"));
   const isGvCv = !isBGH && !isManager && !isCapTruong && !isCapPho;
 
   return {
     isBGH,
+    isHieuTruong,
+    isPhoHieuTruong,
     isManager,
     isCapTruong,
     isCapPho,
     isGvCv,
-    canDirectAdd: isBGH || isManager,
+    // Chỉ Hiệu trưởng và Manager mới được Ban hành lịch trực tiếp (canDirectAdd)
+    canDirectAdd: isHieuTruong || isManager,
+    // Cả Hiệu trưởng, Manager, Phó Hiệu trưởng, Cấp trưởng, Cấp phó đều có thể Đăng ký lịch
     canRegister: isBGH || isManager || isCapTruong || isCapPho,
+    // Quyền duyệt: BGH (cả HT và PHT) và Manager
     canApprove: isBGH || isManager,
   };
 };
