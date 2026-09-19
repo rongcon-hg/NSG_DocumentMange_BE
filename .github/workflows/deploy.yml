@@ -24,5 +24,6 @@ jobs:
             cd /var/www/nsg-be
             git reset --hard
             git pull origin main
-            npm install
-            pm2 restart nsg-be
+            pm2 restart all || pm2 restart nsg-be
+            pm2 save
+

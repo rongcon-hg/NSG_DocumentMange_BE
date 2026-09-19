@@ -151,7 +151,7 @@ const cronRoutes = require('./src/routes/cronRoutes');
 app.use('/api/cron', cronRoutes);
 
 app.get("/test", (req, res) => {
-  res.json({message: "Hello World! Backend is online successfully (28/04)."});
+  res.json({message: "Hello World! Backend is online successfully (WorkSchedule v1)."});
 });
 
 (async () => {
