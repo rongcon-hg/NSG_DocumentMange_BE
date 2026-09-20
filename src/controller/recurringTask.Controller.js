@@ -2,11 +2,11 @@ const RecurringTask = require('../models/recurringTask.model');
 const User = require('../models/user.model');
 const { calculateNextRunDate, generateSingleTaskFromRecurring } = require('../service/recurringTask.service');
 
-// Lấy danh sách mẫu công việc định kỳ
+// Lấy danh sách mẫu công việc định kỳ (chỉ hiển thị mẫu của người dùng đó tạo)
 const getRecurringTasks = async (req, res) => {
     try {
         const userId = req.user?._id || req.user?.id;
-        let filter = {};
+        let filter = { createdBy: userId };
 
         // Nếu có lọc theo phòng ban
         if (req.query.department) {
@@ -62,7 +62,18 @@ const getRecurringTaskById = async (req, res) => {
 
 const { google } = require("googleapis");
 const { Readable } = require("stream");
-const { authorize, getOrCreateMonthFolder, sanitizeFileName } = require("./uploadfile.Controller");
+const { authorize, getOrCreateMonthFolder } = require("./uploadfile.Controller");
+const { formatFileName } = require("../utils/formatFileName");
+
+const getSafeFileName = (file) => {
+    let originalName = file.originalname || "attachment";
+    try {
+        originalName = Buffer.from(file.originalname, "latin1").toString("utf8");
+    } catch (e) {
+        // fallback
+    }
+    return formatFileName(originalName);
+};
 
 const parseJSON = (data, fallback = []) => {
     try {
@@ -124,7 +135,7 @@ const createRecurringTask = async (req, res) => {
 
                 for (const file of req.files) {
                     const fileMetadata = {
-                        name: sanitizeFileName(file.originalname),
+                        name: getSafeFileName(file),
                         parents: [monthFolderId],
                     };
                     const media = {
@@ -238,7 +249,7 @@ const updateRecurringTask = async (req, res) => {
 
                 for (const file of req.files) {
                     const fileMetadata = {
-                        name: sanitizeFileName(file.originalname),
+                        name: getSafeFileName(file),
                         parents: [monthFolderId],
                     };
                     const media = {
