@@ -65,3 +65,47 @@ exports.getDriveToken = async (req, res) => {
         res.status(500).json({ message: "Lỗi hệ thống khi lấy token Google Drive." });
     }
 };
+
+exports.publicStreamFile = async (req, res) => {
+    try {
+        const { fileId } = req.params;
+        if (!fileId) {
+            return res.status(400).json({ message: "Thiếu fileId" });
+        }
+
+        const config = await DriveConfig.findOne();
+        if (!config || !config.clientEmail || !config.privateKey) {
+            return res.status(400).json({ message: "Chưa cấu hình Service Account cho Google Drive." });
+        }
+
+        const auth = new google.auth.JWT({
+            email: config.clientEmail,
+            key: config.privateKey.replace(/\\n/g, '\n'),
+            scopes: ['https://www.googleapis.com/auth/drive'],
+        });
+
+        const drive = google.drive({ version: 'v3', auth });
+
+        // Lấy metadata file
+        const meta = await drive.files.get({
+            fileId,
+            fields: "id, name, mimeType, size",
+            supportsAllDrives: true,
+        });
+
+        const mimeType = meta.data.mimeType || "application/pdf";
+        res.setHeader("Content-Type", mimeType);
+        res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(meta.data.name || 'document.pdf')}"`);
+
+        const stream = await drive.files.get(
+            { fileId, alt: "media", supportsAllDrives: true },
+            { responseType: "stream" }
+        );
+
+        stream.data.pipe(res);
+    } catch (error) {
+        console.error("Lỗi publicStreamFile:", error);
+        res.status(500).json({ message: "Lỗi tải file xem trước", error: error.message });
+    }
+};
+

@@ -188,10 +188,31 @@ async function uploadToDrive(req, res) {
       }
     }
 
+    const { generateVerificationCode, stampQrCodeOnPdf } = require("../service/qrVerification.service");
+    const verificationCode = docType === "sent" ? generateVerificationCode() : undefined;
+    const feBaseUrl = process.env.FE_URL || "https://qlvb.namsaigon.edu.vn";
+
     if (req.files && req.files.length > 0) {
       const monthFolderId = await getOrCreateMonthFolder(drive);
 
-      for (const file of req.files) {
+      for (let i = 0; i < req.files.length; i++) {
+        const file = req.files[i];
+        let fileBuffer = file.buffer;
+
+        // Nếu là văn bản đi và là file PDF đầu tiên (file chính của văn bản), đóng dấu mã QR tra cứu
+        if (docType === "sent" && verificationCode && i === 0 && file.mimetype === "application/pdf") {
+          try {
+            const verifyUrl = `${feBaseUrl}/verify/${verificationCode}`;
+            fileBuffer = await stampQrCodeOnPdf(fileBuffer, {
+              docCode,
+              verificationCode,
+              verifyUrl,
+            });
+          } catch (qrErr) {
+            console.error("Lỗi đóng mã QR lên văn bản:", qrErr);
+          }
+        }
+
         const fileMetadata = {
           name: sanitizeFileName(file.originalname),
           parents: [monthFolderId],
@@ -199,7 +220,7 @@ async function uploadToDrive(req, res) {
 
         const media = {
           mimeType: file.mimetype,
-          body: Readable.from(file.buffer),
+          body: Readable.from(fileBuffer),
         };
 
         const response = await drive.files.create({
@@ -243,6 +264,8 @@ async function uploadToDrive(req, res) {
       unit: docType === 'received' ? unit : undefined,
       files: uploadedFiles,
       receivedAt: receivedAt ? new Date(receivedAt) : undefined,
+      verificationCode,
+
       history: [
         {
           action: "Issued",
@@ -414,6 +437,67 @@ const getDocumentById = async (req, res) => {
         res.status(500).json({ success: false, message: "Error fetching document", error: error.message });
     }
 };
+
+/**
+ * Tra cứu công khai tính hợp lệ của văn bản qua verificationCode hoặc documentId
+ */
+const publicVerifyDocument = async (req, res) => {
+    try {
+        const { code } = req.params;
+        if (!code) {
+            return res.status(400).json({ success: false, message: "Mã tra cứu không hợp lệ" });
+        }
+
+        // Tìm theo verificationCode hoặc _id (nếu là ObjectId hợp lệ)
+        let query = { verificationCode: code };
+        if (mongoose.Types.ObjectId.isValid(code)) {
+            query = { $or: [{ verificationCode: code }, { _id: code }] };
+        }
+
+        const document = await Document.findOne(query)
+            .populate("docVariant", "variantName")
+            .populate("signer", "name")
+            .populate("position", "positionName")
+            .populate("departments", "departmentName")
+            .select("docCode docNum year shortDescription principalIdea createAt deadlineDay files verificationCode docType");
+
+        if (!document) {
+            return res.status(404).json({ 
+                success: false, 
+                message: "Không tìm thấy văn bản tương ứng với mã tra cứu này hoặc văn bản không tồn tại trên hệ thống." 
+            });
+        }
+
+        // File chính thức đã đóng dấu QR
+        const primaryFile = (document.files && document.files.length > 0) ? document.files[0] : null;
+
+        res.status(200).json({
+            success: true,
+            data: {
+                isValid: true,
+                docCode: document.docCode,
+                docNum: document.docNum,
+                year: document.year,
+                variantName: document.docVariant ? document.docVariant.variantName : "Văn bản",
+                shortDescription: document.shortDescription || document.principalIdea || "",
+                signerName: document.signer ? document.signer.name : "",
+                signerPosition: document.position ? document.position.positionName : "",
+                issuingDepartment: document.departments && document.departments[0] ? document.departments[0].departmentName : "Trường Cao đẳng Bách khoa Nam Sài Gòn",
+                issuedDate: document.createAt,
+                verificationCode: document.verificationCode || code,
+                file: primaryFile ? {
+                    fileName: primaryFile.fileName,
+                    fileId: primaryFile.fileId,
+                    mimeType: primaryFile.mimeType,
+                } : null,
+            }
+        });
+    } catch (error) {
+        console.error("Error in publicVerifyDocument:", error);
+        res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });
+    }
+};
+
   
 const getNextDocNum = async (req, res) => {
     try {
@@ -1377,6 +1461,7 @@ module.exports = {
     deleteDocument,
     updateDocument,
     getDocumentById,
+    publicVerifyDocument,
     isRead,
     getDocumentsBySentBy,
     getDocumentsByAssignedTo,
@@ -1390,3 +1475,4 @@ module.exports = {
     sanitizeFileName,
     summarizeDocument
  };
+

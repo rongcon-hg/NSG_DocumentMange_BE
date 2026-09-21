@@ -124,10 +124,81 @@ const markPopupShown = async (req, res) => {
   }
 };
 
+/**
+ * Lấy VAPID Public Key cho Frontend
+ */
+const getVapidPublicKey = async (req, res) => {
+  try {
+    const { VAPID_PUBLIC_KEY } = require("../service/webPush.service");
+    res.status(200).json({ success: true, publicKey: VAPID_PUBLIC_KEY });
+  } catch (error) {
+    console.error("Lỗi getVapidPublicKey:", error);
+    res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });
+  }
+};
+
+/**
+ * Đăng ký Push Subscription cho User
+ */
+const subscribePush = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { subscription, userAgent, deviceType } = req.body;
+
+    if (!subscription || !subscription.endpoint || !subscription.keys) {
+      return res.status(400).json({ success: false, message: "Thiếu thông tin subscription" });
+    }
+
+    const PushSubscription = require("../models/pushSubscription.model");
+
+    // Upsert subscription
+    const pushSub = await PushSubscription.findOneAndUpdate(
+      { endpoint: subscription.endpoint },
+      {
+        user: userId,
+        endpoint: subscription.endpoint,
+        keys: subscription.keys,
+        userAgent: userAgent || "",
+        deviceType: deviceType || "unknown",
+      },
+      { upsert: true, new: true }
+    );
+
+    res.status(200).json({ success: true, message: "Đăng ký nhận thông báo đẩy thành công", data: pushSub });
+  } catch (error) {
+    console.error("Lỗi subscribePush:", error);
+    res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });
+  }
+};
+
+/**
+ * Hủy đăng ký Push Subscription
+ */
+const unsubscribePush = async (req, res) => {
+  try {
+    const { endpoint } = req.body;
+    if (!endpoint) {
+      return res.status(400).json({ success: false, message: "Thiếu endpoint" });
+    }
+
+    const PushSubscription = require("../models/pushSubscription.model");
+    await PushSubscription.findOneAndDelete({ endpoint });
+
+    res.status(200).json({ success: true, message: "Hủy đăng ký thông báo đẩy thành công" });
+  } catch (error) {
+    console.error("Lỗi unsubscribePush:", error);
+    res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });
+  }
+};
+
 module.exports = {
   getMyNotifications,
   getUnreadCount,
   markAsRead,
   markAllAsRead,
   markPopupShown,
+  getVapidPublicKey,
+  subscribePush,
+  unsubscribePush,
 };
+

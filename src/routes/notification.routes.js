@@ -9,4 +9,10 @@ router.patch("/mark-all-read", verifyToken, notificationController.markAllAsRead
 router.patch("/popup-shown", verifyToken, notificationController.markPopupShown);
 router.patch("/:id/read", verifyToken, notificationController.markAsRead);
 
+// Web Push endpoints
+router.get("/push/vapid-public-key", notificationController.getVapidPublicKey);
+router.post("/push/subscribe", verifyToken, notificationController.subscribePush);
+router.post("/push/unsubscribe", verifyToken, notificationController.unsubscribePush);
+
 module.exports = router;
+

@@ -39,6 +39,23 @@ const triggerDocumentNotifications = async (document) => {
         // 1. Send Email notification
         if (uniqueUsers.length > 0) {
             sendNewDocumentEmail(uniqueUsers, document, senderName).catch(err => console.error("Email Notify Error:", err));
+            
+            // Gửi Web Push Notification tức thời đến thiết bị
+            try {
+                const { sendPushToUsers } = require("./webPush.service");
+                const recipientIds = uniqueUsers
+                    .filter(u => !senderUser || u._id.toString() !== senderUser._id.toString())
+                    .map(u => u._id);
+                if (recipientIds.length > 0) {
+                    sendPushToUsers(recipientIds, {
+                        title: `Văn bản mới: ${document.docCode || "Thông báo"}`,
+                        body: document.shortDescription || document.principalIdea || "Bạn có văn bản mới cần xử lý",
+                        url: `/documents/ReceivedDocumentList`
+                    }).catch(err => console.error("Push Notify Error:", err));
+                }
+            } catch (pErr) {
+                console.error("WebPush invocation error:", pErr);
+            }
         }
 
         // 2. Create internal Task and sync Google Calendar if deadline is present

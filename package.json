@@ -37,8 +37,10 @@
     "nodemailer": "^6.9.16",
     "path": "^0.12.7",
     "pdf-lib": "^1.17.1",
+    "qrcode": "^1.5.4",
     "ssh2": "^1.17.0",
-    "unzipper": "^0.12.5"
+    "unzipper": "^0.12.5",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "nodemon": "^3.1.7"

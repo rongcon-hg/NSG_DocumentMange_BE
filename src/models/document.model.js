@@ -156,8 +156,15 @@ const documentSchema = new mongoose.Schema(
         date: { type: Date, default: Date.now },
         note: { type: String }
       }
-    ]
+    ],
+    verificationCode: {
+      type: String,
+      unique: true,
+      sparse: true,
+      index: true,
+    },
   },
+
   {
     timestamps: true,
     indexes: [
