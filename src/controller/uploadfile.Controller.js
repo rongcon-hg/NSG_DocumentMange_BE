@@ -455,7 +455,7 @@ const publicVerifyDocument = async (req, res) => {
         }
 
         const document = await Document.findOne(query)
-            .populate("docVariant", "variantName")
+            .populate("docVariant", "docVariantName variantName")
             .populate("signer", "name")
             .populate("position", "positionName")
             .populate("departments", "departmentName")
@@ -471,14 +471,26 @@ const publicVerifyDocument = async (req, res) => {
         // File chính thức đã đóng dấu QR
         const primaryFile = (document.files && document.files.length > 0) ? document.files[0] : null;
 
+        // Số ký hiệu hoàn chỉnh (VD: 328/NSG-TCHC)
+        let fullDocCode = document.docCode || "";
+        if (document.docNum && document.docCode && !document.docCode.startsWith(`${document.docNum}/`)) {
+            fullDocCode = `${document.docNum}/${document.docCode}`;
+        }
+
+        // Thể loại văn bản
+        const variantName = document.docVariant 
+            ? (document.docVariant.docVariantName || document.docVariant.variantName || "Văn bản")
+            : "Văn bản";
+
         res.status(200).json({
             success: true,
             data: {
                 isValid: true,
-                docCode: document.docCode,
+                docCode: fullDocCode,
+                rawDocCode: document.docCode,
                 docNum: document.docNum,
                 year: document.year,
-                variantName: document.docVariant ? document.docVariant.variantName : "Văn bản",
+                variantName: variantName,
                 shortDescription: document.shortDescription || document.principalIdea || "",
                 signerName: document.signer ? document.signer.name : "",
                 signerPosition: document.position ? document.position.positionName : "",

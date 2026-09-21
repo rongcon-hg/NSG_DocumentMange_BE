@@ -94,8 +94,11 @@ exports.publicStreamFile = async (req, res) => {
         });
 
         const mimeType = meta.data.mimeType || "application/pdf";
+        res.removeHeader("X-Frame-Options");
         res.setHeader("Content-Type", mimeType);
         res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(meta.data.name || 'document.pdf')}"`);
+        res.setHeader("X-Frame-Options", "ALLOWALL");
+        res.setHeader("Access-Control-Allow-Origin", "*");
 
         const stream = await drive.files.get(
             { fileId, alt: "media", supportsAllDrives: true },
