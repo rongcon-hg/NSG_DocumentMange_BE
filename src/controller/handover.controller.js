@@ -1,5 +1,5 @@
 const mongoose = require("mongoose");
-const Task = require("../models/task.Model");
+const Task = require("../models/task.model");
 const Document = require("../models/document.model");
 const User = require("../models/user.model");
 const HandoverLog = require("../models/handoverLog.model");
