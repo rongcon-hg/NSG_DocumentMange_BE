@@ -374,7 +374,7 @@ const ONLINE_RECORD_SUBMIT_EMAIL_TEMPLATE = `
     <div style="background: #fff; padding: 18px; border-left: 4px solid #0d9488; margin: 20px 0; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
       <p style="margin: 6px 0;"><strong>Người gửi hồ sơ:</strong> <span style="font-weight: bold; color: #0f766e;">{senderName}</span> ({senderPosition})</p>
       <p style="margin: 6px 0;"><strong>Đơn vị:</strong> {senderDepartment}</p>
-      <p style="margin: 6px 0;"><strong>Số điện thoại:</strong> {senderPhone} | <strong>Email:</strong> {senderEmail}</p>
+      {senderContactInfo}
       <p style="margin: 6px 0;"><strong>Loại hồ sơ:</strong> <span style="display: inline-block; padding: 2px 8px; background: #ccfbf1; border-radius: 4px; color: #0f766e; font-weight: 600;">📁 {categoryName}</span></p>
       <p style="margin: 6px 0;"><strong>Tiêu đề hồ sơ:</strong> <span style="font-weight: bold; color: #1e293b;">{recordTitle}</span></p>
       <p style="margin: 6px 0;"><strong>Thời gian gửi:</strong> {createdAt}</p>

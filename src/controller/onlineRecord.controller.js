@@ -320,7 +320,7 @@ const createRecord = async (req, res) => {
     let senderName = fullName;
     let senderPos = positionName;
     let senderDept = departmentName;
-    let senderPhone = phoneNumber;
+    let senderPhone = phoneNumber || req.body.mobile;
     let senderEmail = email;
 
     const userDoc = await User.findById(currentUserId)
@@ -331,7 +331,7 @@ const createRecord = async (req, res) => {
       senderName = senderName || userDoc.name;
       senderPos = senderPos || userDoc.position?.positionName || "";
       senderDept = senderDept || userDoc.department?.departmentName || "";
-      senderPhone = senderPhone || userDoc.phoneNumber || "";
+      senderPhone = senderPhone || userDoc.mobile || userDoc.phoneNumber || "";
       senderEmail = senderEmail || userDoc.email || "";
     }
 

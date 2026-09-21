@@ -890,12 +890,23 @@ const sendOnlineRecordSubmitEmail = async (uniqueUsers, recordData, senderName =
 
         const subject = `[${brandName} - Hồ sơ trực tuyến] ${senderName} vừa gửi hồ sơ: ${recordData.title || "Hồ sơ mới"}`;
 
+        const phoneVal = recordData.phoneNumber || recordData.mobile || "";
+        const emailVal = recordData.email || "";
+        let senderContactInfo = "";
+
+        if (phoneVal && emailVal) {
+            senderContactInfo = `<p style="margin: 6px 0;"><strong>Số điện thoại:</strong> ${phoneVal} | <strong>Email:</strong> ${emailVal}</p>`;
+        } else if (phoneVal) {
+            senderContactInfo = `<p style="margin: 6px 0;"><strong>Số điện thoại:</strong> ${phoneVal}</p>`;
+        } else if (emailVal) {
+            senderContactInfo = `<p style="margin: 6px 0;"><strong>Email:</strong> ${emailVal}</p>`;
+        }
+
         let htmlContent = ONLINE_RECORD_SUBMIT_EMAIL_TEMPLATE
             .replace(/{senderName}/g, senderName)
             .replace(/{senderPosition}/g, recordData.positionName || "Cán bộ")
             .replace(/{senderDepartment}/g, recordData.departmentName || "Đơn vị")
-            .replace(/{senderPhone}/g, recordData.phoneNumber || "--")
-            .replace(/{senderEmail}/g, recordData.email || "--")
+            .replace(/{senderContactInfo}/g, senderContactInfo)
             .replace(/{categoryName}/g, recordData.categoryName || recordData.category?.name || "Hồ sơ trực tuyến")
             .replace(/{recordTitle}/g, recordData.title || "--")
             .replace(/{createdAt}/g, createdAtStr)
