@@ -146,6 +146,11 @@ const workScheduleRoutes = require('./src/routes/workSchedule.routes');
 app.use('/api/work-schedules', workScheduleRoutes);
 app.use('/work-schedules', workScheduleRoutes);
 
+// Handover Assistant routes
+const handoverRoutes = require('./src/routes/handover.routes');
+app.use('/api/handover', handoverRoutes);
+app.use('/handover', handoverRoutes);
+
 // Cron endpoint for Vercel
 const cronRoutes = require('./src/routes/cronRoutes');
 app.use('/api/cron', cronRoutes);

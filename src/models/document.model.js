@@ -148,6 +148,21 @@ const documentSchema = new mongoose.Schema(
       usedModel: { type: String, default: "" },
       generatedAt: { type: Date }
     },
+    parentDocument: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Document",
+      default: null,
+    },
+    relatedDocuments: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Document",
+      },
+    ],
+    threadCode: {
+      type: String,
+      default: "",
+    },
     history: [
       {
         action: { type: String, enum: ["Issued", "Forwarded"] },

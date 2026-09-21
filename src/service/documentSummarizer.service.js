@@ -328,6 +328,163 @@ Hãy phân tích và trả về định dạng JSON thuần túy (không dùng m
     }
 };
 
+/**
+ * Trích xuất siêu dữ liệu (metadata) từ tệp văn bản (PDF / ảnh / Word) bằng AI Gemini
+ */
+const extractDocumentMetadataByAI = async (fileBuffer, mimeType = "application/pdf", originalName = "") => {
+    try {
+        const config = await ChatbotConfig.findOne();
+        const apiKey = config?.geminiApiKey || process.env.GEMINI_API_KEY;
+
+        if (!apiKey) {
+            throw new Error("Hệ thống chưa được cấu hình Google Gemini API Key. Vui lòng liên hệ Quản trị viên.");
+        }
+
+        const genAI = new GoogleGenerativeAI(apiKey);
+
+        let filePart = null;
+        if (fileBuffer && Buffer.isBuffer(fileBuffer)) {
+            // Giới hạn 15MB
+            if (fileBuffer.length <= 15 * 1024 * 1024) {
+                filePart = {
+                    inlineData: {
+                        data: fileBuffer.toString("base64"),
+                        mimeType: mimeType || "application/pdf"
+                    }
+                };
+            }
+        }
+
+        const prompt = `Bạn là chuyên gia phân tích và bóc tách văn bản hành chính Việt Nam theo Nghị định 30/2020/NĐ-CP.
+Hãy đọc kỹ tệp đính kèm (hoặc trang đầu) và trích xuất chính xác các trường thông tin sau sang định dạng JSON:
+
+{
+  "docCode": "Ký hiệu văn bản (Ví dụ: SGDDT-GDTXNNDH, NSG-TCHC, KH-NSG. Không gồm số nếu số tách riêng)",
+  "docNum": "Số thứ tự văn bản nếu có (chỉ lấy số nguyên, ví dụ: 328, 9807, 45)",
+  "fullDocCode": "Số và ký hiệu hoàn chỉnh (Ví dụ: 328/NSG-TCHC, 9807/SGDDT-GDTXNNDH)",
+  "issuedDate": "Ngày tháng năm ban hành văn bản theo định dạng YYYY-MM-DD (Ví dụ: 2026-09-18)",
+  "year": "Năm ban hành văn bản (Ví dụ: 2026)",
+  "variantName": "Thể loại văn bản (Công văn, Quyết định, Thông báo, Kế hoạch, Tờ trình, Báo cáo, Hướng dẫn, Biên bản, Quy định...)",
+  "issuingUnit": "Tên cơ quan/tổ chức/đơn vị ban hành (Ví dụ: Sở Giáo dục và Đào tạo TP.HCM, Bộ Giáo dục và Đào tạo, Trường Cao đẳng Bách khoa Nam Sài Gòn, Ban Giám hiệu...)",
+  "signerName": "Họ và tên người ký văn bản",
+  "signerPosition": "Chức vụ người ký (Hiệu trưởng, Phó Hiệu trưởng, Giám đốc, Trưởng phòng...)",
+  "shortDescription": "Trích yếu nội dung văn bản (văn phong hành chính rõ ràng, súc tích)",
+  "urgency": "normal | high | immediately (mặc định normal; nếu có dấu Khẩn thì high; Hỏa tốc/Thượng khẩn thì immediately)",
+  "deadlineDay": "Hạn báo cáo/xử lý theo định dạng YYYY-MM-DD nếu trong nội dung có quy định mốc thời gian hoàn thành (hoặc null)",
+  "relatedDocReferences": ["Mảng các số hiệu văn bản được viện dẫn hoặc phúc đáp trong văn bản, ví dụ: ['123/NSG-TCHC', '45/KH-SGDDT']"]
+}
+
+LƯU Ý CỰC KỲ QUAN TRỌNG:
+- Chỉ trả về duy nhất chuỗi JSON hợp lệ.
+- TUYỆT ĐỐI KHÔNG thêm markdown \`\`\`json hay bất kỳ văn bản giải thích nào khác.`;
+
+        const contents = filePart ? [filePart, prompt] : [prompt];
+
+        let responseText = "";
+        let usedModel = "";
+        let lastError = null;
+
+        for (const modelName of GEMINI_MODELS) {
+            try {
+                const model = genAI.getGenerativeModel({ model: modelName });
+                const result = await model.generateContent(contents);
+                const response = await result.response;
+                responseText = response.text();
+                if (responseText) {
+                    usedModel = modelName;
+                    break;
+                }
+            } catch (err) {
+                lastError = err;
+                console.warn(`[AI OCR] Model ${modelName} thất bại, đang thử model tiếp theo...`);
+            }
+        }
+
+        if (!responseText) {
+            throw new Error(`AI không thể đọc tệp này: ${lastError?.message || "Lỗi xử lý"}`);
+        }
+
+        let cleaned = responseText.trim();
+        if (cleaned.startsWith("```json")) {
+            cleaned = cleaned.replace(/^```json\s*/, "").replace(/\s*```$/, "");
+        } else if (cleaned.startsWith("```")) {
+            cleaned = cleaned.replace(/^```\s*/, "").replace(/\s*```$/, "");
+        }
+
+        let parsed = {};
+        try {
+            parsed = JSON.parse(cleaned);
+        } catch (e) {
+            console.error("[AI OCR] Lỗi parse JSON từ Gemini:", cleaned);
+        }
+
+        const DocVariant = require("../models/docVariant.model");
+        const Unit = require("../models/unit.model");
+
+        let matchedVariant = null;
+        if (parsed.variantName) {
+            matchedVariant = await DocVariant.findOne({
+                $or: [
+                    { docVariantName: { $regex: new RegExp(parsed.variantName.trim(), "i") } },
+                    { variantName: { $regex: new RegExp(parsed.variantName.trim(), "i") } }
+                ]
+            });
+        }
+
+        let matchedUnit = null;
+        if (parsed.issuingUnit) {
+            matchedUnit = await Unit.findOne({
+                unitName: { $regex: new RegExp(parsed.issuingUnit.trim(), "i") }
+            });
+        }
+
+        let matchedRelatedDocs = [];
+        if (Array.isArray(parsed.relatedDocReferences) && parsed.relatedDocReferences.length > 0) {
+            for (const refCode of parsed.relatedDocReferences) {
+                const cleanCode = refCode.trim();
+                if (cleanCode.length >= 3) {
+                    const docs = await Document.find({
+                        $or: [
+                            { docCode: { $regex: new RegExp(cleanCode.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&'), "i") } },
+                            { verificationCode: cleanCode }
+                        ]
+                    }).select("_id docCode docNum year shortDescription");
+                    if (docs && docs.length > 0) {
+                        matchedRelatedDocs.push(...docs);
+                    }
+                }
+            }
+        }
+
+        return {
+            raw: parsed,
+            usedModel,
+            extracted: {
+                docCode: parsed.docCode || "",
+                docNum: parsed.docNum ? Number(parsed.docNum) : null,
+                fullDocCode: parsed.fullDocCode || "",
+                issuedDate: parsed.issuedDate || null,
+                year: parsed.year || new Date().getFullYear().toString(),
+                variantName: parsed.variantName || "",
+                matchedVariantId: matchedVariant ? matchedVariant._id : null,
+                issuingUnit: parsed.issuingUnit || "",
+                matchedUnitId: matchedUnit ? matchedUnit._id : null,
+                signerName: parsed.signerName || "",
+                signerPosition: parsed.signerPosition || "",
+                shortDescription: parsed.shortDescription || "",
+                urgency: parsed.urgency || "normal",
+                deadlineDay: parsed.deadlineDay || null,
+                relatedDocReferences: parsed.relatedDocReferences || [],
+                matchedRelatedDocs: matchedRelatedDocs
+            }
+        };
+    } catch (err) {
+        console.error("[AI OCR] Lỗi extractDocumentMetadataByAI:", err);
+        throw err;
+    }
+};
+
 module.exports = {
-    summarizeDocumentWithAI
+    summarizeDocumentWithAI,
+    extractDocumentMetadataByAI
 };

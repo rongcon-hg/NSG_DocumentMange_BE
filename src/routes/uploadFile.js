@@ -21,6 +21,7 @@ router.put("/:documentId", verifyToken,upload.array("files"), uploadFile.updateD
 router.get("/:documentId",verifyToken,uploadFile.getDocumentById);
 
 router.post("/:documentId/ai-summarize", verifyToken, uploadFile.summarizeDocument);
+router.post("/ai-extract-metadata", verifyToken, upload.single("file"), uploadFile.extractMetadataByAI);
 router.get("/totalDocNum/:docVariantId/:year",verifyToken, uploadFile.getTotalDocNum);
 router.post("/isRead",verifyToken,uploadFile.isRead);
 

@@ -113,7 +113,10 @@ async function uploadToDrive(req, res) {
       createAt,
       receivedAt,
       repliedDocId,
-      onlineRecordId
+      onlineRecordId,
+      parentDocument,
+      relatedDocuments,
+      threadCode
     } = req.body;
 
     if (!sentBy ) {
@@ -142,6 +145,16 @@ async function uploadToDrive(req, res) {
     // Parse fields only if they are strings
     const parsedExecutors = parseJSON(executors);
     const parsedAssignedToUsers = parseJSON(assignedToUsers);
+
+    let parsedRelatedDocs = [];
+    if (relatedDocuments) {
+      try {
+        parsedRelatedDocs = typeof relatedDocuments === "string" ? JSON.parse(relatedDocuments) : relatedDocuments;
+        if (!Array.isArray(parsedRelatedDocs)) parsedRelatedDocs = [parsedRelatedDocs];
+      } catch (e) {
+        parsedRelatedDocs = [];
+      }
+    }
 
     // Xử lý trường departments: nếu là chuỗi JSON thì parse, nếu không thì giữ nguyên
     let parsedDepartments = typeof departments === "string" ? parseJSON(departments) : departments;
@@ -265,6 +278,9 @@ async function uploadToDrive(req, res) {
       files: uploadedFiles,
       receivedAt: receivedAt ? new Date(receivedAt) : undefined,
       verificationCode,
+      parentDocument: parentDocument || null,
+      relatedDocuments: parsedRelatedDocs,
+      threadCode: threadCode || (parentDocument ? String(parentDocument) : ""),
 
       history: [
         {
@@ -276,6 +292,27 @@ async function uploadToDrive(req, res) {
     });
 
     await newDocument.save();
+
+    // Liên kết 2 chiều giữa các văn bản trong cùng chuỗi hồ sơ
+    if (parsedRelatedDocs && parsedRelatedDocs.length > 0) {
+      try {
+        await Document.updateMany(
+          { _id: { $in: parsedRelatedDocs } },
+          { $addToSet: { relatedDocuments: newDocument._id } }
+        );
+      } catch (err) {
+        console.error("Error cross-linking related documents:", err);
+      }
+    }
+    if (parentDocument) {
+      try {
+        await Document.findByIdAndUpdate(parentDocument, {
+          $addToSet: { relatedDocuments: newDocument._id }
+        });
+      } catch (err) {
+        console.error("Error linking parent document:", err);
+      }
+    }
 
     // Nếu văn bản này được phát hành từ một văn bản trình ký, cập nhật trạng thái isIssued
     if (repliedDocId) {
@@ -424,7 +461,9 @@ const getDocumentById = async (req, res) => {
             .populate("unit", "unitName")
             .populate("createAt", "createAt")
             .populate("saveAt", "saveAt")
-            .populate("receivedAt", "receivedAt");
+            .populate("receivedAt", "receivedAt")
+            .populate("parentDocument", "docCode docNum year shortDescription")
+            .populate("relatedDocuments", "docCode docNum year shortDescription");
 
 
         if (!document) {
@@ -1455,7 +1494,7 @@ const getUnreadDocCount = async (req, res) => {
     }
 }
 
-const { summarizeDocumentWithAI } = require('../service/documentSummarizer.service');
+const { summarizeDocumentWithAI, extractDocumentMetadataByAI } = require('../service/documentSummarizer.service');
 
 const summarizeDocument = async (req, res) => {
     try {
@@ -1473,6 +1512,45 @@ const summarizeDocument = async (req, res) => {
         res.status(500).json({
             success: false,
             message: error.message || "Lỗi máy chủ khi tóm tắt văn bản bằng AI"
+        });
+    }
+};
+
+const extractMetadataByAI = async (req, res) => {
+    try {
+        let fileBuffer = null;
+        let mimeType = "application/pdf";
+        let fileName = "document.pdf";
+
+        if (req.file) {
+            fileBuffer = req.file.buffer;
+            mimeType = req.file.mimetype;
+            fileName = req.file.originalname;
+        } else if (req.body.fileBase64) {
+            fileBuffer = Buffer.from(req.body.fileBase64, "base64");
+            mimeType = req.body.mimeType || "application/pdf";
+            fileName = req.body.fileName || "document.pdf";
+        }
+
+        if (!fileBuffer) {
+            return res.status(400).json({
+                success: false,
+                message: "Vui lòng đính kèm tệp PDF hoặc ảnh văn bản để AI phân tích."
+            });
+        }
+
+        const result = await extractDocumentMetadataByAI(fileBuffer, mimeType, fileName);
+        res.status(200).json({
+            success: true,
+            message: "Trích xuất thông tin văn bản bằng AI thành công",
+            data: result.extracted,
+            usedModel: result.usedModel
+        });
+    } catch (error) {
+        console.error("Lỗi extractMetadataByAI:", error);
+        res.status(500).json({
+            success: false,
+            message: error.message || "Lỗi khi trích xuất dữ liệu văn bản bằng AI"
         });
     }
 };
@@ -1499,6 +1577,7 @@ module.exports = {
     getDriveFolderId,
     getOrCreateMonthFolder,
     sanitizeFileName,
-    summarizeDocument
+    summarizeDocument,
+    extractMetadataByAI
  };
 
