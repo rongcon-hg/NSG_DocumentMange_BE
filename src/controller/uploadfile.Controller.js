@@ -459,7 +459,7 @@ const publicVerifyDocument = async (req, res) => {
             .populate("signer", "name")
             .populate("position", "positionName")
             .populate("departments", "departmentName")
-            .select("docCode docNum year shortDescription principalIdea createAt deadlineDay files verificationCode docType");
+            .populate("unit", "unitName");
 
         if (!document) {
             return res.status(404).json({ 
@@ -482,6 +482,19 @@ const publicVerifyDocument = async (req, res) => {
             ? (document.docVariant.docVariantName || document.docVariant.variantName || "Văn bản")
             : "Văn bản";
 
+        let issuingDepartment = "Trường Cao đẳng Bách khoa Nam Sài Gòn";
+        if (document.docType === "received") {
+            if (document.unit && document.unit.unitName) {
+                issuingDepartment = document.unit.unitName;
+            } else if (typeof document.unit === "string") {
+                issuingDepartment = document.unit;
+            }
+        } else {
+            if (document.departments && document.departments.length > 0 && document.departments[0]?.departmentName) {
+                issuingDepartment = document.departments[0].departmentName;
+            }
+        }
+
         res.status(200).json({
             success: true,
             data: {
@@ -494,7 +507,8 @@ const publicVerifyDocument = async (req, res) => {
                 shortDescription: document.shortDescription || document.principalIdea || "",
                 signerName: document.signer ? document.signer.name : "",
                 signerPosition: document.position ? document.position.positionName : "",
-                issuingDepartment: document.departments && document.departments[0] ? document.departments[0].departmentName : "Trường Cao đẳng Bách khoa Nam Sài Gòn",
+                docType: document.docType || "sent",
+                issuingDepartment: issuingDepartment,
                 issuedDate: document.createAt,
                 verificationCode: document.verificationCode || code,
                 file: primaryFile ? {
