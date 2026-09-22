@@ -111,21 +111,22 @@ const handleChat = async (req, res) => {
           "assignedToUsers": { $elemMatch: { userId: userId, isRead: false } }
         });
 
-        // Đếm số văn bản quá hạn xử lý (deadlineDay < hôm nay và người dùng chưa xử lý xong / pending)
+        // Đếm số văn bản đến quá hạn chưa xử lý (văn bản đến có deadlineDay < hôm nay và người dùng vẫn còn nút 'Trả lời' tức onTime === 'pending')
         const startOfToday = new Date();
         startOfToday.setHours(0, 0, 0, 0);
 
         const overdueDocCount = await Document.countDocuments({
+          docType: "received",
           "assignedToUsers": {
             $elemMatch: {
               userId: userId,
-              onTime: { $in: ["pending", "late"] }
+              onTime: "pending"
             }
           },
           deadlineDay: { $ne: null, $lt: startOfToday }
         });
 
-        userDataContext = `Thông tin người dùng: Tên là "${userName}", ID: "${userId}". Hiện có ${todoTaskCount} công việc cần xử lý, ${unreadDocCount} văn bản chưa xem và ${overdueDocCount} văn bản quá hạn xử lý.`;
+        userDataContext = `Thông tin người dùng: Tên là "${userName}", ID: "${userId}". Hiện có ${todoTaskCount} công việc cần xử lý, ${unreadDocCount} văn bản chưa xem và ${overdueDocCount} văn bản đến quá hạn chưa xử lý (còn nút Trả lời).`;
       }
     }
 
@@ -133,7 +134,7 @@ const handleChat = async (req, res) => {
       return res.status(200).json({ 
         success: true, 
         reply: `👋 Chào ${userName}, Em là Trợ lý AI Hệ thống! Em có thể tra cứu toàn bộ thông tin tài khoản của bạn:\n\n` +
-               `📄 **Văn bản**: Tra cứu văn bản đến/đi/nội bộ, văn bản chưa đọc, văn bản khẩn, văn bản **quá hạn xử lý**, số hiệu...\n` +
+               `📄 **Văn bản**: Tra cứu văn bản đến/đi/nội bộ, văn bản chưa đọc, văn bản khẩn, văn bản đến **quá hạn chưa xử lý** (còn nút Trả lời), số hiệu...\n` +
                `📋 **Công việc**: Nhiệm vụ cần làm, đang xử lý, deadline, công việc phối hợp...\n` +
                `📂 **Hồ sơ trực tuyến**: Tiến độ duyệt hồ sơ cá nhân, hồ sơ đã nộp/cần duyệt...\n` +
                `🏆 **Thi đua khen thưởng**: Danh hiệu thi đua đăng ký, thành tích, khen thưởng...\n` +
@@ -142,10 +143,10 @@ const handleChat = async (req, res) => {
                `📌 Hiện tại, bạn đang có:\n` +
                `- **${todoTaskCount}** công việc cần xử lý\n` +
                `- **${unreadDocCount}** văn bản mới chưa xem\n` +
-               `- **${overdueDocCount || 0}** văn bản quá hạn xử lý ⚠️\n\n` +
+               `- **${overdueDocCount || 0}** văn bản đến quá hạn chưa xử lý (chưa trả lời) ⚠️\n\n` +
                `Hãy cho em biết bạn cần tìm hoặc hỗ trợ gì nhé!`,
         suggestions: [
-          "Văn bản nào của tôi bị quá hạn xử lý?",
+          "Văn bản đến nào quá hạn chưa xử lý?",
           "Tôi có văn bản nào chưa xem?", 
           "Liệt kê công việc cần làm", 
           "Hồ sơ trực tuyến của tôi thế nào?", 
@@ -159,7 +160,7 @@ const handleChat = async (req, res) => {
       functionDeclarations: [
         {
           name: "searchUserDocuments",
-          description: "Tra cứu văn bản (đến, đi, nội bộ) liên quan đến tài khoản người dùng hoặc toàn trường. Dùng khi hỏi văn bản chưa xem, văn bản khẩn, văn bản quá hạn xử lý, tìm trích yếu, số hiệu.",
+          description: "Tra cứu văn bản (đến, đi, nội bộ) liên quan đến tài khoản người dùng hoặc toàn trường. Dùng khi hỏi văn bản chưa xem, văn bản khẩn, văn bản đến quá hạn chưa xử lý (còn nút Trả lời), tìm trích yếu, số hiệu.",
           parameters: {
             type: SchemaType ? SchemaType.OBJECT : "object",
             properties: {
@@ -173,7 +174,7 @@ const handleChat = async (req, res) => {
               },
               isOverdue: {
                 type: SchemaType ? SchemaType.BOOLEAN : "boolean",
-                description: "true nếu người dùng hỏi các văn bản QUÁ HẠN XỬ LÝ (trễ hạn, quá hạn deadline, chưa hoàn thành đúng hạn). Bỏ qua nếu không hỏi về quá hạn."
+                description: "true nếu người dùng hỏi các văn bản QUÁ HẠN CHƯA XỬ LÝ (văn bản đến quá hạn deadline mà người dùng vẫn chưa trả lời / vẫn còn nút Trả lời)."
               },
               urgency: {
                 type: SchemaType ? SchemaType.STRING : "string",
@@ -374,13 +375,14 @@ NGUYÊN TẮC TRẢ LỜI:
           startOfToday.setHours(0, 0, 0, 0);
 
           if (args.isOverdue) {
+             query.docType = "received";
              query.$and = query.$and || [];
              query.$and.push({
                deadlineDay: { $ne: null, $lt: startOfToday },
                "assignedToUsers": {
                  $elemMatch: {
                    userId: userId,
-                   onTime: { $in: ["pending", "late"] }
+                   onTime: "pending"
                  }
                }
              });
@@ -403,11 +405,11 @@ NGUYÊN TẮC TRẢ LỜI:
                 hanXuLyStr = deadlineDate.toLocaleDateString("vi-VN");
                 const deadlineClean = new Date(deadlineDate);
                 deadlineClean.setHours(0, 0, 0, 0);
-                if (deadlineClean < startOfToday && (!assigned || assigned.onTime === "pending" || assigned.onTime === "late")) {
+                if (deadlineClean < startOfToday && assigned?.onTime === "pending") {
                   const daysLate = Math.ceil((startOfToday - deadlineClean) / (1000 * 60 * 60 * 24));
-                  tinhTrangHan = `⚠️ Quá hạn ${daysLate} ngày (Hạn chót: ${hanXuLyStr})`;
-                } else if (assigned && (assigned.onTime === "onTime" || assigned.onTime === "soon")) {
-                  tinhTrangHan = `Đã xử lý đúng hạn`;
+                  tinhTrangHan = `⚠️ Quá hạn ${daysLate} ngày (Chưa trả lời - Hạn chót: ${hanXuLyStr})`;
+                } else if (assigned && (assigned.onTime === "onTime" || assigned.onTime === "soon" || assigned.onTime === "late")) {
+                  tinhTrangHan = `Đã gửi trả lời văn bản`;
                 } else {
                   tinhTrangHan = `Còn hạn đến ${hanXuLyStr}`;
                 }
@@ -418,6 +420,7 @@ NGUYÊN TẮC TRẢ LỜI:
                 trichYeu: d.shortDescription,
                 loaiVanBan: d.docType === 'received' ? 'Văn bản đến' : 'Văn bản đi/nội bộ',
                 trangThaiDoc: assigned?.isRead ? 'Đã xem' : 'Chưa xem',
+                trangThaiTraLoi: assigned?.onTime === "pending" ? "Chưa trả lời (Còn nút Trả lời)" : "Đã xử lý trả lời",
                 hanXuLy: hanXuLyStr,
                 tinhTrangQuaHan: tinhTrangHan,
                 mucDoKhan: d.urgency === 'immediately' ? 'Hỏa tốc' : (d.urgency === 'high' ? 'Khẩn' : 'Bình thường'),
@@ -425,7 +428,7 @@ NGUYÊN TẮC TRẢ LỜI:
               };
             });
           } else {
-             functionResponseData = { result: args.isOverdue ? "Tuyệt vời! Hiện tại bạn không có văn bản nào bị quá hạn xử lý." : "Không tìm thấy văn bản nào phù hợp." };
+             functionResponseData = { result: args.isOverdue ? "Tuyệt vời! Hiện tại bạn không có văn bản đến nào quá hạn mà chưa trả lời (không còn văn bản nào tồn đọng nút Trả lời)." : "Không tìm thấy văn bản nào phù hợp." };
           }
         } else if (call.name === "searchUserTasks" && userId) {
           const args = call.args || {};
