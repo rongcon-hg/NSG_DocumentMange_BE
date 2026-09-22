@@ -111,7 +111,21 @@ const handleChat = async (req, res) => {
           "assignedToUsers": { $elemMatch: { userId: userId, isRead: false } }
         });
 
-        userDataContext = `Thông tin người dùng: Tên là "${userName}", ID: "${userId}". Hiện có ${todoTaskCount} công việc cần xử lý và ${unreadDocCount} văn bản chưa xem.`;
+        // Đếm số văn bản quá hạn xử lý (deadlineDay < hôm nay và người dùng chưa xử lý xong / pending)
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
+
+        const overdueDocCount = await Document.countDocuments({
+          "assignedToUsers": {
+            $elemMatch: {
+              userId: userId,
+              onTime: { $in: ["pending", "late"] }
+            }
+          },
+          deadlineDay: { $ne: null, $lt: startOfToday }
+        });
+
+        userDataContext = `Thông tin người dùng: Tên là "${userName}", ID: "${userId}". Hiện có ${todoTaskCount} công việc cần xử lý, ${unreadDocCount} văn bản chưa xem và ${overdueDocCount} văn bản quá hạn xử lý.`;
       }
     }
 
@@ -119,18 +133,22 @@ const handleChat = async (req, res) => {
       return res.status(200).json({ 
         success: true, 
         reply: `👋 Chào ${userName}, Em là Trợ lý AI Hệ thống! Em có thể tra cứu toàn bộ thông tin tài khoản của bạn:\n\n` +
-               `📄 **Văn bản**: Tra cứu văn bản đến/đi/nội bộ, văn bản chưa đọc, văn bản khẩn, số hiệu...\n` +
+               `📄 **Văn bản**: Tra cứu văn bản đến/đi/nội bộ, văn bản chưa đọc, văn bản khẩn, văn bản **quá hạn xử lý**, số hiệu...\n` +
                `📋 **Công việc**: Nhiệm vụ cần làm, đang xử lý, deadline, công việc phối hợp...\n` +
                `📂 **Hồ sơ trực tuyến**: Tiến độ duyệt hồ sơ cá nhân, hồ sơ đã nộp/cần duyệt...\n` +
                `🏆 **Thi đua khen thưởng**: Danh hiệu thi đua đăng ký, thành tích, khen thưởng...\n` +
                `🎓 **Bồi dưỡng tập huấn**: Các khóa đào tạo/tập huấn đã đăng ký, trạng thái duyệt...\n` +
                `📅 **Lịch công tác**: Lịch họp, sự kiện công tác trong tuần của trường.\n\n` +
-               `📌 Hiện tại, bạn đang có **${todoTaskCount}** công việc cần xử lý và **${unreadDocCount}** văn bản mới chưa xem. Hãy cho em biết bạn cần tìm gì nhé!`,
+               `📌 Hiện tại, bạn đang có:\n` +
+               `- **${todoTaskCount}** công việc cần xử lý\n` +
+               `- **${unreadDocCount}** văn bản mới chưa xem\n` +
+               `- **${overdueDocCount || 0}** văn bản quá hạn xử lý ⚠️\n\n` +
+               `Hãy cho em biết bạn cần tìm hoặc hỗ trợ gì nhé!`,
         suggestions: [
+          "Văn bản nào của tôi bị quá hạn xử lý?",
           "Tôi có văn bản nào chưa xem?", 
           "Liệt kê công việc cần làm", 
           "Hồ sơ trực tuyến của tôi thế nào?", 
-          "Danh hiệu thi đua tôi đã đăng ký", 
           "Lịch công tác tuần này"
         ]
       });
@@ -141,7 +159,7 @@ const handleChat = async (req, res) => {
       functionDeclarations: [
         {
           name: "searchUserDocuments",
-          description: "Tra cứu văn bản (đến, đi, nội bộ) liên quan đến tài khoản người dùng hoặc toàn trường. Dùng khi hỏi văn bản chưa xem, văn bản khẩn, tìm trích yếu, số hiệu.",
+          description: "Tra cứu văn bản (đến, đi, nội bộ) liên quan đến tài khoản người dùng hoặc toàn trường. Dùng khi hỏi văn bản chưa xem, văn bản khẩn, văn bản quá hạn xử lý, tìm trích yếu, số hiệu.",
           parameters: {
             type: SchemaType ? SchemaType.OBJECT : "object",
             properties: {
@@ -152,6 +170,10 @@ const handleChat = async (req, res) => {
               isRead: {
                 type: SchemaType ? SchemaType.BOOLEAN : "boolean",
                 description: "false nếu hỏi văn bản chưa đọc/chưa xem; true nếu hỏi đã đọc. Bỏ qua nếu không phân biệt."
+              },
+              isOverdue: {
+                type: SchemaType ? SchemaType.BOOLEAN : "boolean",
+                description: "true nếu người dùng hỏi các văn bản QUÁ HẠN XỬ LÝ (trễ hạn, quá hạn deadline, chưa hoàn thành đúng hạn). Bỏ qua nếu không hỏi về quá hạn."
               },
               urgency: {
                 type: SchemaType ? SchemaType.STRING : "string",
@@ -348,23 +370,62 @@ NGUYÊN TẮC TRẢ LỜI:
              });
           }
 
+          const startOfToday = new Date();
+          startOfToday.setHours(0, 0, 0, 0);
+
+          if (args.isOverdue) {
+             query.$and = query.$and || [];
+             query.$and.push({
+               deadlineDay: { $ne: null, $lt: startOfToday },
+               "assignedToUsers": {
+                 $elemMatch: {
+                   userId: userId,
+                   onTime: { $in: ["pending", "late"] }
+                 }
+               }
+             });
+          }
+
           if (args.urgency) {
               query.urgency = args.urgency;
           }
 
-          const docs = await Document.find(query).sort({ createdAt: -1 }).limit(10);
+          const docs = await Document.find(query).sort({ deadlineDay: 1, createdAt: -1 }).limit(10);
           
           if (docs.length > 0) {
-            functionResponseData = docs.map(d => ({
-              soHieu: (d.docNum && d.docCode) ? `${d.docNum}/${d.docCode}` : (d.docCode || d.docNum || 'N/A'),
-              trichYeu: d.shortDescription,
-              loaiVanBan: d.docType === 'received' ? 'Văn bản đến' : 'Văn bản đi/nội bộ',
-              trangThaiDoc: d.assignedToUsers.find(u => u.userId?.toString() === userId.toString())?.isRead ? 'Đã xem' : 'Chưa xem',
-              mucDoKhan: d.urgency === 'immediately' ? 'Hỏa tốc' : (d.urgency === 'high' ? 'Khẩn' : 'Bình thường'),
-              tepDinhKem: d.files?.map(f => ({ ten: f.fileName, link: `https://drive.google.com/file/d/${f.fileId}/view` })) || []
-            }));
+            functionResponseData = docs.map(d => {
+              const assigned = d.assignedToUsers.find(u => u.userId?.toString() === userId.toString());
+              const deadlineDate = d.deadlineDay ? new Date(d.deadlineDay) : null;
+              let hanXuLyStr = "Không có hạn chót";
+              let tinhTrangHan = "Bình thường";
+              
+              if (deadlineDate) {
+                hanXuLyStr = deadlineDate.toLocaleDateString("vi-VN");
+                const deadlineClean = new Date(deadlineDate);
+                deadlineClean.setHours(0, 0, 0, 0);
+                if (deadlineClean < startOfToday && (!assigned || assigned.onTime === "pending" || assigned.onTime === "late")) {
+                  const daysLate = Math.ceil((startOfToday - deadlineClean) / (1000 * 60 * 60 * 24));
+                  tinhTrangHan = `⚠️ Quá hạn ${daysLate} ngày (Hạn chót: ${hanXuLyStr})`;
+                } else if (assigned && (assigned.onTime === "onTime" || assigned.onTime === "soon")) {
+                  tinhTrangHan = `Đã xử lý đúng hạn`;
+                } else {
+                  tinhTrangHan = `Còn hạn đến ${hanXuLyStr}`;
+                }
+              }
+
+              return {
+                soHieu: (d.docNum && d.docCode) ? `${d.docNum}/${d.docCode}` : (d.docCode || d.docNum || 'N/A'),
+                trichYeu: d.shortDescription,
+                loaiVanBan: d.docType === 'received' ? 'Văn bản đến' : 'Văn bản đi/nội bộ',
+                trangThaiDoc: assigned?.isRead ? 'Đã xem' : 'Chưa xem',
+                hanXuLy: hanXuLyStr,
+                tinhTrangQuaHan: tinhTrangHan,
+                mucDoKhan: d.urgency === 'immediately' ? 'Hỏa tốc' : (d.urgency === 'high' ? 'Khẩn' : 'Bình thường'),
+                tepDinhKem: d.files?.map(f => ({ ten: f.fileName, link: `https://drive.google.com/file/d/${f.fileId}/view` })) || []
+              };
+            });
           } else {
-             functionResponseData = { result: "Không tìm thấy văn bản nào phù hợp." };
+             functionResponseData = { result: args.isOverdue ? "Tuyệt vời! Hiện tại bạn không có văn bản nào bị quá hạn xử lý." : "Không tìm thấy văn bản nào phù hợp." };
           }
         } else if (call.name === "searchUserTasks" && userId) {
           const args = call.args || {};
