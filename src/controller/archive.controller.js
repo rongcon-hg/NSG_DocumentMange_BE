@@ -21,12 +21,21 @@ const getArchiveFolders = async (req, res) => {
       ];
     }
 
-    // Phân quyền: Cán bộ thông thường chỉ thấy hồ sơ của đơn vị mình hoặc do mình tạo, admin/manager xem toàn bộ
-    if (!['admin', 'manager'].includes(req.user?.role)) {
+    // Phân quyền theo quy chuẩn:
+    // 1. Hồ sơ của ai thì người đó thấy (OPEN, SUBMITTED, ARCHIVED)
+    // 2. Khi người dùng nộp lưu / gửi kho (SUBMITTED) hoặc đã duyệt kho (ARCHIVED): Manager (và Admin) thấy được
+    const userRole = req.user?.role;
+    const userId = req.user?._id;
+
+    if (userRole === "manager" || userRole === "admin") {
+      // Manager/Admin thấy hồ sơ của chính mình + tất cả hồ sơ đã nộp lưu (SUBMITTED) hoặc đã duyệt kho (ARCHIVED)
       query.$or = [
-        { creator: req.user?._id },
-        { department: req.user?.department },
+        { creator: userId },
+        { status: { $in: ["SUBMITTED", "ARCHIVED"] } }
       ];
+    } else {
+      // Cán bộ/người dùng thông thường: CHỈ THẤY HỒ SƠ DO CHÍNH MÌNH TẠO
+      query.creator = userId;
     }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -68,6 +77,18 @@ const getArchiveFolderById = async (req, res) => {
 
     if (!folder) {
       return res.status(404).json({ success: false, message: 'Không tìm thấy hồ sơ lưu trữ' });
+    }
+
+    // Kiểm tra quyền xem chi tiết hồ sơ:
+    const isCreator = folder.creator?._id?.toString() === req.user?._id?.toString();
+    const isManagerOrAdmin = ['manager', 'admin'].includes(req.user?.role);
+    const isSubmittedOrArchived = ['SUBMITTED', 'ARCHIVED'].includes(folder.status);
+
+    if (!isCreator && !(isManagerOrAdmin && isSubmittedOrArchived)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Bạn không có quyền xem hồ sơ này. Chỉ người tạo và Manager (khi đã gửi kho) mới được xem.',
+      });
     }
 
     return res.json({ success: true, data: folder });
