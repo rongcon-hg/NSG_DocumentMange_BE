@@ -212,9 +212,19 @@ const upadteInfo = async (req, res) => {
       else if (user.role === null) {
         return res.status(403).json({ message: "Your account has been disabled." });
       }
+
+      // Kiểm tra quyền: Chỉ cho phép tự cập nhật tài khoản của chính mình hoặc admin/manager
+      const isSelf = req.user?._id?.toString() === userId.toString() || req.user?.id?.toString() === userId.toString();
+      const isAdminOrManager = ["admin", "manager"].includes(req.user?.role);
+      if (!isSelf && !isAdminOrManager) {
+        return res.status(403).json({
+          success: false,
+          message: "Bạn không có quyền chỉnh sửa thông tin của người dùng khác.",
+        });
+      }
   
-      // Chặn người không phải admin cập nhật role
-      if (updatedData.role && !["admin", "manager"].includes(req.user?.role)) {
+      // Chặn người không phải admin/manager cập nhật role
+      if (updatedData.role && !isAdminOrManager) {
         return res.status(403).json({
           success: false,
           message: "Only admin or manager can update user roles.",
@@ -267,7 +277,16 @@ const upadteInfo = async (req, res) => {
 
       // Cho phép cập nhật phòng ban/chức vụ nếu là admin/manager và có truyền lên
       if (["admin", "manager"].includes(req.user?.role)) {
-        if (updatedData.role !== undefined) user.role = updatedData.role;
+        if (updatedData.role !== undefined) {
+          // Chỉ admin mới được gán quyền admin cho người khác
+          if (updatedData.role === "admin" && req.user?.role !== "admin") {
+            return res.status(403).json({
+              success: false,
+              message: "Chỉ quản trị viên cấp cao (Admin) mới có quyền gán vai trò Admin.",
+            });
+          }
+          user.role = updatedData.role;
+        }
         if (updatedData.position !== undefined) user.position = updatedData.position || null;
         if (updatedData.department !== undefined) user.department = updatedData.department || null;
       }
