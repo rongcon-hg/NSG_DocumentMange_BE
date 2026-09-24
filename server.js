@@ -161,6 +161,11 @@ const zaloOARoutes = require('./src/routes/zaloOA.routes');
 app.use('/api/zalo', zaloOARoutes);
 app.use('/zalo', zaloOARoutes);
 
+// Digital Archiving (e-Archive) routes
+const archiveRoutes = require('./src/routes/archive.routes');
+app.use('/api/archives', archiveRoutes);
+app.use('/archives', archiveRoutes);
+
 // Cron endpoint for Vercel
 const cronRoutes = require('./src/routes/cronRoutes');
 app.use('/api/cron', cronRoutes);
