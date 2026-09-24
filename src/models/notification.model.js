@@ -14,7 +14,7 @@ const notificationSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ["SUBTASK_COMPLETED", "TASK_COMPLETED", "TASK_ASSIGNED", "GENERAL"],
+      enum: ["SUBTASK_COMPLETED", "TASK_COMPLETED", "TASK_ASSIGNED", "COMMENT_MENTION", "COMMENT_NEW", "GENERAL"],
       default: "SUBTASK_COMPLETED",
     },
     title: {

@@ -151,6 +151,11 @@ const handoverRoutes = require('./src/routes/handover.routes');
 app.use('/api/handover', handoverRoutes);
 app.use('/handover', handoverRoutes);
 
+// Thread Discussion Comments routes
+const commentRoutes = require('./src/routes/comment.routes');
+app.use('/api/comments', commentRoutes);
+app.use('/comments', commentRoutes);
+
 // Cron endpoint for Vercel
 const cronRoutes = require('./src/routes/cronRoutes');
 app.use('/api/cron', cronRoutes);
