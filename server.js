@@ -166,6 +166,11 @@ const archiveRoutes = require('./src/routes/archive.routes');
 app.use('/api/archives', archiveRoutes);
 app.use('/archives', archiveRoutes);
 
+// AI Document Drafter & Compliance routes
+const aiDraftRoutes = require('./src/routes/aiDraft.routes');
+app.use('/api/ai-draft', aiDraftRoutes);
+app.use('/ai-draft', aiDraftRoutes);
+
 // Cron endpoint for Vercel
 const cronRoutes = require('./src/routes/cronRoutes');
 app.use('/api/cron', cronRoutes);
