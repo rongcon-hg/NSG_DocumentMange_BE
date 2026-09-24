@@ -29,6 +29,17 @@ const userSchema = new mongoose.Schema({
         type: String,
         default: "",
     },
+    zaloId: {
+        type: String,
+        default: "",
+        trim: true,
+    },
+    zaloNotifications: {
+        enabled: { type: Boolean, default: true },
+        mention: { type: Boolean, default: true },
+        urgentTask: { type: Boolean, default: true },
+        urgentDoc: { type: Boolean, default: true },
+    },
     position: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Position",

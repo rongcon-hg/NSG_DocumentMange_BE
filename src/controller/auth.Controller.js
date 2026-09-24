@@ -254,6 +254,17 @@ const upadteInfo = async (req, res) => {
         user.mobile = typeof updatedData.mobile === 'string' ? updatedData.mobile.trim() : String(updatedData.mobile || '');
       }
 
+      if (updatedData.zaloId !== undefined) {
+        user.zaloId = typeof updatedData.zaloId === 'string' ? updatedData.zaloId.trim() : String(updatedData.zaloId || '');
+      }
+
+      if (updatedData.zaloNotifications && typeof updatedData.zaloNotifications === 'object') {
+        user.zaloNotifications = {
+          ...(user.zaloNotifications?.toObject ? user.zaloNotifications.toObject() : (user.zaloNotifications || {})),
+          ...updatedData.zaloNotifications
+        };
+      }
+
       // Chỉ cập nhật mật khẩu khi có nhập chuỗi mật khẩu mới
       if (updatedData.password && typeof updatedData.password === 'string' && updatedData.password.trim() !== '') {
         user.password = updatedData.password;

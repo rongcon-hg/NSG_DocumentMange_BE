@@ -156,6 +156,11 @@ const commentRoutes = require('./src/routes/comment.routes');
 app.use('/api/comments', commentRoutes);
 app.use('/comments', commentRoutes);
 
+// Zalo OA routes
+const zaloOARoutes = require('./src/routes/zaloOA.routes');
+app.use('/api/zalo', zaloOARoutes);
+app.use('/zalo', zaloOARoutes);
+
 // Cron endpoint for Vercel
 const cronRoutes = require('./src/routes/cronRoutes');
 app.use('/api/cron', cronRoutes);

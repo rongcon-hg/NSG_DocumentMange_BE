@@ -4,6 +4,7 @@ const Task = require("../models/task.model");
 const Document = require("../models/document.model");
 const User = require("../models/user.model");
 const Notification = require("../models/notification.model");
+const zaloOAService = require("../services/zaloOA.service");
 const { google } = require("googleapis");
 const { Readable } = require("stream");
 const { authorize, getOrCreateMonthFolder, sanitizeFileName } = require("./uploadfile.Controller");
@@ -130,16 +131,40 @@ const createComment = async (req, res) => {
       const senderUser = await User.findById(senderId).select("name");
       const senderName = senderUser?.name || "Một cán bộ";
 
-      for (const mentionId of parsedMentions) {
-        if (mentionId.toString() !== senderId.toString()) {
+      const recipientUsers = await User.find({ _id: { $in: parsedMentions } });
+
+      let targetTitle = "";
+      if (targetType === "Document") {
+        const doc = await Document.findById(targetId).select("title documentNumber");
+        targetTitle = doc ? `${doc.documentNumber || ""} - ${doc.title || ""}` : "Văn bản";
+      } else {
+        const task = await Task.findById(targetId).select("title");
+        targetTitle = task?.title || "Công việc";
+      }
+
+      for (const mentionUser of recipientUsers) {
+        if (mentionUser._id.toString() !== senderId.toString()) {
           await Notification.create({
-            recipient: mentionId,
+            recipient: mentionUser._id,
             sender: senderId,
             type: "COMMENT_MENTION",
             title: "Bạn được nhắc đến trong trao đổi",
             message: `${senderName} đã nhắc đến bạn trong một trao đổi trên ${targetType === "Document" ? "văn bản" : "công việc"}: "${content.substring(0, 60)}..."`,
             link: targetType === "Document" ? `/documents/ReceivedDocumentList` : `/schedule`,
           });
+
+          // Gửi thông báo đẩy qua Zalo OA (nếu có liên kết Zalo)
+          try {
+            zaloOAService.notifyMention({
+              senderName,
+              recipientUser: mentionUser,
+              targetType,
+              targetTitle,
+              contentPreview: content.substring(0, 100),
+            }).catch(e => console.error("Zalo OA notify error:", e.message));
+          } catch (zErr) {
+            // Non-blocking
+          }
         }
       }
     }
