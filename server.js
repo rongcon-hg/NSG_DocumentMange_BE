@@ -171,6 +171,11 @@ const aiDraftRoutes = require('./src/routes/aiDraft.routes');
 app.use('/api/ai-draft', aiDraftRoutes);
 app.use('/ai-draft', aiDraftRoutes);
 
+// Quarterly Work Plan (Kế hoạch quý) routes
+const quarterlyPlanRoutes = require('./src/routes/quarterlyPlan.routes');
+app.use('/api/quarterly-plans', quarterlyPlanRoutes);
+app.use('/quarterly-plans', quarterlyPlanRoutes);
+
 // Cron endpoint for Vercel
 const cronRoutes = require('./src/routes/cronRoutes');
 app.use('/api/cron', cronRoutes);

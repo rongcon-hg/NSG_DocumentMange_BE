@@ -1,0 +1,173 @@
+const mongoose = require("mongoose");
+
+const quarterlyPlanItemSchema = new mongoose.Schema(
+  {
+    planId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "QuarterlyPlan",
+      required: true,
+      index: true,
+    },
+    // Nhóm nhiệm vụ (Ví dụ: "I. CÔNG TÁC ĐÀO TẠO", "II. CÔNG TÁC TUYỂN SINH", "III. CÔNG TÁC QUẢN LÝ HỌC SINH SINH VIÊN"...)
+    groupName: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    // Số thứ tự hiển thị
+    order: {
+      type: Number,
+      default: 0,
+    },
+    // Nội dung công việc / nhiệm vụ trọng tâm
+    taskContent: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    // Sản phẩm dự kiến / Kết quả đầu ra
+    expectedOutcome: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    // Đơn vị thực hiện (Phòng, Khoa, Trung tâm)
+    assignedDepartments: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Department",
+      },
+    ],
+    // Đơn vị phối hợp
+    coordinatingDepartments: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Department",
+      },
+    ],
+    // Ban Giám hiệu phụ trách chỉ đạo (Lấy từ User có chức danh Hiệu trưởng / P.Hiệu trưởng)
+    bghInCharge: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+    // Mốc thời gian bắt đầu
+    startDate: {
+      type: Date,
+    },
+    // Thời gian dự kiến hoàn thành
+    expectedDeadline: {
+      type: Date,
+      required: true,
+    },
+    // Thời gian thực tế hoàn thành
+    actualCompletedDate: {
+      type: Date,
+      default: null,
+    },
+    // % Tiến độ (0 - 100)
+    progressPercent: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+    },
+    // Trạng thái công việc
+    status: {
+      type: String,
+      enum: ["NOT_STARTED", "IN_PROGRESS", "COMPLETED", "OVERDUE", "PAUSED"],
+      default: "NOT_STARTED",
+    },
+    // Đánh giá/Nhận xét tự động (tính toán dựa trên ngày dự kiến vs thực tế)
+    autoRemark: {
+      type: String,
+      default: "",
+    },
+    // Phân loại màu nhận xét: "ON_TIME" (xanh lá), "EARLY" (xanh lục), "IN_PROGRESS" (xanh lam/vàng), "LATE" (cam), "OVERDUE" (đỏ)
+    autoRemarkStatus: {
+      type: String,
+      enum: ["ON_TIME", "EARLY", "IN_PROGRESS", "LATE", "OVERDUE", "NOT_STARTED"],
+      default: "NOT_STARTED",
+    },
+    // Ghi chú / Nhận xét thêm của Manager hoặc Ban Giám hiệu
+    manualRemark: {
+      type: String,
+      default: "",
+    },
+    creator: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+// Hàm helper tự động tính toán autoRemark và autoRemarkStatus
+quarterlyPlanItemSchema.methods.calculateAutoRemark = function () {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const deadline = this.expectedDeadline ? new Date(this.expectedDeadline) : null;
+  if (deadline) deadline.setHours(0, 0, 0, 0);
+
+  const completed = this.actualCompletedDate ? new Date(this.actualCompletedDate) : null;
+  if (completed) completed.setHours(0, 0, 0, 0);
+
+  if (!deadline) {
+    this.autoRemark = "Chưa thiết lập hạn dự kiến";
+    this.autoRemarkStatus = "NOT_STARTED";
+    return;
+  }
+
+  // Trường hợp 1: Đã hoàn thành (có ngày hoàn thành thực tế)
+  if (completed) {
+    const diffTime = completed.getTime() - deadline.getTime();
+    const diffDays = Math.round(diffTime / (1000 * 3600 * 24));
+
+    if (diffDays < 0) {
+      this.autoRemark = `Hoàn thành sớm ${Math.abs(diffDays)} ngày`;
+      this.autoRemarkStatus = "EARLY";
+    } else if (diffDays === 0) {
+      this.autoRemark = "Hoàn thành đúng hạn";
+      this.autoRemarkStatus = "ON_TIME";
+    } else {
+      this.autoRemark = `Hoàn thành trễ hạn (${diffDays} ngày)`;
+      this.autoRemarkStatus = "LATE";
+    }
+    this.status = "COMPLETED";
+    this.progressPercent = 100;
+    return;
+  }
+
+  // Trường hợp 2: Chưa hoàn thành
+  const diffTime = today.getTime() - deadline.getTime();
+  const diffDays = Math.round(diffTime / (1000 * 3600 * 24));
+
+  if (diffDays > 0) {
+    this.autoRemark = `Quá hạn dự kiến (${diffDays} ngày)`;
+    this.autoRemarkStatus = "OVERDUE";
+    this.status = "OVERDUE";
+  } else if (diffDays === 0) {
+    this.autoRemark = "Đến hạn hôm nay";
+    this.autoRemarkStatus = "IN_PROGRESS";
+    this.status = "IN_PROGRESS";
+  } else {
+    const daysLeft = Math.abs(diffDays);
+    this.autoRemark = `Đang thực hiện (còn ${daysLeft} ngày)`;
+    this.autoRemarkStatus = "IN_PROGRESS";
+    if (this.status === "NOT_STARTED" && this.progressPercent > 0) {
+      this.status = "IN_PROGRESS";
+    }
+  }
+};
+
+// Hook trước khi lưu tự động tính toán nhận xét
+quarterlyPlanItemSchema.pre("save", function (next) {
+  this.calculateAutoRemark();
+  next();
+});
+
+module.exports = mongoose.model("QuarterlyPlanItem", quarterlyPlanItemSchema);
