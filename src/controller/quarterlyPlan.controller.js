@@ -135,6 +135,74 @@ const createQuarterlyPlan = async (req, res) => {
 };
 
 /**
+ * Cập nhật thông tin Kế hoạch quý (Manager / Admin)
+ */
+const updateQuarterlyPlan = async (req, res) => {
+  try {
+    if (!isManagerOrAdmin(req.user)) {
+      return res.status(403).json({ success: false, message: "Bạn không có quyền chỉnh sửa kế hoạch quý." });
+    }
+
+    const { id } = req.params;
+    const { title, academicYear, year, quarter, startDate, endDate, status, note } = req.body;
+
+    const plan = await QuarterlyPlan.findById(id);
+    if (!plan) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy kế hoạch quý." });
+    }
+
+    if (title !== undefined) plan.title = title;
+    if (academicYear !== undefined) plan.academicYear = academicYear;
+    if (year !== undefined) plan.year = year;
+    if (quarter !== undefined) plan.quarter = quarter;
+    if (startDate !== undefined) plan.startDate = startDate;
+    if (endDate !== undefined) plan.endDate = endDate;
+    if (status !== undefined) plan.status = status;
+    if (note !== undefined) plan.note = note;
+
+    await plan.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Đã cập nhật kế hoạch quý thành công!",
+      data: plan,
+    });
+  } catch (error) {
+    console.error("Lỗi updateQuarterlyPlan:", error);
+    return res.status(500).json({ success: false, message: "Lỗi cập nhật kế hoạch quý", error: error.message });
+  }
+};
+
+/**
+ * Xóa Kế hoạch quý và tất cả các nhiệm vụ thuộc kế hoạch đó (Manager / Admin)
+ */
+const deleteQuarterlyPlan = async (req, res) => {
+  try {
+    if (!isManagerOrAdmin(req.user)) {
+      return res.status(403).json({ success: false, message: "Bạn không có quyền xóa kế hoạch quý." });
+    }
+
+    const { id } = req.params;
+    const plan = await QuarterlyPlan.findById(id);
+    if (!plan) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy kế hoạch quý." });
+    }
+
+    // Xóa tất cả các nhiệm vụ thuộc kế hoạch này
+    await QuarterlyPlanItem.deleteMany({ planId: id });
+    await QuarterlyPlan.findByIdAndDelete(id);
+
+    return res.status(200).json({
+      success: true,
+      message: "Đã xóa kế hoạch quý và toàn bộ nhiệm vụ liên quan thành công!",
+    });
+  } catch (error) {
+    console.error("Lỗi deleteQuarterlyPlan:", error);
+    return res.status(500).json({ success: false, message: "Lỗi xóa kế hoạch quý", error: error.message });
+  }
+};
+
+/**
  * Lấy chi tiết Kế hoạch quý kèm danh sách tất cả các mục nhiệm vụ đã phân công
  */
 const getQuarterlyPlanDetail = async (req, res) => {
@@ -347,6 +415,8 @@ module.exports = {
   getPlanMetadata,
   getQuarterlyPlans,
   createQuarterlyPlan,
+  updateQuarterlyPlan,
+  deleteQuarterlyPlan,
   getQuarterlyPlanDetail,
   createPlanItem,
   updatePlanItem,

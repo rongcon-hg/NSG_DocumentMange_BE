@@ -11,6 +11,8 @@ router.get("/metadata", quarterlyPlanController.getPlanMetadata);
 // Lấy danh sách & Tạo kế hoạch quý
 router.get("/", quarterlyPlanController.getQuarterlyPlans);
 router.post("/", quarterlyPlanController.createQuarterlyPlan);
+router.put("/:id", quarterlyPlanController.updateQuarterlyPlan);
+router.delete("/:id", quarterlyPlanController.deleteQuarterlyPlan);
 
 // Chi tiết kế hoạch quý
 router.get("/:id", quarterlyPlanController.getQuarterlyPlanDetail);
