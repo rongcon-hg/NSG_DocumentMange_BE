@@ -221,6 +221,8 @@ const getQuarterlyPlanDetail = async (req, res) => {
         select: "_id name email position",
         populate: { path: "position", select: "positionName positionCode" },
       })
+      .populate("creator", "name email")
+      .populate("history.actor", "name email role")
       .sort({ groupName: 1, order: 1, createdAt: 1 });
 
     // Tính toán lại tự động nhận xét theo thời gian hiện tại
@@ -273,6 +275,9 @@ const createPlanItem = async (req, res) => {
       });
     }
 
+    const status = req.body.status || "NOT_STARTED";
+    const pauseReason = req.body.pauseReason || "";
+
     const newItem = new QuarterlyPlanItem({
       planId,
       groupName: groupName.trim(),
@@ -287,7 +292,17 @@ const createPlanItem = async (req, res) => {
       manualRemark: manualRemark || "",
       files: files || [],
       creator: req.user._id,
-      status: "NOT_STARTED",
+      status,
+      pauseReason,
+      history: [
+        {
+          action: "CREATE",
+          actor: req.user._id,
+          actorName: req.user.name || "Quản trị viên",
+          details: `Khởi tạo nhiệm vụ: "${taskContent.trim()}"`,
+          timestamp: new Date(),
+        },
+      ],
     });
 
     newItem.calculateAutoRemark();
@@ -300,7 +315,9 @@ const createPlanItem = async (req, res) => {
         path: "bghInCharge",
         select: "_id name email position",
         populate: { path: "position", select: "positionName positionCode" },
-      });
+      })
+      .populate("creator", "name email")
+      .populate("history.actor", "name email role");
 
     return res.status(201).json({
       success: true,
@@ -345,29 +362,88 @@ const updatePlanItem = async (req, res) => {
       actualCompletedDate,
       progressPercent,
       status,
+      pauseReason,
       manualRemark,
       files,
     } = req.body;
 
+    const changes = [];
+    const statusMap = {
+      NOT_STARTED: "Chưa làm",
+      IN_PROGRESS: "Đang thực hiện",
+      COMPLETED: "Đã hoàn thành",
+      OVERDUE: "Quá hạn",
+      PAUSED: "Tạm dừng",
+    };
+
     if (isManager) {
-      // Manager có quyền sửa tất cả các trường
-      if (groupName !== undefined) item.groupName = groupName;
-      if (order !== undefined) item.order = order;
-      if (taskContent !== undefined) item.taskContent = taskContent;
-      if (expectedOutcome !== undefined) item.expectedOutcome = expectedOutcome;
+      if (taskContent !== undefined && taskContent !== item.taskContent) {
+        changes.push(`Đổi nội dung: "${taskContent}"`);
+        item.taskContent = taskContent;
+      }
+      if (groupName !== undefined && groupName !== item.groupName) {
+        changes.push(`Đổi nhóm: "${groupName}"`);
+        item.groupName = groupName;
+      }
+      if (order !== undefined && order !== item.order) {
+        item.order = order;
+      }
+      if (expectedOutcome !== undefined && expectedOutcome !== item.expectedOutcome) {
+        changes.push(`Đổi kết quả đầu ra: "${expectedOutcome}"`);
+        item.expectedOutcome = expectedOutcome;
+      }
       if (assignedDepartments !== undefined) item.assignedDepartments = assignedDepartments;
       if (coordinatingDepartments !== undefined) item.coordinatingDepartments = coordinatingDepartments;
       if (bghInCharge !== undefined) item.bghInCharge = bghInCharge;
       if (startDate !== undefined) item.startDate = startDate;
       if (expectedDeadline !== undefined) item.expectedDeadline = expectedDeadline;
-      if (manualRemark !== undefined) item.manualRemark = manualRemark;
+      if (manualRemark !== undefined && manualRemark !== item.manualRemark) {
+        changes.push(`Cập nhật ghi chú`);
+        item.manualRemark = manualRemark;
+      }
     }
 
-    // Cả Manager và Đơn vị thực hiện đều có thể cập nhật ngày hoàn thành thực tế, tiến độ và đính kèm file
-    if (actualCompletedDate !== undefined) item.actualCompletedDate = actualCompletedDate;
-    if (progressPercent !== undefined) item.progressPercent = progressPercent;
-    if (status !== undefined) item.status = status;
+    if (status !== undefined && status !== item.status) {
+      const oldStatusLabel = statusMap[item.status] || item.status;
+      const newStatusLabel = statusMap[status] || status;
+      changes.push(`Chuyển trạng thái từ [${oldStatusLabel}] sang [${newStatusLabel}]`);
+      item.status = status;
+    }
+
+    if (pauseReason !== undefined && pauseReason !== item.pauseReason) {
+      if (pauseReason) {
+        changes.push(`Lý do tạm dừng: "${pauseReason}"`);
+      }
+      item.pauseReason = pauseReason;
+    }
+
+    if (actualCompletedDate !== undefined) {
+      const oldDate = item.actualCompletedDate ? new Date(item.actualCompletedDate).toISOString().slice(0, 10) : "";
+      const newDate = actualCompletedDate ? new Date(actualCompletedDate).toISOString().slice(0, 10) : "";
+      if (oldDate !== newDate) {
+        changes.push(newDate ? `Cập nhật ngày hoàn thành thực tế: ${newDate}` : `Hủy ngày hoàn thành thực tế`);
+      }
+      item.actualCompletedDate = actualCompletedDate;
+    }
+
+    if (progressPercent !== undefined && progressPercent !== item.progressPercent) {
+      changes.push(`Tiến độ: ${item.progressPercent}% -> ${progressPercent}%`);
+      item.progressPercent = progressPercent;
+    }
+
     if (files !== undefined) item.files = files;
+
+    // Ghi nhận lịch sử nếu có thay đổi
+    if (changes.length > 0) {
+      if (!item.history) item.history = [];
+      item.history.push({
+        action: status !== undefined && status !== item.status ? "STATUS_CHANGE" : "UPDATE",
+        actor: req.user._id,
+        actorName: req.user.name || (isManager ? "Quản lý" : "Đơn vị thực hiện"),
+        details: changes.join("; "),
+        timestamp: new Date(),
+      });
+    }
 
     item.calculateAutoRemark();
     await item.save();
@@ -379,7 +455,9 @@ const updatePlanItem = async (req, res) => {
         path: "bghInCharge",
         select: "_id name email position",
         populate: { path: "position", select: "positionName positionCode" },
-      });
+      })
+      .populate("creator", "name email")
+      .populate("history.actor", "name email role");
 
     return res.status(200).json({
       success: true,
@@ -498,6 +576,15 @@ const importPlanItems = async (req, res) => {
         manualRemark: raw.manualRemark || "",
         creator: req.user._id,
         status: raw.actualCompletedDate ? "COMPLETED" : "NOT_STARTED",
+        history: [
+          {
+            action: "CREATE",
+            actor: req.user._id,
+            actorName: req.user.name || "Quản trị viên",
+            details: `Import từ file Excel: "${raw.taskContent.trim()}"`,
+            timestamp: new Date(),
+          },
+        ],
       });
 
       newItem.calculateAutoRemark();

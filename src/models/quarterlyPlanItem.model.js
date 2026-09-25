@@ -90,11 +90,27 @@ const quarterlyPlanItemSchema = new mongoose.Schema(
       enum: ["ON_TIME", "EARLY", "IN_PROGRESS", "LATE", "OVERDUE", "NOT_STARTED"],
       default: "NOT_STARTED",
     },
+    // Lý do tạm dừng (khi status === 'PAUSED')
+    pauseReason: {
+      type: String,
+      default: "",
+      trim: true,
+    },
     // Ghi chú / Nhận xét thêm của Manager hoặc Ban Giám hiệu
     manualRemark: {
       type: String,
       default: "",
     },
+    // Lịch sử thay đổi nội dung và trạng thái nhiệm vụ
+    history: [
+      {
+        action: { type: String, default: "UPDATE" }, // "CREATE", "UPDATE", "STATUS_CHANGE", "PROGRESS_UPDATE"
+        actor: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        actorName: { type: String },
+        details: { type: String },
+        timestamp: { type: Date, default: Date.now },
+      },
+    ],
     // Danh sách tệp đính kèm / minh chứng kết quả
     files: [
       {
@@ -137,6 +153,13 @@ quarterlyPlanItemSchema.methods.calculateAutoRemark = function () {
 
   if (!deadlineStr) {
     this.autoRemark = "Chưa thiết lập hạn dự kiến";
+    this.autoRemarkStatus = "NOT_STARTED";
+    return;
+  }
+
+  // Trường hợp 0: Tạm dừng thực hiện (PAUSED)
+  if (this.status === "PAUSED") {
+    this.autoRemark = this.pauseReason ? `Tạm dừng (${this.pauseReason})` : "Tạm dừng thực hiện";
     this.autoRemarkStatus = "NOT_STARTED";
     return;
   }
