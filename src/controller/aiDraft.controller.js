@@ -32,7 +32,23 @@ const generateAIDraft = async (req, res) => {
     }
 
     const genAI = new GoogleGenerativeAI(config.geminiApiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+    // Danh sách model ưu tiên tự động fallback nếu gặp lỗi 503 (quá tải) hoặc lỗi mạng
+    const candidateModels = ["gemini-2.5-flash", "gemini-3.5-flash", "gemini-flash-latest"];
+    const callGeminiWithFallback = async (contentPrompt) => {
+      let lastErr = null;
+      for (const m of candidateModels) {
+        try {
+          const modelInstance = genAI.getGenerativeModel({ model: m });
+          const res = await modelInstance.generateContent(contentPrompt);
+          return res.response.text();
+        } catch (err) {
+          lastErr = err;
+          console.warn(`[AI Draft] Model ${m} gặp lỗi:`, err.message, "Đang thử model tiếp theo...");
+        }
+      }
+      throw lastErr || new Error("Không thể kết nối đến dịch vụ AI.");
+    };
 
     const typeLabel = DOC_TYPE_LABELS[docType] || "VĂN BẢN HÀNH CHÍNH";
 
@@ -52,18 +68,18 @@ ${requestSummary}
 
 QUY ĐỊNH BẮT BUỘC VỀ THỂ THỨC VÀ BỐ CỤC (NGHỊ ĐỊNH 30/2020/NĐ-CP):
 1. TUYỆT ĐỐI KHÔNG thêm bất kỳ lời chào, lời dẫn (như "Tuyệt vời!", "Dưới đây là...", "Kính gửi...").
-2. Chỉ xuất DUY NHẤT mã HTML hợp lệ chuẩn bắt đầu bằng thẻ <div ...>.
+2. Chỉ xuất DUY NHẤT mã HTML hợp lệ chuẩn bắt đầu bằng thẻ <div ...> và kết thúc bằng </div>.
 
 3. ĐẦU VĂN BẢN (Bắt buộc dùng table không viền để chia 2 cột đều nhau):
 <table style="width: 100%; border: none; border-collapse: collapse; margin-bottom: 20px;">
   <tr>
-    <td style="width: 48%; text-align: center; vertical-align: top; font-family: 'Times New Roman', serif;">
+    <td style="width: 50%; text-align: center; vertical-align: top; font-family: 'Times New Roman', serif;">
       <div style="font-size: 12pt; font-weight: normal; text-transform: uppercase; line-height: 1.3;">ỦY BAN NHÂN DÂN<br>THÀNH PHỐ HỒ CHÍ MINH</div>
       <div style="font-size: 13pt; font-weight: bold; text-transform: uppercase; line-height: 1.3; margin-top: 4px;">TRƯỜNG CAO ĐẲNG BÁCH KHOA<br>NAM SÀI GÒN</div>
       <div style="width: 140px; height: 1px; background-color: #000; margin: 4px auto 8px auto;"></div>
       <div style="font-size: 13pt; margin-top: 4px;">Số: ....../${docType === 'TO_TRINH' ? 'TTr' : docType === 'THONG_BAO' ? 'TB' : docType === 'QUYET_DINH' ? 'QĐ' : 'CV'}-CĐNSG</div>
     </td>
-    <td style="width: 52%; text-align: center; vertical-align: top; font-family: 'Times New Roman', serif;">
+    <td style="width: 50%; text-align: center; vertical-align: top; font-family: 'Times New Roman', serif;">
       <div style="font-size: 12pt; font-weight: bold; text-transform: uppercase; line-height: 1.3;">CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</div>
       <div style="font-size: 13pt; font-weight: bold; line-height: 1.3; margin-top: 4px;">Độc lập - Tự do - Hạnh phúc</div>
       <div style="width: 160px; height: 1px; background-color: #000; margin: 4px auto 8px auto;"></div>
@@ -72,9 +88,10 @@ QUY ĐỊNH BẮT BUỘC VỀ THỂ THỨC VÀ BỐ CỤC (NGHỊ ĐỊNH 30/202
   </tr>
 </table>
 
-LƯU Ý ĐẶC BIỆT:
-- Dòng chữ "ỦY BAN NHÂN DÂN THÀNH PHỐ HỒ CHÍ MINH" KHÔNG ĐƯỢC IN ĐẬM (font-weight: normal), viết hoa, xuống dòng thành 2 dòng như mẫu trên.
-- Dòng chữ "TRƯỜNG CAO ĐẲNG BÁCH KHOA NAM SÀI GÒN" PHẢI IN ĐẬM (font-weight: bold), viết hoa, xuống dòng thành 2 dòng như mẫu trên.
+LƯU Ý ĐẶC BIỆT VỀ CƠ QUAN BAN HÀNH:
+- KHÔNG VIẾT TẮT "UBND". Bắt buộc ghi đầy đủ chữ: "ỦY BAN NHÂN DÂN" và xuống dòng "THÀNH PHỐ HỒ CHÍ MINH".
+- Dòng chữ "ỦY BAN NHÂN DÂN" và "THÀNH PHỐ HỒ CHÍ MINH" TUYỆT ĐỐI KHÔNG ĐƯỢC IN ĐẬM (font-weight: normal), chữ in hoa.
+- Dòng chữ "TRƯỜNG CAO ĐẲNG BÁCH KHOA" và "NAM SÀI GÒN" BẮT BUỘC PHẢI IN ĐẬM (font-weight: bold), chữ in hoa, xuống dòng thành 2 dòng như mẫu trên.
 
 4. TÊN LOẠI VĂN BẢN VÀ TRÍCH YẾU:
 - Tên loại văn bản: In hoa, đậm, cỡ chữ 14-15pt, căn giữa (Ví dụ: TỜ TRÌNH, THÔNG BÁO, QUYẾT ĐỊNH).
@@ -87,7 +104,7 @@ LƯU Ý ĐẶC BIỆT:
 - Các Căn cứ pháp lý: In nghiêng, thụt dòng (font-style: italic; text-align: justify;).
 - Các điều khoản, mục lục: Trình bày mạch lạc theo Điều / Khoản / Điểm chuẩn văn bản hành chính nhà nước.
 
-6. PHẦN CUỐI VĂN BẢN (NƠI NHẬN VÀ CHỮ KÝ - NGHỊ ĐỊNH 30):
+6. PHẦN CUỐI VĂN BẢN (NƠI NHẬN VÀ CHỮ KÝ - CHUẨN NGHỊ ĐỊNH 30/2020/NĐ-CP):
 Bắt buộc dùng bảng không viền 2 cột:
 <table style="width: 100%; border: none; border-collapse: collapse; margin-top: 30px;">
   <tr>
@@ -109,8 +126,7 @@ Bắt buộc dùng bảng không viền 2 cột:
 </table>
 `;
 
-    const result = await model.generateContent(prompt);
-    let generatedText = result.response.text();
+    let generatedText = await callGeminiWithFallback(prompt);
 
     // Làm sạch nếu AI lỡ bọc code block markdown ```html ... ``` hoặc ``` ... ```
     generatedText = generatedText
@@ -150,7 +166,7 @@ Bắt buộc dùng bảng không viền 2 cột:
     });
   } catch (error) {
     console.error("Lỗi generateAIDraft:", error);
-    return res.status(500).json({ success: false, message: "Lỗi xử lý AI Soạn thảo văn bản", error: error.message });
+    return res.status(500).json({ success: false, message: "Lỗi xử lý AI Soạn thảo văn bản: " + (error.message || ""), error: error.message });
   }
 };
 
@@ -170,13 +186,32 @@ const auditDocumentCompliance = async (req, res) => {
     }
 
     const genAI = new GoogleGenerativeAI(config.geminiApiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const candidateModels = ["gemini-2.5-flash", "gemini-3.5-flash", "gemini-flash-latest"];
+    const callGeminiWithFallback = async (contentPrompt) => {
+      let lastErr = null;
+      for (const m of candidateModels) {
+        try {
+          const modelInstance = genAI.getGenerativeModel({ model: m });
+          const res = await modelInstance.generateContent(contentPrompt);
+          return res.response.text();
+        } catch (err) {
+          lastErr = err;
+          console.warn(`[AI Audit] Model ${m} gặp lỗi:`, err.message, "Đang thử model tiếp theo...");
+        }
+      }
+      throw lastErr || new Error("Không thể kết nối đến dịch vụ AI.");
+    };
 
     const auditPrompt = `
-Bạn là chuyên gia kiểm tra và thẩm định thể thức văn bản hành chính theo Nghị định 30/2020/NĐ-CP.
+Bạn là chuyên gia kiểm tra và thẩm định thể thức văn bản hành chính theo Nghị định 30/2020/NĐ-CP của Chính phủ Việt Nam.
 Hãy kiểm tra văn bản dưới đây và đưa ra đánh giá chi tiết:
 1. Điểm số chuẩn thể thức (từ 0 đến 100)
-2. Các lỗi hoặc thiếu sót thể thức (Quốc hiệu, tiêu ngữ, cơ quan ban hành, trích yếu, căn cứ, căn lề, nơi nhận, chữ ký)
+2. Các lỗi hoặc thiếu sót thể thức:
+   - Cơ quan ban hành: Tuyệt đối KHÔNG viết tắt "UBND" (phải viết đầy đủ "ỦY BAN NHÂN DÂN", không in đậm).
+   - Đơn vị ban hành "TRƯỜNG CAO ĐẲNG BÁCH KHOA NAM SÀI GÒN" phải in đậm, viết hoa.
+   - Quốc hiệu: "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM" in hoa đậm; Tiêu ngữ "Độc lập - Tự do - Hạnh phúc" chữ in thường đứng đậm, có gạch nối.
+   - Căn cứ, bố cục nội dung, thụt đầu dòng (1 - 1.27cm), căn lề 2 bên (justify).
+   - Nơi nhận: "Nơi nhận:" in đậm nghiêng 12pt, các mục liệt kê 11pt, gạch đầu dòng. Chữ ký bên phải.
 3. Đề xuất chỉnh sửa cụ thể.
 
 Văn bản cần thẩm định:
@@ -187,13 +222,12 @@ ${content}
 YÊU CẦU: Trả về ĐÚNG DUY NHẤT một chuỗi JSON thuần, không dùng backticks markdown, theo định dạng:
 {
   "score": 95,
-  "issues": ["Ủy ban nhân dân không được viết tắt", "..."],
-  "suggestions": ["Viết hoa không in đậm: ỦY BAN NHÂN DÂN THÀNH PHỐ HỒ CHÍ MINH", "..."]
+  "issues": ["...", "..."],
+  "suggestions": ["...", "..."]
 }
 `;
 
-    const result = await model.generateContent(auditPrompt);
-    const rawOutput = result.response.text().trim();
+    const rawOutput = (await callGeminiWithFallback(auditPrompt)).trim();
     
     let auditData = { score: 92, issues: [], suggestions: [] };
     try {
