@@ -50,22 +50,37 @@ Thông tin đầu vào:
 ${requestSummary}
 """
 
-Yêu cầu xuất ra:
-1. Đảm bảo 100% đầy đủ các thành phần thể thức theo Nghị định 30/2020/NĐ-CP:
-   - Quốc hiệu, Tiêu ngữ (CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM / Độc lập - Tự do - Hạnh phúc)
-   - Tên cơ quan chủ quản và Tên cơ quan ban hành: UBND THÀNH PHỐ HỒ CHÍ MINH / TRƯỜNG CAO ĐẲNG BÁCH KHOA NAM SÀI GÒN
-   - Số, ký hiệu văn bản (để trống placeholder như: .../TTr-CĐNSG, .../TB-CĐNSG hoặc .../QĐ-CĐNSG)
-   - Địa danh, ngày tháng năm (Thành phố Hồ Chí Minh, ngày ... tháng ... năm 20...)
-   - Tên loại và trích yếu nội dung văn bản
-   - Các Căn cứ pháp lý viện dẫn phù hợp (Luật Giáo dục nghề nghiệp, Điều lệ trường, Nghị định 30,...)
+QUY ĐỊNH BẮT BUỘC VỀ ĐẦU RA:
+1. TUYỆT ĐỐI KHÔNG thêm lời chào, lời dẫn (như "Tuyệt vời!", "Dưới đây là bản tờ trình...", "Chúc bạn thành công!").
+2. Chỉ xuất DUY NHẤT một khối mã HTML chuẩn (không bọc trong \`\`\`html hay \`\`\`markdown, bắt đầu ngay bằng các thẻ HTML).
+3. Đảm bảo 100% đầy đủ các thành phần thể thức theo Nghị định 30/2020/NĐ-CP:
+   - Sử dụng bảng (<table style="width: 100%; border: none;">) cho phần đầu: bên trái là Tên cơ quan (UBND THÀNH PHỐ HỒ CHÍ MINH / TRƯỜNG CAO ĐẲNG BÁCH KHOA NAM SÀI GÒN / Số ký hiệu), bên phải là Quốc hiệu - Tiêu ngữ (CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM / Độc lập - Tự do - Hạnh phúc / Địa danh, ngày tháng năm).
+   - Tên loại văn bản và Trích yếu in hoa đậm, căn giữa.
+   - Các Căn cứ pháp lý viện dẫn in nghiêng phù hợp.
    - Nội dung chính: Rõ ràng, hành văn trang trọng, mạch lạc, phân chia các Điều / Mục / Khoản / Điểm logic.
-   - Nơi nhận (phù hợp với loại văn bản)
-   - Chức vụ, họ tên người ký.
-2. Trả về định dạng Markdown/HTML đẹp mắt để hiển thị trực tiếp vào trình soạn thảo.
+   - Bảng cuối văn bản: bên trái là Nơi nhận (cỡ chữ 11-12pt, gạch đầu dòng), bên phải là Chức vụ, chữ ký và Họ tên người ký (in hoa, đậm).
+4. Sử dụng font chữ 'Times New Roman', màu chữ #000000, thụt đầu dòng chuẩn.
 `;
 
     const result = await model.generateContent(prompt);
-    const generatedText = result.response.text();
+    let generatedText = result.response.text();
+
+    // Làm sạch nếu AI lỡ bọc code block markdown ```html ... ``` hoặc ``` ... ```
+    generatedText = generatedText
+      .replace(/^```html\s*/i, "")
+      .replace(/^```markdown\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/\s*```$/i, "")
+      .trim();
+
+    // Loại bỏ các dòng chào hỏi đằng trước nếu có
+    const htmlStartIndex = generatedText.indexOf("<");
+    if (htmlStartIndex > 0) {
+      const prefixText = generatedText.substring(0, htmlStartIndex);
+      if (prefixText.includes("Tuyệt vời") || prefixText.includes("Dưới đây") || prefixText.includes("Chào")) {
+        generatedText = generatedText.substring(htmlStartIndex);
+      }
+    }
 
     // Lưu bản nháp vào CSDL
     const newDraft = await DocumentDraft.create({
