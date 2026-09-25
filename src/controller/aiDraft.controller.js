@@ -253,6 +253,110 @@ YÊU CẦU: Trả về ĐÚNG DUY NHẤT một chuỗi JSON thuần, không dùn
 };
 
 /**
+ * Tự động chỉnh sửa văn bản chuẩn theo thể thức Nghị định 30/2020/NĐ-CP dựa trên các gợi ý / phát hiện
+ */
+const fixDocumentCompliance = async (req, res) => {
+  try {
+    const { content, suggestions } = req.body;
+    if (!content) {
+      return res.status(400).json({ success: false, message: "Vui lòng cung cấp nội dung văn bản cần chỉnh sửa." });
+    }
+
+    const config = await ChatbotConfig.findOne();
+    if (!config || !config.geminiApiKey) {
+      return res.status(400).json({ success: false, message: "Chưa cấu hình Gemini API Key." });
+    }
+
+    const genAI = new GoogleGenerativeAI(config.geminiApiKey);
+    const candidateModels = ["gemini-2.5-flash", "gemini-3.5-flash", "gemini-flash-latest"];
+    const callGeminiWithFallback = async (contentPrompt) => {
+      let lastErr = null;
+      for (const m of candidateModels) {
+        try {
+          const modelInstance = genAI.getGenerativeModel({ model: m });
+          const res = await modelInstance.generateContent(contentPrompt);
+          return res.response.text();
+        } catch (err) {
+          lastErr = err;
+          console.warn(`[AI Fix] Model ${m} gặp lỗi:`, err.message, "Đang thử model tiếp theo...");
+        }
+      }
+      throw lastErr || new Error("Không thể kết nối đến dịch vụ AI.");
+    };
+
+    const fixPrompt = `
+Bạn là chuyên gia hiệu đính và chuẩn hóa thể thức văn bản hành chính theo đúng NGHỊ ĐỊNH 30/2020/NĐ-CP của Chính phủ.
+Nhiệm vụ của bạn: Tiếp nhận văn bản HTML hiện tại và các gợi ý sửa đổi, sau đó CHỈNH SỬA LẠI TOÀN BỘ VĂN BẢN sao cho chuẩn 100% Nghị định 30.
+
+CÁC YÊU CẦU BẮT BUỘC VỀ THỂ THỨC (NGHỊ ĐỊNH 30/2020/NĐ-CP):
+1. ĐẦU VĂN BẢN (Bảng 2 cột cân đối, không viền):
+   - Bên trái (Cơ quan ban hành):
+     <div style="font-size: 12pt; font-weight: normal; text-transform: uppercase; line-height: 1.3;">ỦY BAN NHÂN DÂN<br>THÀNH PHỐ HỒ CHÍ MINH</div>
+     <div style="font-size: 13pt; font-weight: bold; text-transform: uppercase; line-height: 1.3; margin-top: 4px;">TRƯỜNG CAO ĐẲNG BÁCH KHOA<br>NAM SÀI GÒN</div>
+     <div style="width: 140px; height: 1px; background-color: #000; margin: 4px auto 8px auto;"></div>
+     <div style="font-size: 13pt; margin-top: 4px;">Số: ......</div>
+     (Lưu ý: "ỦY BAN NHÂN DÂN THÀNH PHỐ HỒ CHÍ MINH" không được viết tắt, KHÔNG ĐƯỢC IN ĐẬM, viết hoa, xuống dòng 2 dòng. "TRƯỜNG CAO ĐẲNG BÁCH KHOA NAM SÀI GÒN" IN ĐẬM, viết hoa, xuống dòng 2 dòng).
+   - Bên phải (Quốc hiệu & Tiêu ngữ):
+     <div style="font-size: 12pt; font-weight: bold; text-transform: uppercase; line-height: 1.3;">CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</div>
+     <div style="font-size: 13pt; font-weight: bold; line-height: 1.3; margin-top: 4px;">Độc lập - Tự do - Hạnh phúc</div>
+     <div style="width: 160px; height: 1px; background-color: #000; margin: 4px auto 8px auto;"></div>
+     <div style="font-size: 13pt; font-style: italic; margin-top: 4px;">Thành phố Hồ Chí Minh, ngày ..... tháng ..... năm 20....</div>
+
+2. TÊN LOẠI VĂN BẢN & TRÍCH YẾU:
+   - Tên loại văn bản (TỜ TRÌNH, THÔNG BÁO...): Cỡ chữ 14pt-15pt, in hoa, in đậm, căn giữa.
+   - Trích yếu nội dung: Cỡ chữ 13pt-14pt, in đậm, căn giữa (Ví dụ: Về việc mua sắm máy tính mới).
+
+3. NỘI DUNG VĂN BẢN:
+   - Font chữ: 'Times New Roman', cỡ chữ 13-14pt, giãn dòng 1.3 - 1.4, căn lề 2 bên (text-align: justify).
+   - Thụt đầu dòng: text-indent: 1.27cm (hoặc 1cm).
+   - Căn cứ pháp lý: In nghiêng, thụt lề đầu dòng.
+
+4. NƠI NHẬN VÀ CHỮ KÝ (Bảng 2 cột cân đối ở cuối):
+   - Bên trái: "Nơi nhận:" cỡ 12pt, in đậm, nghiêng. Danh sách nơi nhận cỡ 11pt, dòng giãn 1.3, có dấu gạch đầu dòng.
+   - Bên phải: Chức danh người ký in hoa, in đậm, cỡ 13pt. Dưới có khoảng trống ký và họ tên người ký in đậm.
+
+CÁC GỢI Ý ĐỀ XUẤT CHỈNH SỬA CẦN ÁP DỤNG:
+"""
+${Array.isArray(suggestions) ? suggestions.join("\n") : (suggestions || "Chuẩn hóa theo Nghị định 30")}
+"""
+
+VĂN BẢN GỐC HIỆN TẠI:
+"""
+${content}
+"""
+
+QUY CÁCH ĐẦU RA:
+- TUYỆT ĐỐI KHÔNG thêm bất kỳ lời chào, lời dẫn (như "Dưới đây là...", "Tôi đã sửa...").
+- Chỉ xuất DUY NHẤT mã HTML hợp lệ chuẩn bắt đầu bằng <div ...> và kết thúc bằng </div>.
+`;
+
+    let fixedHtml = (await callGeminiWithFallback(fixPrompt)).trim();
+    fixedHtml = fixedHtml
+      .replace(/^```html\s*/i, "")
+      .replace(/^```markdown\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/\s*```$/i, "")
+      .trim();
+
+    const htmlStartIndex = fixedHtml.indexOf("<");
+    if (htmlStartIndex > 0) {
+      fixedHtml = fixedHtml.substring(htmlStartIndex);
+    }
+
+    return res.json({
+      success: true,
+      message: "Đã tự động chỉnh sửa văn bản theo chuẩn thể thức Nghị định 30 thành công!",
+      data: {
+        content: fixedHtml,
+      },
+    });
+  } catch (error) {
+    console.error("Lỗi fixDocumentCompliance:", error);
+    return res.status(500).json({ success: false, message: "Lỗi khi tự động chỉnh sửa thể thức: " + (error.message || ""), error: error.message });
+  }
+};
+
+/**
  * Lấy lịch sử các bản nháp văn bản do người dùng tạo
  */
 const getDraftHistory = async (req, res) => {
@@ -269,5 +373,6 @@ const getDraftHistory = async (req, res) => {
 module.exports = {
   generateAIDraft,
   auditDocumentCompliance,
+  fixDocumentCompliance,
   getDraftHistory,
 };

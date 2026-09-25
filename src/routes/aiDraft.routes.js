@@ -7,6 +7,7 @@ router.use(verifyToken);
 
 router.post('/generate', aiDraftController.generateAIDraft);
 router.post('/audit', aiDraftController.auditDocumentCompliance);
+router.post('/fix-compliance', aiDraftController.fixDocumentCompliance);
 router.get('/history', aiDraftController.getDraftHistory);
 
 module.exports = router;
