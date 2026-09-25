@@ -164,10 +164,36 @@ quarterlyPlanItemSchema.methods.calculateAutoRemark = function () {
     return;
   }
 
-  // Trường hợp 1: Đã hoàn thành (có ngày hoàn thành thực tế)
-  if (completedStr) {
+  // Trường hợp 1: Nếu trạng thái được đặt rõ ràng là CHƯA LÀM (NOT_STARTED) hoặc ĐANG THỰC HIỆN (IN_PROGRESS)
+  if (this.status === "NOT_STARTED" || this.status === "IN_PROGRESS") {
+    this.actualCompletedDate = null;
     const dDeadline = new Date(deadlineStr).getTime();
-    const dCompleted = new Date(completedStr).getTime();
+    const dToday = new Date(todayStr).getTime();
+    const diffDays = Math.round((dToday - dDeadline) / (1000 * 3600 * 24));
+
+    if (diffDays > 0) {
+      this.autoRemark = `Quá hạn dự kiến (${diffDays} ngày)`;
+      this.autoRemarkStatus = "OVERDUE";
+      this.status = "OVERDUE";
+    } else if (diffDays === 0) {
+      this.autoRemark = "Đến hạn hôm nay";
+      this.autoRemarkStatus = "IN_PROGRESS";
+      this.status = "IN_PROGRESS";
+    } else {
+      const daysLeft = Math.abs(diffDays);
+      this.autoRemark = this.status === "NOT_STARTED" ? `Chưa làm (còn ${daysLeft} ngày)` : `Đang thực hiện (còn ${daysLeft} ngày)`;
+      this.autoRemarkStatus = this.status === "NOT_STARTED" ? "NOT_STARTED" : "IN_PROGRESS";
+    }
+    return;
+  }
+
+  // Trường hợp 2: Đã hoàn thành (COMPLETED hoặc có ngày hoàn thành thực tế)
+  if (this.status === "COMPLETED" || completedStr) {
+    this.status = "COMPLETED";
+    this.progressPercent = 100;
+    const effectiveCompletedStr = completedStr || todayStr;
+    const dDeadline = new Date(deadlineStr).getTime();
+    const dCompleted = new Date(effectiveCompletedStr).getTime();
     const diffDays = Math.round((dCompleted - dDeadline) / (1000 * 3600 * 24));
 
     if (diffDays < 0) {
@@ -180,12 +206,10 @@ quarterlyPlanItemSchema.methods.calculateAutoRemark = function () {
       this.autoRemark = `Hoàn thành trễ hạn (${diffDays} ngày)`;
       this.autoRemarkStatus = "LATE";
     }
-    this.status = "COMPLETED";
-    this.progressPercent = 100;
     return;
   }
 
-  // Trường hợp 2: Chưa hoàn thành
+  // Trường hợp 3: Mặc định chưa hoàn thành
   const dDeadline = new Date(deadlineStr).getTime();
   const dToday = new Date(todayStr).getTime();
   const diffDays = Math.round((dToday - dDeadline) / (1000 * 3600 * 24));

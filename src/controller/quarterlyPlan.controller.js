@@ -408,6 +408,9 @@ const updatePlanItem = async (req, res) => {
       const newStatusLabel = statusMap[status] || status;
       changes.push(`Chuyển trạng thái từ [${oldStatusLabel}] sang [${newStatusLabel}]`);
       item.status = status;
+      if (status !== "COMPLETED" && actualCompletedDate === undefined) {
+        item.actualCompletedDate = null;
+      }
     }
 
     if (pauseReason !== undefined && pauseReason !== item.pauseReason) {
@@ -424,6 +427,9 @@ const updatePlanItem = async (req, res) => {
         changes.push(newDate ? `Cập nhật ngày hoàn thành thực tế: ${newDate}` : `Hủy ngày hoàn thành thực tế`);
       }
       item.actualCompletedDate = actualCompletedDate;
+      if (!actualCompletedDate && item.status === "COMPLETED") {
+        item.status = "IN_PROGRESS";
+      }
     }
 
     if (progressPercent !== undefined && progressPercent !== item.progressPercent) {
