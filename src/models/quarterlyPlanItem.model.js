@@ -95,6 +95,16 @@ const quarterlyPlanItemSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    // Danh sách tệp đính kèm / minh chứng kết quả
+    files: [
+      {
+        fileId: { type: String },
+        fileName: { type: String },
+        fileMimeType: { type: String },
+        fileSize: { type: Number },
+        webViewLink: { type: String },
+      },
+    ],
     creator: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

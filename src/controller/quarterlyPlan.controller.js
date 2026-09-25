@@ -37,11 +37,11 @@ const canViewQuarterlyPlan = (user) => {
 const getPlanMetadata = async (req, res) => {
   try {
     // 1. Lấy toàn bộ đơn vị (Khoa/Phòng/Trung tâm)
-    const departments = await Department.find({ isDeleted: false })
+    const departments = await Department.find()
       .select("_id departmentName departmentCode")
       .sort({ departmentName: 1 });
 
-    // 2. Lấy danh sách người dùng thuộc Ban Giám hiệu (Hiệu trưởng, Phó Hiệu trưởng)
+    // 2. Lấy danh sách người dùng thuộc Ban Giám hiệu (Hiệu trưởng, Phó Hiệu trưởng) - LỌC CHUẨN XÁC
     const bghPositions = await Position.find({
       $or: [
         { positionCode: { $in: ["HT", "PHT"] } },
@@ -51,10 +51,7 @@ const getPlanMetadata = async (req, res) => {
 
     const bghPosIds = bghPositions.map((p) => p._id);
     const bghUsers = await User.find({
-      $or: [
-        { position: { $in: bghPosIds } },
-        { role: "manager" },
-      ],
+      position: { $in: bghPosIds },
     })
       .populate("position", "positionName positionCode")
       .select("_id name email position role")
@@ -264,6 +261,7 @@ const createPlanItem = async (req, res) => {
       startDate,
       expectedDeadline,
       manualRemark,
+      files,
     } = req.body;
 
     if (!planId || !groupName || !taskContent || !expectedDeadline) {
@@ -285,6 +283,7 @@ const createPlanItem = async (req, res) => {
       startDate,
       expectedDeadline,
       manualRemark: manualRemark || "",
+      files: files || [],
       creator: req.user._id,
       status: "NOT_STARTED",
     });
@@ -345,6 +344,7 @@ const updatePlanItem = async (req, res) => {
       progressPercent,
       status,
       manualRemark,
+      files,
     } = req.body;
 
     if (isManager) {
@@ -361,10 +361,11 @@ const updatePlanItem = async (req, res) => {
       if (manualRemark !== undefined) item.manualRemark = manualRemark;
     }
 
-    // Cả Manager và Đơn vị thực hiện đều có thể cập nhật ngày hoàn thành thực tế và tiến độ
+    // Cả Manager và Đơn vị thực hiện đều có thể cập nhật ngày hoàn thành thực tế, tiến độ và đính kèm file
     if (actualCompletedDate !== undefined) item.actualCompletedDate = actualCompletedDate;
     if (progressPercent !== undefined) item.progressPercent = progressPercent;
     if (status !== undefined) item.status = status;
+    if (files !== undefined) item.files = files;
 
     item.calculateAutoRemark();
     await item.save();
