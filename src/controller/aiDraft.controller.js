@@ -50,16 +50,63 @@ Thông tin đầu vào:
 ${requestSummary}
 """
 
-QUY ĐỊNH BẮT BUỘC VỀ ĐẦU RA:
-1. TUYỆT ĐỐI KHÔNG thêm lời chào, lời dẫn (như "Tuyệt vời!", "Dưới đây là bản tờ trình...", "Chúc bạn thành công!").
-2. Chỉ xuất DUY NHẤT một khối mã HTML chuẩn (không bọc trong \`\`\`html hay \`\`\`markdown, bắt đầu ngay bằng các thẻ HTML).
-3. Đảm bảo 100% đầy đủ các thành phần thể thức theo Nghị định 30/2020/NĐ-CP:
-   - Sử dụng bảng (<table style="width: 100%; border: none;">) cho phần đầu: bên trái là Tên cơ quan (UBND THÀNH PHỐ HỒ CHÍ MINH / TRƯỜNG CAO ĐẲNG BÁCH KHOA NAM SÀI GÒN / Số ký hiệu), bên phải là Quốc hiệu - Tiêu ngữ (CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM / Độc lập - Tự do - Hạnh phúc / Địa danh, ngày tháng năm).
-   - Tên loại văn bản và Trích yếu in hoa đậm, căn giữa.
-   - Các Căn cứ pháp lý viện dẫn in nghiêng phù hợp.
-   - Nội dung chính: Rõ ràng, hành văn trang trọng, mạch lạc, phân chia các Điều / Mục / Khoản / Điểm logic.
-   - Bảng cuối văn bản: bên trái là Nơi nhận (cỡ chữ 11-12pt, gạch đầu dòng), bên phải là Chức vụ, chữ ký và Họ tên người ký (in hoa, đậm).
-4. Sử dụng font chữ 'Times New Roman', màu chữ #000000, thụt đầu dòng chuẩn.
+QUY ĐỊNH BẮT BUỘC VỀ THỂ THỨC VÀ BỐ CỤC (NGHỊ ĐỊNH 30/2020/NĐ-CP):
+1. TUYỆT ĐỐI KHÔNG thêm bất kỳ lời chào, lời dẫn (như "Tuyệt vời!", "Dưới đây là...", "Kính gửi...").
+2. Chỉ xuất DUY NHẤT mã HTML hợp lệ chuẩn bắt đầu bằng thẻ <div ...>.
+
+3. ĐẦU VĂN BẢN (Bắt buộc dùng table không viền để chia 2 cột đều nhau):
+<table style="width: 100%; border: none; border-collapse: collapse; margin-bottom: 20px;">
+  <tr>
+    <td style="width: 48%; text-align: center; vertical-align: top; font-family: 'Times New Roman', serif;">
+      <div style="font-size: 12pt; font-weight: normal; text-transform: uppercase; line-height: 1.3;">ỦY BAN NHÂN DÂN<br>THÀNH PHỐ HỒ CHÍ MINH</div>
+      <div style="font-size: 13pt; font-weight: bold; text-transform: uppercase; line-height: 1.3; margin-top: 4px;">TRƯỜNG CAO ĐẲNG BÁCH KHOA<br>NAM SÀI GÒN</div>
+      <div style="width: 140px; height: 1px; background-color: #000; margin: 4px auto 8px auto;"></div>
+      <div style="font-size: 13pt; margin-top: 4px;">Số: ....../${docType === 'TO_TRINH' ? 'TTr' : docType === 'THONG_BAO' ? 'TB' : docType === 'QUYET_DINH' ? 'QĐ' : 'CV'}-CĐNSG</div>
+    </td>
+    <td style="width: 52%; text-align: center; vertical-align: top; font-family: 'Times New Roman', serif;">
+      <div style="font-size: 12pt; font-weight: bold; text-transform: uppercase; line-height: 1.3;">CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</div>
+      <div style="font-size: 13pt; font-weight: bold; line-height: 1.3; margin-top: 4px;">Độc lập - Tự do - Hạnh phúc</div>
+      <div style="width: 160px; height: 1px; background-color: #000; margin: 4px auto 8px auto;"></div>
+      <div style="font-size: 13pt; font-style: italic; margin-top: 4px;">Thành phố Hồ Chí Minh, ngày ..... tháng ..... năm 20....</div>
+    </td>
+  </tr>
+</table>
+
+LƯU Ý ĐẶC BIỆT:
+- Dòng chữ "ỦY BAN NHÂN DÂN THÀNH PHỐ HỒ CHÍ MINH" KHÔNG ĐƯỢC IN ĐẬM (font-weight: normal), viết hoa, xuống dòng thành 2 dòng như mẫu trên.
+- Dòng chữ "TRƯỜNG CAO ĐẲNG BÁCH KHOA NAM SÀI GÒN" PHẢI IN ĐẬM (font-weight: bold), viết hoa, xuống dòng thành 2 dòng như mẫu trên.
+
+4. TÊN LOẠI VĂN BẢN VÀ TRÍCH YẾU:
+- Tên loại văn bản: In hoa, đậm, cỡ chữ 14-15pt, căn giữa (Ví dụ: TỜ TRÌNH, THÔNG BÁO, QUYẾT ĐỊNH).
+- Trích yếu nội dung: Cỡ chữ 13-14pt, in đậm, căn giữa (Ví dụ: Về việc mua sắm thiết bị máy tính mới).
+
+5. NỘI DUNG VĂN BẢN:
+- Font chữ: 'Times New Roman', cỡ chữ 13-14pt, màu chữ #000000.
+- Căn lề đều 2 bên (text-align: justify), giãn dòng 1.3 - 1.4.
+- Thụt đầu dòng đoạn văn bản: 1cm đến 1.27cm (text-indent: 1.27cm).
+- Các Căn cứ pháp lý: In nghiêng, thụt dòng (font-style: italic; text-align: justify;).
+- Các điều khoản, mục lục: Trình bày mạch lạc theo Điều / Khoản / Điểm chuẩn văn bản hành chính nhà nước.
+
+6. PHẦN CUỐI VĂN BẢN (NƠI NHẬN VÀ CHỮ KÝ - NGHỊ ĐỊNH 30):
+Bắt buộc dùng bảng không viền 2 cột:
+<table style="width: 100%; border: none; border-collapse: collapse; margin-top: 30px;">
+  <tr>
+    <td style="width: 50%; vertical-align: top; text-align: left; font-family: 'Times New Roman', serif;">
+      <div style="font-size: 12pt; font-weight: bold; font-style: italic;">Nơi nhận:</div>
+      <div style="font-size: 11pt; line-height: 1.4; margin-top: 4px;">
+        - Như kính gửi;<br>
+        - Ban Giám hiệu (để b/c);<br>
+        - Lưu: VT, ${departmentName || "đơn vị"}.
+      </div>
+    </td>
+    <td style="width: 50%; vertical-align: top; text-align: center; font-family: 'Times New Roman', serif;">
+      <div style="font-size: 13pt; font-weight: bold; text-transform: uppercase;">${signerPosition || "HIỆU TRƯỞNG"}</div>
+      <div style="font-size: 12pt; font-style: italic; margin-top: 2px;">(Ký, ghi rõ họ tên và đóng dấu)</div>
+      <div style="height: 70px;"></div>
+      <div style="font-size: 13pt; font-weight: bold;">[Họ và tên người ký]</div>
+    </td>
+  </tr>
+</table>
 `;
 
     const result = await model.generateContent(prompt);
@@ -127,32 +174,38 @@ const auditDocumentCompliance = async (req, res) => {
 
     const auditPrompt = `
 Bạn là chuyên gia kiểm tra và thẩm định thể thức văn bản hành chính theo Nghị định 30/2020/NĐ-CP.
-Hãy kiểm tra văn bản dưới đây và đưa ra đánh giá:
-1. Điểm số chuẩn thể thức (thang điểm 100)
-2. Các lỗi hoặc thiếu sót thể thức (Quốc hiệu, tiêu ngữ, trích yếu, căn cứ, căn lề, nơi nhận, chữ ký)
-3. Lỗi chính tả, câu từ chưa trang trọng hành chính (nếu có)
-4. Đề xuất chỉnh sửa cụ thể.
+Hãy kiểm tra văn bản dưới đây và đưa ra đánh giá chi tiết:
+1. Điểm số chuẩn thể thức (từ 0 đến 100)
+2. Các lỗi hoặc thiếu sót thể thức (Quốc hiệu, tiêu ngữ, cơ quan ban hành, trích yếu, căn cứ, căn lề, nơi nhận, chữ ký)
+3. Đề xuất chỉnh sửa cụ thể.
 
 Văn bản cần thẩm định:
 """
 ${content}
 """
 
-Trả về kết quả định dạng JSON thuần với cấu trúc:
+YÊU CẦU: Trả về ĐÚNG DUY NHẤT một chuỗi JSON thuần, không dùng backticks markdown, theo định dạng:
 {
   "score": 95,
-  "issues": ["Thiếu địa danh ngày tháng năm", "..."],
-  "suggestions": ["Bổ sung 'Thành phố Hồ Chí Minh, ngày ... tháng ... năm ...'", "..."]
+  "issues": ["Ủy ban nhân dân không được viết tắt", "..."],
+  "suggestions": ["Viết hoa không in đậm: ỦY BAN NHÂN DÂN THÀNH PHỐ HỒ CHÍ MINH", "..."]
 }
 `;
 
     const result = await model.generateContent(auditPrompt);
-    let auditData = { score: 90, issues: [], suggestions: [] };
+    const rawOutput = result.response.text().trim();
+    
+    let auditData = { score: 92, issues: [], suggestions: [] };
     try {
-      const cleaned = result.response.text().replace(/```json|```/g, "").trim();
+      const cleaned = rawOutput.replace(/```json/gi, "").replace(/```/g, "").trim();
       auditData = JSON.parse(cleaned);
-    } catch (e) {
-      auditData.suggestions = [result.response.text()];
+    } catch (parseErr) {
+      console.warn("Lỗi parse JSON audit:", parseErr.message, "Raw:", rawOutput);
+      auditData = {
+        score: 88,
+        issues: ["Không thể phân tích tự động chi tiết"],
+        suggestions: [rawOutput.substring(0, 300)],
+      };
     }
 
     return res.json({
@@ -161,7 +214,7 @@ Trả về kết quả định dạng JSON thuần với cấu trúc:
     });
   } catch (error) {
     console.error("Lỗi auditDocumentCompliance:", error);
-    return res.status(500).json({ success: false, message: "Lỗi khi thẩm định văn bản", error: error.message });
+    return res.status(500).json({ success: false, message: "Lỗi khi thẩm định văn bản: " + (error.message || ""), error: error.message });
   }
 };
 
