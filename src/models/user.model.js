@@ -101,6 +101,7 @@ const userSchema = new mongoose.Schema({
         trainingRegister: { type: Boolean, default: true },
         onlineRecordSubmit: { type: Boolean, default: true },
         onlineRecordStatus: { type: Boolean, default: true },
+        quarterlyPlanReminder: { type: Boolean, default: true },
     },
     themePreference: {
         preset: { type: String, default: "blue_ocean" },

@@ -202,20 +202,23 @@ app.get("/test", (req, res) => {
 const cron = require('node-cron');
 const { executeTaskReminders, executeAutoBackup } = require('./src/service/TaskCron.service');
 const { executeRecurringTasksGeneration } = require('./src/service/recurringTask.service');
+const { executeQuarterlyPlanReminders } = require('./src/service/quarterlyPlanCron.service');
 
-// Chạy hàng ngày vào lúc 00:05 (Nhắc việc & Sao lưu)
+// Chạy hàng ngày vào lúc 00:05 (Nhắc việc, Kế hoạch quý & Sao lưu)
 cron.schedule('5 0 * * *', async () => {
     console.log('--- Bắt đầu chạy Cron Jobs (Nhắc nhở & Backup) ---');
     await executeTaskReminders();
+    await executeQuarterlyPlanReminders();
     await executeAutoBackup();
     console.log('--- Hoàn tất Cron Jobs ---');
 });
 
-// Chạy hàng ngày vào lúc 06:30 sáng (Tự động sinh Công việc Định kỳ)
+// Chạy hàng ngày vào lúc 06:30 sáng (Tự động sinh Công việc Định kỳ & Nhắc việc Kế hoạch quý buổi sáng)
 cron.schedule('30 6 * * *', async () => {
     console.log('--- Bắt đầu quét & sinh Công việc định kỳ hàng ngày (06:30) ---');
     await executeRecurringTasksGeneration();
-    console.log('--- Hoàn tất sinh Công việc định kỳ ---');
+    await executeQuarterlyPlanReminders();
+    console.log('--- Hoàn tất sinh Công việc định kỳ & Quét Kế hoạch quý ---');
 });
 
 module.exports = app;

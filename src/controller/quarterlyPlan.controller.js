@@ -609,6 +609,29 @@ const importPlanItems = async (req, res) => {
   }
 };
 
+/**
+ * Kích hoạt thủ công việc quét và gửi email + chuông thông báo (Dành cho Manager/Admin)
+ */
+const triggerPlanReminders = async (req, res) => {
+  try {
+    if (!isManagerOrAdmin(req.user)) {
+      return res.status(403).json({ success: false, message: "Bạn không có quyền thực hiện tính năng này." });
+    }
+
+    const { executeQuarterlyPlanReminders } = require("../service/quarterlyPlanCron.service");
+    const result = await executeQuarterlyPlanReminders();
+
+    return res.status(200).json({
+      success: true,
+      message: "Đã kích hoạt quét và gửi thông báo Kế hoạch quý thành công!",
+      data: result,
+    });
+  } catch (error) {
+    console.error("Lỗi triggerPlanReminders:", error);
+    return res.status(500).json({ success: false, message: "Lỗi khi quét thông báo", error: error.message });
+  }
+};
+
 module.exports = {
   getPlanMetadata,
   getQuarterlyPlans,
@@ -620,4 +643,6 @@ module.exports = {
   updatePlanItem,
   deletePlanItem,
   importPlanItems,
+  triggerPlanReminders,
 };
+

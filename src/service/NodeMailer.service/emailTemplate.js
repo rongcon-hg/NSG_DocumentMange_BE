@@ -458,6 +458,55 @@ const ONLINE_RECORD_STATUS_EMAIL_TEMPLATE = `
 </html>
 `;
 
+const QUARTERLY_PLAN_REMINDER_EMAIL_TEMPLATE = `
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Thông Báo Kế Hoạch Quý: {reminderBadge}</title>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 650px; margin: 0 auto; padding: 20px;">
+  <div style="background: linear-gradient(to right, {headerColorStart}, {headerColorEnd}); padding: 22px; text-align: center; border-radius: 8px 8px 0 0;">
+    <h1 style="color: #fff; margin: 0; font-size: 20px; text-transform: uppercase; letter-spacing: 0.5px;">{headerTitle}</h1>
+  </div>
+  <div style="background-color: #f9fbfd; padding: 24px; border-radius: 0 0 8px 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid #e1e8ed; border-top: none;">
+    <p>Kính gửi: <strong>Quý Lãnh đạo / Cán bộ phụ trách</strong>,</p>
+    <p>{systemName} xin trân trọng thông báo về tiến độ thực hiện nhiệm vụ thuộc <strong>{planTitle}</strong>:</p>
+    
+    <div style="background: #fff; padding: 18px; border-left: 4px solid {headerBorderColor}; margin: 20px 0; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+      <p style="margin: 6px 0;"><strong>Nhóm công tác:</strong> <span style="color: #2563eb; font-weight: 600;">{groupName}</span></p>
+      <p style="margin: 6px 0;"><strong>Nội dung nhiệm vụ:</strong> <span style="font-weight: bold; color: #1e293b; font-size: 14px;">{taskContent}</span></p>
+      <p style="margin: 6px 0;"><strong>Sản phẩm / Kết quả đầu ra:</strong> {expectedOutcome}</p>
+      <p style="margin: 6px 0;"><strong>Đơn vị chủ trì:</strong> <span style="color: #0e7490; font-weight: 600;">{assignedDepartments}</span></p>
+      <p style="margin: 6px 0;"><strong>Đơn vị phối hợp:</strong> {coordinatingDepartments}</p>
+      <p style="margin: 6px 0;"><strong>BGH Phụ trách chỉ đạo:</strong> <span style="color: #7e22ce; font-weight: 600;">{bghInCharge}</span></p>
+      
+      <div style="margin: 12px 0; padding: 10px 14px; background-color: {alertBg}; border: 1px solid {alertBorder}; border-radius: 6px;">
+        <p style="margin: 4px 0;"><strong>Thời hạn thực hiện:</strong> <span style="font-weight: bold;">{dateRangeStr}</span></p>
+        <p style="margin: 4px 0;"><strong>Tình trạng hạn:</strong> <span style="font-weight: bold; color: {alertColor};">{deadlineStatusStr}</span></p>
+        <p style="margin: 4px 0;"><strong>Trạng thái nhiệm vụ:</strong> <span style="font-weight: 600;">{taskStatusStr}</span></p>
+        <p style="margin: 4px 0;"><strong>Nhận xét tự động:</strong> <em>{autoRemark}</em></p>
+      </div>
+
+      {noteBlockHtml}
+    </div>
+
+    <div style="text-align: center; margin: 25px 0;">
+      <a href="https://qlvb.namsaigon.edu.vn/schedule/quarterly-plan" target="_blank" style="background-color: {headerBorderColor}; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
+        Truy Cập Bảng Kế Hoạch Quý
+      </a>
+    </div>
+
+    <p style="font-size: 13px; color: #666;">Kính đề nghị Đơn vị chủ trì phối hợp chặt chẽ với các đơn vị liên quan để hoàn thành nhiệm vụ đúng tiến độ và báo cáo kịp thời cho Ban Giám hiệu phụ trách.</p>
+    <p style="margin-top: 20px;">Trân trọng,<br><strong>{systemName}</strong></p>
+  </div>
+  <div style="text-align: center; margin-top: 15px; color: #888; font-size: 11px;">
+    <p>Đây là thông báo tự động từ {systemName}, vui lòng không trả lời trực tiếp email này.</p>
+  </div>
+</body>
+</html>
+`;
+
 module.exports = {
   TEMPPASSWORD_EMAIL_TEMPLATE,
   NEW_DOCUMENT_EMAIL_TEMPLATE,
@@ -469,4 +518,6 @@ module.exports = {
   TRAINING_STATUS_EMAIL_TEMPLATE,
   ONLINE_RECORD_SUBMIT_EMAIL_TEMPLATE,
   ONLINE_RECORD_STATUS_EMAIL_TEMPLATE,
+  QUARTERLY_PLAN_REMINDER_EMAIL_TEMPLATE,
 };
+

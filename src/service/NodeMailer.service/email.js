@@ -9,6 +9,7 @@ const {
     TRAINING_STATUS_EMAIL_TEMPLATE,
     ONLINE_RECORD_SUBMIT_EMAIL_TEMPLATE,
     ONLINE_RECORD_STATUS_EMAIL_TEMPLATE,
+    QUARTERLY_PLAN_REMINDER_EMAIL_TEMPLATE,
 } = require("./emailTemplate");
 const nodemailer = require("nodemailer");
 const dotenv = require("dotenv");
@@ -1009,6 +1010,140 @@ const sendOnlineRecordStatusEmail = async (uniqueUsers, recordData, status, opin
     }
 };
 
+/**
+ * Gửi email thông báo nhắc nhở tiến độ / hạn xử lý nhiệm vụ Kế hoạch quý
+ * @param {Array<string>} recipientEmails Danh sách email người nhận (Cấp trưởng, Ban Giám hiệu)
+ * @param {Object} planData Dữ liệu kế hoạch { title, quarter, academicYear }
+ * @param {Object} itemData Dữ liệu nhiệm vụ { taskContent, expectedOutcome, startDate, expectedDeadline, actualCompletedDate, status, autoRemark, manualRemark, assignedDepartments, coordinatingDepartments, bghInCharge }
+ * @param {string} reminderType 'near_deadline' (sắp đến hạn), 'due_today' (đến hạn hôm nay), 'overdue' (quá hạn)
+ */
+const sendQuarterlyPlanReminderEmail = async (recipientEmails, planData, itemData, reminderType) => {
+    try {
+        if (!recipientEmails || recipientEmails.length === 0) return;
+        const bccList = Array.from(new Set(Array.isArray(recipientEmails) ? recipientEmails : [recipientEmails]))
+            .filter(e => !!e && typeof e === 'string' && e.includes('@'));
+        if (bccList.length === 0) return;
+
+        const { transporter, sender, brandName } = await getTransporterAndSender();
+
+        let headerTitle = "THÔNG BÁO TIẾN ĐỘ NHIỆM VỤ";
+        let reminderBadge = "Nhắc nhở công việc";
+        let headerColorStart = "#2563eb";
+        let headerColorEnd = "#3b82f6";
+        let headerBorderColor = "#2563eb";
+        let alertBg = "#eff6ff";
+        let alertBorder = "#bfdbfe";
+        let alertColor = "#1d4ed8";
+        let deadlineStatusStr = "Sắp đến hạn hoàn thành";
+
+        if (reminderType === "near_deadline") {
+            headerTitle = "NHIỆM VỤ SẮP ĐẾN HẠN HOÀN THÀNH";
+            reminderBadge = "Sắp đến hạn";
+            headerColorStart = "#f59e0b";
+            headerColorEnd = "#fbbf24";
+            headerBorderColor = "#d97706";
+            alertBg = "#fffbeb";
+            alertBorder = "#fde68a";
+            alertColor = "#b45309";
+            deadlineStatusStr = "Sắp đến hạn hoàn thành (còn trong vòng 3 ngày tới)";
+        } else if (reminderType === "due_today") {
+            headerTitle = "NHIỆM VỤ ĐẾN HẠN HÔM NAY";
+            reminderBadge = "Đến hạn hôm nay";
+            headerColorStart = "#ea580c";
+            headerColorEnd = "#f97316";
+            headerBorderColor = "#c2410c";
+            alertBg = "#fff7ed";
+            alertBorder = "#fed7aa";
+            alertColor = "#c2410c";
+            deadlineStatusStr = "ĐẾN HẠN HOÀN THÀNH TRONG HÔM NAY";
+        } else if (reminderType === "overdue") {
+            headerTitle = "NHIỆM VỤ ĐÃ QUÁ HẠN DỰ KIẾN";
+            reminderBadge = "Quá hạn hoàn thành";
+            headerColorStart = "#dc2626";
+            headerColorEnd = "#ef4444";
+            headerBorderColor = "#b91c1c";
+            alertBg = "#fef2f2";
+            alertBorder = "#fecaca";
+            alertColor = "#b91c1c";
+            deadlineStatusStr = "ĐÃ QUÁ HẠN DỰ KIẾN";
+        }
+
+        const planTitle = planData?.title 
+            ? `${planData.title} (Quý ${planData.quarter} - Năm học ${planData.academicYear || ''})`
+            : "Kế hoạch công tác trọng tâm theo Quý";
+
+        const startStr = itemData.startDate ? formatVietnamDate(itemData.startDate) : "";
+        const endStr = itemData.expectedDeadline ? formatVietnamDate(itemData.expectedDeadline) : "Chưa rõ";
+        const dateRangeStr = startStr ? `${startStr} đến ${endStr}` : endStr;
+
+        let assignedStr = "Chưa phân công";
+        if (Array.isArray(itemData.assignedDepartments) && itemData.assignedDepartments.length > 0) {
+            assignedStr = itemData.assignedDepartments.map(d => d.departmentName || d).join(', ');
+        }
+
+        let coordStr = "Không có";
+        if (Array.isArray(itemData.coordinatingDepartments) && itemData.coordinatingDepartments.length > 0) {
+            coordStr = itemData.coordinatingDepartments.map(d => d.departmentName || d).join(', ');
+        }
+
+        let bghStr = "Ban Giám hiệu";
+        if (Array.isArray(itemData.bghInCharge) && itemData.bghInCharge.length > 0) {
+            bghStr = itemData.bghInCharge.map(u => u.name || u).join(', ');
+        }
+
+        let taskStatusStr = "Đang thực hiện";
+        if (itemData.status === "NOT_STARTED") taskStatusStr = "Chưa làm";
+        else if (itemData.status === "COMPLETED") taskStatusStr = "Đã hoàn thành";
+        else if (itemData.status === "PAUSED") taskStatusStr = `Tạm dừng ${itemData.pauseReason ? `(${itemData.pauseReason})` : ''}`;
+        else if (itemData.status === "OVERDUE") taskStatusStr = "Quá hạn";
+
+        let noteBlockHtml = "";
+        if (itemData.manualRemark && itemData.manualRemark.trim()) {
+            noteBlockHtml = `
+            <div style="margin-top: 10px; padding: 8px 12px; background-color: #f8fafc; border-left: 3px solid #64748b; font-size: 13px; color: #475569;">
+                <strong>Ghi chú từ BGH / Quản lý:</strong> ${itemData.manualRemark}
+            </div>`;
+        }
+
+        const subject = `[${brandName} - Kế hoạch quý] [${reminderBadge}] ${itemData.taskContent}`;
+
+        let htmlContent = QUARTERLY_PLAN_REMINDER_EMAIL_TEMPLATE
+            .replace(/{headerTitle}/g, headerTitle)
+            .replace(/{reminderBadge}/g, reminderBadge)
+            .replace(/{headerColorStart}/g, headerColorStart)
+            .replace(/{headerColorEnd}/g, headerColorEnd)
+            .replace(/{headerBorderColor}/g, headerBorderColor)
+            .replace(/{planTitle}/g, planTitle)
+            .replace(/{groupName}/g, itemData.groupName || "Nhiệm vụ trọng tâm")
+            .replace(/{taskContent}/g, itemData.taskContent || "--")
+            .replace(/{expectedOutcome}/g, itemData.expectedOutcome || "Theo kế hoạch ban hành")
+            .replace(/{assignedDepartments}/g, assignedStr)
+            .replace(/{coordinatingDepartments}/g, coordStr)
+            .replace(/{bghInCharge}/g, bghStr)
+            .replace(/{dateRangeStr}/g, dateRangeStr)
+            .replace(/{deadlineStatusStr}/g, deadlineStatusStr)
+            .replace(/{alertBg}/g, alertBg)
+            .replace(/{alertBorder}/g, alertBorder)
+            .replace(/{alertColor}/g, alertColor)
+            .replace(/{taskStatusStr}/g, taskStatusStr)
+            .replace(/{autoRemark}/g, itemData.autoRemark || deadlineStatusStr)
+            .replace(/{noteBlockHtml}/g, noteBlockHtml);
+
+        const mailOptions = {
+            from: sender,
+            to: bccList.join(', '),
+            subject: subject,
+            html: applySystemBranding(htmlContent, brandName),
+        };
+
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`[Email] Đã gửi nhắc nhở Kế hoạch quý "${itemData.taskContent.substring(0, 40)}..." (${reminderType}) tới:`, bccList.join(', '), info?.messageId);
+        return true;
+    } catch (error) {
+        console.error("Error in sendQuarterlyPlanReminderEmail:", error);
+    }
+};
+
 module.exports = {
     sentTempPassword,
     sendRestoreOtpEmail,
@@ -1022,4 +1157,5 @@ module.exports = {
     sendTrainingStatusEmail,
     sendOnlineRecordSubmitEmail,
     sendOnlineRecordStatusEmail,
+    sendQuarterlyPlanReminderEmail,
 };

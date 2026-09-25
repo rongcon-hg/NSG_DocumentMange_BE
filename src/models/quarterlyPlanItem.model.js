@@ -125,6 +125,23 @@ const quarterlyPlanItemSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
     },
+    // Trạng thái đã gửi nhắc nhở qua Email & Chuông thông báo
+    nearDeadlineReminderSent: {
+      type: Boolean,
+      default: false,
+    },
+    dueTodayReminderSent: {
+      type: Boolean,
+      default: false,
+    },
+    overdueReminderSent: {
+      type: Boolean,
+      default: false,
+    },
+    lastReminderDate: {
+      type: String, // Lưu ngày dạng YYYY-MM-DD đã gửi nhắc nhở gần nhất
+      default: null,
+    },
   },
   {
     timestamps: true,
@@ -197,7 +214,7 @@ quarterlyPlanItemSchema.methods.calculateAutoRemark = function () {
     const diffDays = Math.round((dCompleted - dDeadline) / (1000 * 3600 * 24));
 
     if (diffDays < 0) {
-      this.autoRemark = `Hoàn thành sớm ${Math.abs(diffDays)} ngày`;
+      this.autoRemark = `Hoàn thành trước hạn ${Math.abs(diffDays)} ngày`;
       this.autoRemarkStatus = "EARLY";
     } else if (diffDays === 0) {
       this.autoRemark = "Hoàn thành đúng hạn";

@@ -17,6 +17,9 @@ router.delete("/:id", quarterlyPlanController.deleteQuarterlyPlan);
 // Chi tiết kế hoạch quý
 router.get("/:id", quarterlyPlanController.getQuarterlyPlanDetail);
 
+// Kích hoạt gửi email + chuông thông báo thủ công (Manager/Admin)
+router.post("/trigger-reminders", quarterlyPlanController.triggerPlanReminders);
+
 // Nhiệm vụ con trong kế hoạch quý
 router.post("/items", quarterlyPlanController.createPlanItem);
 router.post("/items/import", quarterlyPlanController.importPlanItems);
