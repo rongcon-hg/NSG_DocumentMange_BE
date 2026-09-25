@@ -1,6 +1,7 @@
 const { sendNewDocumentEmail, sendTaskNotificationEmail } = require("./NodeMailer.service/email");
 const User = require("../models/user.model");
 const Task = require("../models/task.model");
+const Notification = require("../models/notification.model");
 const { google } = require("googleapis");
 
 const triggerDocumentNotifications = async (document) => {
@@ -52,6 +53,19 @@ const triggerDocumentNotifications = async (document) => {
                         body: document.shortDescription || document.principalIdea || "Bạn có văn bản mới cần xử lý",
                         url: `/documents/ReceivedDocumentList`
                     }).catch(err => console.error("Push Notify Error:", err));
+
+                    // Lưu bản ghi thông báo vào database để hiển thị popup và danh sách thông báo trên chuông
+                    const notifDocs = recipientIds.map(recId => ({
+                        recipient: recId,
+                        sender: senderUser ? senderUser._id : undefined,
+                        type: "GENERAL",
+                        title: `Văn bản mới: ${document.docCode || "Thông báo"}`,
+                        message: document.shortDescription || document.principalIdea || "Bạn có một văn bản mới được gửi đến.",
+                        link: "/documents/ReceivedDocumentList",
+                        isRead: false,
+                        isPopupShown: false,
+                    }));
+                    Notification.insertMany(notifDocs).catch(err => console.error("Error creating document notifications:", err));
                 }
             } catch (pErr) {
                 console.error("WebPush invocation error:", pErr);
