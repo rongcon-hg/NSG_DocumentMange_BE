@@ -36,8 +36,10 @@ const canViewQuarterlyPlan = (user) => {
  */
 const getPlanMetadata = async (req, res) => {
   try {
-    // 1. Lấy toàn bộ đơn vị (Khoa/Phòng/Trung tâm)
-    const departments = await Department.find()
+    // 1. Lấy toàn bộ đơn vị (Khoa/Phòng/Trung tâm) đang hoạt động, loại trừ đơn vị có chữ "giải thể"
+    const departments = await Department.find({
+      departmentName: { $not: /giải thể/i },
+    })
       .select("_id departmentName departmentCode")
       .sort({ departmentName: 1 });
 
@@ -412,6 +414,108 @@ const deletePlanItem = async (req, res) => {
   }
 };
 
+/**
+ * Import danh sách nhiệm vụ từ Excel vào Kế hoạch quý (Chỉ Manager / Admin)
+ */
+const importPlanItems = async (req, res) => {
+  try {
+    if (!isManagerOrAdmin(req.user)) {
+      return res.status(403).json({ success: false, message: "Chỉ Quản lý mới có quyền import nhiệm vụ." });
+    }
+
+    const { planId, items } = req.body;
+    if (!planId) {
+      return res.status(400).json({ success: false, message: "Thiếu mã kế hoạch quý (planId)." });
+    }
+
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ success: false, message: "Danh sách nhiệm vụ trống." });
+    }
+
+    const plan = await QuarterlyPlan.findById(planId);
+    if (!plan) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy kế hoạch quý." });
+    }
+
+    // Tra cứu danh sách phòng ban và BGH để map tên sang ObjectId
+    const allDepts = await Department.find().select("_id departmentName");
+    const bghPositions = await Position.find({
+      $or: [{ positionCode: { $in: ["HT", "PHT"] } }, { positionName: { $regex: /hiệu trưởng/i } }],
+    }).select("_id");
+    const allBgh = await User.find({ position: { $in: bghPositions.map((p) => p._id) } }).select("_id name");
+
+    const createdItems = [];
+
+    for (const raw of items) {
+      if (!raw.taskContent || !raw.taskContent.trim()) continue;
+
+      // Tìm assignedDepartments
+      const assignedIds = [];
+      if (raw.assignedDepartmentNames && Array.isArray(raw.assignedDepartmentNames)) {
+        for (const name of raw.assignedDepartmentNames) {
+          const match = allDepts.find(
+            (d) => d.departmentName.trim().toLowerCase() === name.trim().toLowerCase()
+          );
+          if (match) assignedIds.push(match._id);
+        }
+      }
+
+      // Tìm coordinatingDepartments
+      const coordIds = [];
+      if (raw.coordinatingDepartmentNames && Array.isArray(raw.coordinatingDepartmentNames)) {
+        for (const name of raw.coordinatingDepartmentNames) {
+          const match = allDepts.find(
+            (d) => d.departmentName.trim().toLowerCase() === name.trim().toLowerCase()
+          );
+          if (match) coordIds.push(match._id);
+        }
+      }
+
+      // Tìm BGH
+      const bghIds = [];
+      if (raw.bghNames && Array.isArray(raw.bghNames)) {
+        for (const name of raw.bghNames) {
+          const cleanName = name.replace(/^(ThS\.|TS\.|Thầy|Cô|Hiệu trưởng|Phó Hiệu trưởng|HT|PHT)[:\s]+/i, "").trim().toLowerCase();
+          const match = allBgh.find(
+            (u) => u.name.trim().toLowerCase().includes(cleanName) || cleanName.includes(u.name.trim().toLowerCase())
+          );
+          if (match) bghIds.push(match._id);
+        }
+      }
+
+      const newItem = new QuarterlyPlanItem({
+        planId,
+        groupName: raw.groupName || "I. CÔNG TÁC CHÍNH TRỊ - TƯ TƯỞNG",
+        order: raw.order || (createdItems.length + 1),
+        taskContent: raw.taskContent.trim(),
+        expectedOutcome: raw.expectedOutcome || "",
+        assignedDepartments: assignedIds,
+        coordinatingDepartments: coordIds,
+        bghInCharge: bghIds,
+        startDate: raw.startDate ? new Date(raw.startDate) : null,
+        expectedDeadline: raw.expectedDeadline ? new Date(raw.expectedDeadline) : (plan.endDate || new Date()),
+        actualCompletedDate: raw.actualCompletedDate ? new Date(raw.actualCompletedDate) : null,
+        manualRemark: raw.manualRemark || "",
+        creator: req.user._id,
+        status: raw.actualCompletedDate ? "COMPLETED" : "NOT_STARTED",
+      });
+
+      newItem.calculateAutoRemark();
+      await newItem.save();
+      createdItems.push(newItem);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Đã import thành công ${createdItems.length} nhiệm vụ vào kế hoạch!`,
+      data: { count: createdItems.length },
+    });
+  } catch (error) {
+    console.error("Lỗi importPlanItems:", error);
+    return res.status(500).json({ success: false, message: "Lỗi import danh sách nhiệm vụ", error: error.message });
+  }
+};
+
 module.exports = {
   getPlanMetadata,
   getQuarterlyPlans,
@@ -422,4 +526,5 @@ module.exports = {
   createPlanItem,
   updatePlanItem,
   deletePlanItem,
+  importPlanItems,
 };

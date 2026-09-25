@@ -19,6 +19,7 @@ router.get("/:id", quarterlyPlanController.getQuarterlyPlanDetail);
 
 // Nhiệm vụ con trong kế hoạch quý
 router.post("/items", quarterlyPlanController.createPlanItem);
+router.post("/items/import", quarterlyPlanController.importPlanItems);
 router.put("/items/:itemId", quarterlyPlanController.updatePlanItem);
 router.delete("/items/:itemId", quarterlyPlanController.deletePlanItem);
 

@@ -117,25 +117,35 @@ const quarterlyPlanItemSchema = new mongoose.Schema(
 
 // Hàm helper tự động tính toán autoRemark và autoRemarkStatus
 quarterlyPlanItemSchema.methods.calculateAutoRemark = function () {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  // Lấy định dạng YYYY-MM-DD theo giờ địa phương / ISO date part để so sánh chuẩn xác theo ngày
+  const toDateOnlyStr = (d) => {
+    if (!d) return null;
+    const dateObj = new Date(d);
+    if (isNaN(dateObj.getTime())) return null;
+    // Sử dụng múi giờ Việt Nam (UTC+7) hoặc local
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Ho_Chi_Minh",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(dateObj); // Kết quả dạng "YYYY-MM-DD"
+  };
 
-  const deadline = this.expectedDeadline ? new Date(this.expectedDeadline) : null;
-  if (deadline) deadline.setHours(0, 0, 0, 0);
+  const deadlineStr = toDateOnlyStr(this.expectedDeadline);
+  const completedStr = toDateOnlyStr(this.actualCompletedDate);
+  const todayStr = toDateOnlyStr(new Date());
 
-  const completed = this.actualCompletedDate ? new Date(this.actualCompletedDate) : null;
-  if (completed) completed.setHours(0, 0, 0, 0);
-
-  if (!deadline) {
+  if (!deadlineStr) {
     this.autoRemark = "Chưa thiết lập hạn dự kiến";
     this.autoRemarkStatus = "NOT_STARTED";
     return;
   }
 
   // Trường hợp 1: Đã hoàn thành (có ngày hoàn thành thực tế)
-  if (completed) {
-    const diffTime = completed.getTime() - deadline.getTime();
-    const diffDays = Math.round(diffTime / (1000 * 3600 * 24));
+  if (completedStr) {
+    const dDeadline = new Date(deadlineStr).getTime();
+    const dCompleted = new Date(completedStr).getTime();
+    const diffDays = Math.round((dCompleted - dDeadline) / (1000 * 3600 * 24));
 
     if (diffDays < 0) {
       this.autoRemark = `Hoàn thành sớm ${Math.abs(diffDays)} ngày`;
@@ -153,8 +163,9 @@ quarterlyPlanItemSchema.methods.calculateAutoRemark = function () {
   }
 
   // Trường hợp 2: Chưa hoàn thành
-  const diffTime = today.getTime() - deadline.getTime();
-  const diffDays = Math.round(diffTime / (1000 * 3600 * 24));
+  const dDeadline = new Date(deadlineStr).getTime();
+  const dToday = new Date(todayStr).getTime();
+  const diffDays = Math.round((dToday - dDeadline) / (1000 * 3600 * 24));
 
   if (diffDays > 0) {
     this.autoRemark = `Quá hạn dự kiến (${diffDays} ngày)`;
