@@ -126,11 +126,12 @@ const createComment = async (req, res) => {
       .populate("mentions", "name email")
       .lean();
 
-    // Gửi thông báo đến những người được tag (@mention)
-    if (parsedMentions && parsedMentions.length > 0) {
-      const senderUser = await User.findById(senderId).select("name");
-      const senderName = senderUser?.name || "Một cán bộ";
+    // Lấy thông tin người gửi
+    const senderUser = await User.findById(senderId).select("name");
+    const senderName = senderUser?.name || "Một cán bộ";
 
+    // 1. Gửi thông báo đến những người được tag (@mention)
+    if (parsedMentions && parsedMentions.length > 0) {
       const recipientUsers = await User.find({ _id: { $in: parsedMentions } });
 
       let targetTitle = "";
@@ -166,6 +167,74 @@ const createComment = async (req, res) => {
             // Non-blocking
           }
         }
+      }
+    }
+
+    // 2. Gửi thông báo chuông & Web Push đến toàn bộ nhân sự được phân công (Assignees & Collaborators & Creator)
+    if (targetType === "Task") {
+      try {
+        const task = await Task.findById(targetId).select("title assignees collaborators createdBy");
+        if (task) {
+          const taskRecipientSet = new Set();
+
+          // Thêm người thực hiện chính (assignees)
+          if (Array.isArray(task.assignees)) {
+            task.assignees.forEach(a => {
+              const id = (a?._id || a)?.toString();
+              if (id) taskRecipientSet.add(id);
+            });
+          }
+
+          // Thêm người phối hợp (collaborators)
+          if (Array.isArray(task.collaborators)) {
+            task.collaborators.forEach(c => {
+              const id = (c?._id || c)?.toString();
+              if (id) taskRecipientSet.add(id);
+            });
+          }
+
+          // Thêm người tạo công việc (createdBy)
+          if (task.createdBy) {
+            taskRecipientSet.add(task.createdBy.toString());
+          }
+
+          // Loại trừ người vừa gửi ý kiến trao đổi và những người đã nhận thông báo qua @mention ở trên
+          const mentionedIdSet = new Set((parsedMentions || []).map(m => m.toString()));
+          taskRecipientSet.delete(senderId.toString());
+          mentionedIdSet.forEach(mId => taskRecipientSet.delete(mId));
+
+          const taskRecipientIds = Array.from(taskRecipientSet);
+
+          if (taskRecipientIds.length > 0) {
+            const notificationsToInsert = taskRecipientIds.map(recId => ({
+              recipient: recId,
+              sender: senderId,
+              type: "COMMENT_NEW",
+              title: "Ý kiến trao đổi mới trong công việc",
+              message: `${senderName} vừa gửi trao đổi mới trong công việc "${task.title}": "${content.substring(0, 70)}${content.length > 70 ? '...' : ''}"`,
+              task: task._id,
+              link: `/schedule?taskId=${task._id}`,
+              isRead: false,
+              isPopupShown: false,
+            }));
+
+            await Notification.insertMany(notificationsToInsert);
+
+            // Gửi Web Push Notification tức thời
+            try {
+              const { sendPushToUsers } = require("../service/webPush.service");
+              sendPushToUsers(taskRecipientIds, {
+                title: `Trao đổi công việc: ${task.title}`,
+                body: `${senderName}: ${content.substring(0, 80)}`,
+                url: `/schedule?taskId=${task._id}`,
+              }).catch(err => console.error("Comment WebPush Error:", err));
+            } catch (pushErr) {
+              console.error("WebPush invocation error in comment:", pushErr);
+            }
+          }
+        }
+      } catch (taskNotifErr) {
+        console.error("Lỗi gửi thông báo trao đổi cho nhân sự công việc:", taskNotifErr);
       }
     }
 

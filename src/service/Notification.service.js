@@ -144,6 +144,33 @@ const createTasksAndSyncGoogleCalendar = async (document, uniqueUsers) => {
                     assignees: uniqueUsers
                 };
                 sendTaskNotificationEmail(uniqueUsers, taskDataForEmail, 'create').catch(err => console.error("Error sending task email:", err));
+
+                // Gửi thông báo chuông và Web Push cho người xử lý công việc từ văn bản
+                const creatorName = senderName || "Hệ thống";
+                const targetRecipients = uniqueUsers.filter(u => u._id.toString() !== createdBy.toString());
+                if (targetRecipients.length > 0) {
+                    const notifDocs = targetRecipients.map(u => ({
+                        recipient: u._id,
+                        sender: createdBy,
+                        type: "TASK_ASSIGNED",
+                        title: "Bạn có công việc mới từ văn bản",
+                        message: `${creatorName} đã giao bạn xử lý công việc: "${taskTitle}". Hạn xử lý: ${endDate.toLocaleDateString("vi-VN")}.`,
+                        task: newTask._id,
+                        link: `/schedule?taskId=${newTask._id}`,
+                        isRead: false,
+                        isPopupShown: false,
+                    }));
+                    Notification.insertMany(notifDocs).catch(e => console.error("Error inserting notifs from doc-task:", e));
+
+                    try {
+                        const { sendPushToUsers } = require("./webPush.service");
+                        sendPushToUsers(targetRecipients.map(u => u._id), {
+                            title: "Công việc mới từ văn bản",
+                            body: `${creatorName} đã giao bạn xử lý: ${taskTitle}`,
+                            url: `/schedule?taskId=${newTask._id}`,
+                        }).catch(e => console.error("Error sending push from doc-task:", e));
+                    } catch (pushErr) {}
+                }
             }
         }
 

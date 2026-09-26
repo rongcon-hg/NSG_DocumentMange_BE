@@ -297,8 +297,54 @@ const createTask = async (req, res) => {
                 sendTaskNotificationEmail(uniqueUsers, populatedTask, 'create');
                 syncTaskToGoogleCalendar(populatedTask, uniqueUsers);
             }
+
+            // Gửi thông báo trong hệ thống (chuông & popup) + Web Push Notification cho người được phân công
+            const creatorUser = uniqueUsersMap.get(createdBy.toString()) || await User.findById(createdBy).select("name");
+            const creatorName = creatorUser?.name || "Lãnh đạo / Người giao việc";
+
+            const assignedRecipientIds = uniqueUsers
+                .filter(u => u._id.toString() !== createdBy.toString())
+                .map(u => u._id);
+
+            if (assignedRecipientIds.length > 0) {
+                const notifs = assignedRecipientIds.map(recId => {
+                    const isAssignee = Array.isArray(populatedTask.assignees) && populatedTask.assignees.some(a => (a._id || a).toString() === recId.toString());
+                    const roleTitle = isAssignee ? "người thực hiện chính" : "người phối hợp";
+                    return {
+                        recipient: recId,
+                        sender: createdBy,
+                        type: "TASK_ASSIGNED",
+                        title: "Bạn có công việc mới được phân công",
+                        message: `${creatorName} đã phân công bạn làm ${roleTitle} công việc: "${populatedTask.title}". Hạn hoàn thành: ${new Date(populatedTask.endDate).toLocaleDateString("vi-VN")}.`,
+                        task: populatedTask._id,
+                        link: `/schedule?taskId=${populatedTask._id}`,
+                        isRead: false,
+                        isPopupShown: false,
+                        metadata: {
+                            taskId: populatedTask._id,
+                            taskTitle: populatedTask.title,
+                            creatorName,
+                            roleTitle,
+                        }
+                    };
+                });
+
+                await Notification.insertMany(notifs);
+
+                // Gửi Web Push Notification tức thời
+                try {
+                    const { sendPushToUsers } = require('../service/webPush.service');
+                    sendPushToUsers(assignedRecipientIds, {
+                        title: "Công việc mới được phân công",
+                        body: `${creatorName} đã phân công bạn: ${populatedTask.title}`,
+                        url: `/schedule?taskId=${populatedTask._id}`,
+                    }).catch(pushErr => console.error("Error sending push for newTask:", pushErr));
+                } catch (pushEx) {
+                    console.error("Push notification invocation error:", pushEx);
+                }
+            }
         } catch (emailErr) {
-            console.error("Lỗi gửi email tạo task:", emailErr);
+            console.error("Lỗi gửi email/thông báo tạo task:", emailErr);
         }
 
         const fullPopulatedTask = await Task.findById(newTask._id)
@@ -760,8 +806,49 @@ const updateTask = async (req, res) => {
             if (uniqueUsers.length > 0) {
                 sendTaskNotificationEmail(uniqueUsers, populatedTask, actionType);
             }
+
+            // Gửi thông báo chuông và Web Push cho các nhân sự trong công việc khi có cập nhật hoặc phân công mới
+            const updaterUser = await User.findById(updater).select("name");
+            const updaterName = updaterUser?.name || "Người phụ trách";
+
+            // Danh sách người nhận (loại trừ chính người vừa thực hiện cập nhật)
+            const notifyRecipients = uniqueUsers.filter(u => u._id.toString() !== updater.toString());
+            if (notifyRecipients.length > 0) {
+                let notifTitle = "Công việc có cập nhật mới";
+                let notifMsg = `${updaterName} đã cập nhật thông tin công việc: "${populatedTask.title}". (${details.replace(/\n/g, ', ')})`;
+
+                if (assigneesChanged) {
+                    notifTitle = "Phân công công việc đã thay đổi";
+                } else if (statusChanged) {
+                    notifTitle = "Trạng thái công việc đã thay đổi";
+                }
+
+                const notifDocs = notifyRecipients.map(u => ({
+                    recipient: u._id,
+                    sender: updater,
+                    type: assigneesChanged ? "TASK_ASSIGNED" : "GENERAL",
+                    title: notifTitle,
+                    message: notifMsg,
+                    task: populatedTask._id,
+                    link: `/schedule?taskId=${populatedTask._id}`,
+                    isRead: false,
+                    isPopupShown: false,
+                }));
+
+                await Notification.insertMany(notifDocs);
+
+                // Gửi Web Push Notification
+                try {
+                    const { sendPushToUsers } = require('../service/webPush.service');
+                    sendPushToUsers(notifyRecipients.map(u => u._id), {
+                        title: notifTitle,
+                        body: `${updaterName}: ${populatedTask.title}`,
+                        url: `/schedule?taskId=${populatedTask._id}`,
+                    }).catch(err => console.error("Error sending push in updateTask:", err));
+                } catch (pushErr) {}
+            }
         } catch (emailErr) {
-            console.error("Lỗi gửi email cập nhật task:", emailErr);
+            console.error("Lỗi gửi email/thông báo cập nhật task:", emailErr);
         }
 
         res.status(200).json({ success: true, message: "Task updated", data: populatedTask });
