@@ -401,37 +401,84 @@ const uploadAndParseWord = async (req, res) => {
       return res.status(400).json({ success: false, message: "Tệp tin tải lên rỗng." });
     }
 
-    // Kiểm tra nếu tệp là định dạng .doc nhị phân cũ (magic bytes D0 CF 11 E0)
+    // 1. Kiểm tra nếu tệp là định dạng .doc nhị phân cũ (magic bytes D0 CF 11 E0)
     if (fileBuffer.length >= 4 && fileBuffer[0] === 0xD0 && fileBuffer[1] === 0xCF && fileBuffer[2] === 0x11 && fileBuffer[3] === 0xE0) {
       return res.status(400).json({
         success: false,
-        message: "Tệp tin của bạn thuộc định dạng Word .doc đời cũ (Microsoft Word 97-2003). Vui lòng mở tệp trong Word, chọn 'Lưu thành' (Save As) dạng .docx rồi tải lên lại để AI thẩm định chính xác nhất!",
+        message: "Tệp tin của bạn thuộc định dạng Word .doc đời cũ (Microsoft Word 97-2003). Vui lòng mở tệp trong Word trên máy tính, chọn 'Lưu thành' (Save As) dạng .docx rồi tải lên lại để AI thẩm định chính xác nhất!",
       });
     }
 
-    // Chuyển đổi DOCX sang HTML bằng mammoth
-    const options = {
-      styleMap: [
-        "p[style-name='Heading 1'] => h1:fresh",
-        "p[style-name='Heading 2'] => h2:fresh",
-        "p[style-name='Heading 3'] => h3:fresh",
-      ],
-    };
+    // 2. Kiểm tra nếu tệp thực chất là HTML/MHTML/XML được lưu dưới đuôi .doc / .docx (rất phổ biến khi xuất văn bản từ web)
+    const headerPrefix = fileBuffer.slice(0, 1024).toString("utf-8").toLowerCase();
+    const isHtmlDoc =
+      headerPrefix.includes("<html") ||
+      headerPrefix.includes("<!doctype html") ||
+      headerPrefix.includes("xmlns:w=\"urn:schemas-microsoft-com:office:word\"") ||
+      headerPrefix.includes("xmlns:o=\"urn:schemas-microsoft-com:office:office\"") ||
+      headerPrefix.includes("<body") ||
+      headerPrefix.includes("<table");
 
     let htmlContent = "";
-    try {
-      const conversionResult = await mammoth.convertToHtml({ buffer: fileBuffer }, options);
-      htmlContent = conversionResult.value || "";
-    } catch (parseErr) {
-      // Fallback thử trích xuất raw text nếu convert HTML thất bại
-      try {
-        const rawResult = await mammoth.extractRawText({ buffer: fileBuffer });
-        if (rawResult.value) {
-          htmlContent = rawResult.value.split("\n").filter(l => l.trim()).map(l => `<p>${l}</p>`).join("");
-        }
-      } catch (fallbackErr) {
-        throw parseErr;
+
+    if (isHtmlDoc) {
+      // Đọc trực tiếp nội dung HTML từ fileBuffer
+      const fullText = fileBuffer.toString("utf-8");
+      // Trích xuất phần thân bên trong <body>...</body> nếu có
+      const bodyMatch = fullText.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+      if (bodyMatch && bodyMatch[1]) {
+        htmlContent = bodyMatch[1].trim();
+      } else {
+        htmlContent = fullText.trim();
       }
+    } else {
+      // 3. Kiểm tra xem có phải chuẩn tệp nén ZIP (.docx chuẩn luôn bắt đầu bằng magic bytes PK\x03\x04 hoặc PK\x05\x06)
+      const isZip = fileBuffer.length >= 4 && fileBuffer[0] === 0x50 && fileBuffer[1] === 0x4B;
+
+      if (!isZip) {
+        return res.status(400).json({
+          success: false,
+          message: "Tệp tải lên không phải là định dạng Word .docx chuẩn. Vui lòng mở tệp trong Microsoft Word hoặc Google Docs, chọn 'Lưu thành' (Save As) tệp .docx rồi tải lên lại!",
+        });
+      }
+
+      // Chuyển đổi DOCX sang HTML bằng mammoth
+      const options = {
+        styleMap: [
+          "p[style-name='Heading 1'] => h1:fresh",
+          "p[style-name='Heading 2'] => h2:fresh",
+          "p[style-name='Heading 3'] => h3:fresh",
+        ],
+      };
+
+      try {
+        const conversionResult = await mammoth.convertToHtml({ buffer: fileBuffer }, options);
+        htmlContent = conversionResult.value || "";
+      } catch (parseErr) {
+        // Fallback thử trích xuất raw text nếu convert HTML thất bại
+        try {
+          const rawResult = await mammoth.extractRawText({ buffer: fileBuffer });
+          if (rawResult.value) {
+            htmlContent = rawResult.value.split("\n").filter(l => l.trim()).map(l => `<p>${l}</p>`).join("");
+          } else {
+            throw parseErr;
+          }
+        } catch (fallbackErr) {
+          console.warn("Lỗi mammoth parse:", parseErr.message);
+          return res.status(400).json({
+            success: false,
+            message: "Không thể đọc nội dung tệp .docx do tệp bị lỗi hoặc không đúng chuẩn. Vui lòng mở tệp bằng Word, lưu lại thành .docx mới và thử lại!",
+            error: parseErr.message,
+          });
+        }
+      }
+    }
+
+    if (!htmlContent || htmlContent.trim().length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Không tìm thấy nội dung văn bản trong tệp tin Word đã tải lên.",
+      });
     }
 
     // Bọc nội dung trong thẻ div chuẩn hiển thị nếu chưa có bọc
