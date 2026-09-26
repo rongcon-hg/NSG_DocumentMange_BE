@@ -5,6 +5,7 @@ const upload = require('../middleware/multer');
 const { verifyToken } = require('../middleware/authMiddleware');
 
 router.post('/', verifyToken, upload.array('files', 10), taskController.createTask);
+router.post('/bulk-create', verifyToken, taskController.bulkCreateTasks);
 router.get('/', verifyToken, taskController.getTasks);
 router.get('/kpi/stats', verifyToken, taskController.getKpiStats);
 router.put('/:taskId', verifyToken, upload.array('files', 10), taskController.updateTask);

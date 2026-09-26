@@ -1897,7 +1897,111 @@ const deleteSubtask = async (req, res) => {
         res.status(200).json({ success: true, message: "Đã xóa công việc con", data: populatedTask });
     } catch (error) {
         console.error("Error deleting subtask:", error);
-        res.status(500).json({ success: false, message: "Server Error", error: error.message });
+/**
+ * Import nhiều công việc từ file Excel (Bulk Create Tasks)
+ */
+const bulkCreateTasks = async (req, res) => {
+    try {
+        const createdBy = req.user ? req.user._id : req.body.createdBy;
+        const { tasks } = req.body;
+
+        if (!Array.isArray(tasks) || tasks.length === 0) {
+            return res.status(400).json({ success: false, message: "Danh sách công việc nhập vào trống" });
+        }
+
+        const createdTasks = [];
+        const allAssignedRecipients = new Set();
+
+        for (const t of tasks) {
+            if (!t.title || !t.title.trim()) continue;
+
+            const taskType = t.taskType === 'URGENT' ? 'URGENT' : 'REGULAR';
+            const baseScore = t.baseScore !== undefined ? Number(t.baseScore) : (taskType === 'URGENT' ? 12 : 10);
+            const difficultyRate = t.difficultyRate !== undefined ? Number(t.difficultyRate) : 1.0;
+            const assignees = Array.isArray(t.assignees) && t.assignees.length > 0 ? t.assignees : (createdBy ? [createdBy] : []);
+            let collaborators = Array.isArray(t.collaborators) ? t.collaborators : [];
+            const subtasks = Array.isArray(t.subtasks) ? t.subtasks.map(s => ({
+                title: s.title ? s.title.trim() : "",
+                assignee: s.assignee || null,
+                startDate: s.startDate ? new Date(s.startDate) : null,
+                endDate: s.endDate ? new Date(s.endDate) : null,
+                status: s.status || "TODO",
+                createdBy: createdBy,
+                createdAt: new Date()
+            })).filter(s => s.title) : [];
+
+            collaborators = syncCollaboratorsWithSubtasks(assignees, collaborators, subtasks);
+
+            const newTask = new Task({
+                title: t.title.trim(),
+                description: t.description || '',
+                notes: t.notes || '',
+                startDate: t.startDate ? new Date(t.startDate) : new Date(),
+                endDate: t.endDate ? new Date(t.endDate) : new Date(),
+                assignees,
+                collaborators,
+                subtasks,
+                files: [],
+                priority: t.priority || 'NORMAL',
+                status: t.status || 'TODO',
+                taskType,
+                baseScore,
+                outputResult: t.outputResult ? String(t.outputResult).trim() : '',
+                focusAxis: t.focusAxis ? String(t.focusAxis).trim() : '',
+                difficultyRate,
+                createdBy,
+                history: [{
+                    action: 'Import Excel',
+                    user: createdBy,
+                    details: subtasks.length > 0 
+                        ? `Import từ file Excel kèm ${subtasks.length} công việc con` 
+                        : 'Import từ file Excel',
+                    timestamp: new Date()
+                }]
+            });
+
+            await newTask.save();
+            createdTasks.push(newTask);
+
+            // Ghi nhận người nhận thông báo
+            assignees.forEach(a => {
+                if (a.toString() !== createdBy.toString()) allAssignedRecipients.add(a.toString());
+            });
+            collaborators.forEach(c => {
+                if (c.toString() !== createdBy.toString()) allAssignedRecipients.add(c.toString());
+            });
+        }
+
+        // Tạo thông báo trong hệ thống cho người nhận
+        if (allAssignedRecipients.size > 0 && createdTasks.length > 0) {
+            try {
+                const creatorUser = await User.findById(createdBy).select("name");
+                const creatorName = creatorUser?.name || "Lãnh đạo / Quản trị viên";
+                const notifs = Array.from(allAssignedRecipients).map(recId => ({
+                    recipient: recId,
+                    sender: createdBy,
+                    type: "TASK_ASSIGNED",
+                    title: `Bạn được giao ${createdTasks.length} công việc mới (Import Excel)`,
+                    message: `${creatorName} đã phân công bạn trong đợt nhập công việc mới (${createdTasks.length} việc). Vui lòng kiểm tra lịch làm việc.`,
+                    link: `/schedule/all`,
+                    isRead: false,
+                    isPopupShown: false,
+                    metadata: { count: createdTasks.length, creatorName }
+                }));
+                await Notification.insertMany(notifs);
+            } catch (notifErr) {
+                console.error("Lỗi tạo thông báo bulkCreateTasks:", notifErr);
+            }
+        }
+
+        res.status(201).json({
+            success: true,
+            message: `Nhập thành công ${createdTasks.length} công việc từ file Excel`,
+            data: createdTasks
+        });
+    } catch (error) {
+        console.error("Error bulkCreateTasks:", error);
+        res.status(500).json({ success: false, message: "Lỗi khi nhập công việc từ file", error: error.message });
     }
 };
 
@@ -1910,5 +2014,6 @@ module.exports = {
     deleteTask,
     addSubtask,
     updateSubtask,
-    deleteSubtask
+    deleteSubtask,
+    bulkCreateTasks
 };
