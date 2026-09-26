@@ -1,4 +1,5 @@
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+const mammoth = require("mammoth");
 const ChatbotConfig = require("../models/chatbotConfig.model");
 const DocumentDraft = require("../models/documentDraft.model");
 const User = require("../models/user.model");
@@ -171,7 +172,7 @@ Bắt buộc dùng bảng không viền 2 cột:
 };
 
 /**
- * Thẩm định thể thức văn bản theo Nghị định 30/2020/NĐ-CP
+ * Thẩm định thể thức văn bản theo Nghị định 30/2020/NĐ-CP và Thẩm định hiệu lực của các căn cứ pháp lý
  */
 const auditDocumentCompliance = async (req, res) => {
   try {
@@ -203,33 +204,48 @@ const auditDocumentCompliance = async (req, res) => {
     };
 
     const auditPrompt = `
-Bạn là chuyên gia kiểm tra và thẩm định thể thức văn bản hành chính theo Nghị định 30/2020/NĐ-CP của Chính phủ Việt Nam.
-Hãy kiểm tra văn bản dưới đây và đưa ra đánh giá chi tiết:
-1. Điểm số chuẩn thể thức (từ 0 đến 100)
-2. Các lỗi hoặc thiếu sót thể thức:
-   - Cơ quan ban hành: Tuyệt đối KHÔNG viết tắt "UBND" (phải viết đầy đủ "ỦY BAN NHÂN DÂN", không in đậm).
-   - Đơn vị ban hành "TRƯỜNG CAO ĐẲNG BÁCH KHOA NAM SÀI GÒN" phải in đậm, viết hoa.
-   - Quốc hiệu: "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM" in hoa đậm; Tiêu ngữ "Độc lập - Tự do - Hạnh phúc" chữ in thường đứng đậm, có gạch nối.
-   - Căn cứ, bố cục nội dung, thụt đầu dòng (1 - 1.27cm), căn lề 2 bên (justify).
-   - Nơi nhận: "Nơi nhận:" in đậm nghiêng 12pt, các mục liệt kê 11pt, gạch đầu dòng. Chữ ký bên phải.
-3. Đề xuất chỉnh sửa cụ thể.
+Bạn là chuyên gia thẩm định văn bản hành chính nhà nước và chuyên gia pháp chế pháp luật Việt Nam.
+Nhiệm vụ của bạn là thẩm định toàn diện văn bản hành chính dưới đây theo 2 nội dung trọng tâm:
+
+PHẦN 1: THẨM ĐỊNH THỂ THỨC VĂN BẢN (Theo Nghị định 30/2020/NĐ-CP của Chính phủ):
+1. Cơ quan ban hành: Tuyệt đối KHÔNG viết tắt "UBND" (phải viết đầy đủ "ỦY BAN NHÂN DÂN", không in đậm).
+   Đơn vị ban hành: "TRƯỜNG CAO ĐẲNG BÁCH KHOA NAM SÀI GÒN" (phải in đậm, viết hoa).
+2. Quốc hiệu & Tiêu ngữ: "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM" in hoa đậm; Tiêu ngữ "Độc lập - Tự do - Hạnh phúc" in thường đứng đậm, có dấu gạch nối giữa các từ.
+3. Địa danh và ngày tháng năm ban hành văn bản: Chữ in nghiêng.
+4. Tên loại văn bản & Trích yếu nội dung: Tên loại in hoa đậm ở giữa, trích yếu in đậm ở giữa.
+5. Căn cứ ban hành, bố cục nội dung, thụt đầu dòng (1 - 1.27cm), căn lề 2 bên (justify).
+6. Chức danh người ký & Nơi nhận: Nơi nhận in đậm nghiêng, danh sách nơi nhận 11pt gạch đầu dòng; Chức danh người ký in hoa đậm.
+
+PHẦN 2: THẨM ĐỊNH TÍNH HIỆU LỰC CỦA CÁC CĂN CỨ PHÁP LUẬT:
+Rà soát toàn bộ các điều khoản căn cứ pháp lý được viện dẫn trong văn bản (ví dụ: Luật, Nghị định, Thông tư, Quyết định...):
+- Liệt kê từng căn cứ pháp luật có trong văn bản.
+- Đánh giá tình trạng hiệu lực: "Còn hiệu lực", "Đã hết hiệu lực" (được thay thế bởi văn bản nào), "Hết hiệu lực một phần", hoặc "Chưa có căn cứ pháp lý rõ ràng".
+- Ghi chú phân tích chi tiết và đề xuất văn bản pháp luật mới nhất hiện hành cần thay thế (nếu căn cứ cũ đã hết hiệu lực).
 
 Văn bản cần thẩm định:
 """
 ${content}
 """
 
-YÊU CẦU: Trả về ĐÚNG DUY NHẤT một chuỗi JSON thuần, không dùng backticks markdown, theo định dạng:
+YÊU CẦU: Trả về ĐÚNG DUY NHẤT một chuỗi JSON thuần (không có bất kỳ từ dẫn dắt nào, không markdown bọc ngoài):
 {
-  "score": 95,
-  "issues": ["...", "..."],
-  "suggestions": ["...", "..."]
+  "score": 90,
+  "issues": ["Danh sách các lỗi thể thức phát hiện được..."],
+  "suggestions": ["Danh sách các gợi ý hoàn thiện thể thức..."],
+  "legalReview": [
+    {
+      "basis": "Tên căn cứ được trích dẫn trong văn bản (ví dụ: Nghị định số 110/2004/NĐ-CP...)",
+      "status": "Đã hết hiệu lực",
+      "note": "Đã được thay thế bởi Nghị định số 30/2020/NĐ-CP ngày 05/03/2020 của Chính phủ về công tác văn thư.",
+      "replacement": "Nghị định số 30/2020/NĐ-CP"
+    }
+  ]
 }
 `;
 
     const rawOutput = (await callGeminiWithFallback(auditPrompt)).trim();
     
-    let auditData = { score: 92, issues: [], suggestions: [] };
+    let auditData = { score: 92, issues: [], suggestions: [], legalReview: [] };
     try {
       const cleaned = rawOutput.replace(/```json/gi, "").replace(/```/g, "").trim();
       auditData = JSON.parse(cleaned);
@@ -239,6 +255,7 @@ YÊU CẦU: Trả về ĐÚNG DUY NHẤT một chuỗi JSON thuần, không dùn
         score: 88,
         issues: ["Không thể phân tích tự động chi tiết"],
         suggestions: [rawOutput.substring(0, 300)],
+        legalReview: [],
       };
     }
 
@@ -370,9 +387,59 @@ const getDraftHistory = async (req, res) => {
   }
 };
 
+/**
+ * Tải lên tệp Word (.docx) và trích xuất nội dung HTML / văn bản
+ */
+const uploadAndParseWord = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: "Vui lòng chọn tệp Word (.docx) để tải lên." });
+    }
+
+    const fileBuffer = req.file.buffer;
+    if (!fileBuffer || fileBuffer.length === 0) {
+      return res.status(400).json({ success: false, message: "Tệp tin tải lên rỗng." });
+    }
+
+    // Chuyển đổi DOCX sang HTML bằng mammoth
+    const options = {
+      styleMap: [
+        "p[style-name='Heading 1'] => h1:fresh",
+        "p[style-name='Heading 2'] => h2:fresh",
+        "p[style-name='Heading 3'] => h3:fresh",
+      ],
+    };
+
+    const conversionResult = await mammoth.convertToHtml({ buffer: fileBuffer }, options);
+    let htmlContent = conversionResult.value || "";
+
+    // Bọc nội dung trong thẻ div chuẩn hiển thị nếu chưa có bọc
+    if (!htmlContent.startsWith("<div") && !htmlContent.startsWith("<table")) {
+      htmlContent = `<div style="font-family: 'Times New Roman', Times, serif; font-size: 13pt; line-height: 1.45; text-align: justify;">${htmlContent}</div>`;
+    }
+
+    return res.json({
+      success: true,
+      message: "Trích xuất nội dung tệp Word thành công!",
+      data: {
+        fileName: req.file.originalname,
+        content: htmlContent,
+      },
+    });
+  } catch (error) {
+    console.error("Lỗi uploadAndParseWord:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Không thể đọc nội dung tệp Word. Vui lòng đảm bảo tệp có định dạng .docx hợp lệ. Chi tiết: " + (error.message || ""),
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   generateAIDraft,
   auditDocumentCompliance,
   fixDocumentCompliance,
+  uploadAndParseWord,
   getDraftHistory,
 };

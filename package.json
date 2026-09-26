@@ -30,6 +30,7 @@
     "ioredis": "^5.4.2",
     "jsonwebtoken": "^9.0.2",
     "libreoffice-convert": "^1.8.2",
+    "mammoth": "^1.12.3",
     "mongodb": "^6.21.0",
     "mongoose": "^8.8.5",
     "multer": "^2.0.2",
