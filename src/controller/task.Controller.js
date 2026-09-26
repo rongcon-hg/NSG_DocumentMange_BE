@@ -1897,6 +1897,10 @@ const deleteSubtask = async (req, res) => {
         res.status(200).json({ success: true, message: "Đã xóa công việc con", data: populatedTask });
     } catch (error) {
         console.error("Error deleting subtask:", error);
+        res.status(500).json({ success: false, message: "Lỗi xóa công việc con", error: error.message });
+    }
+};
+
 /**
  * Import nhiều công việc từ file Excel (Bulk Create Tasks)
  */
