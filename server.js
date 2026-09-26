@@ -171,6 +171,11 @@ const aiDraftRoutes = require('./src/routes/aiDraft.routes');
 app.use('/api/ai-draft', aiDraftRoutes);
 app.use('/ai-draft', aiDraftRoutes);
 
+// Legal Basis Database routes
+const legalBasisRoutes = require('./src/routes/legalBasis.routes');
+app.use('/api/legal-bases', legalBasisRoutes);
+app.use('/legal-bases', legalBasisRoutes);
+
 // Quarterly Work Plan (Kế hoạch quý) routes
 const quarterlyPlanRoutes = require('./src/routes/quarterlyPlan.routes');
 app.use('/api/quarterly-plans', quarterlyPlanRoutes);

@@ -2,6 +2,7 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 const mammoth = require("mammoth");
 const ChatbotConfig = require("../models/chatbotConfig.model");
 const DocumentDraft = require("../models/documentDraft.model");
+const LegalBasis = require("../models/legalBasis.model");
 const User = require("../models/user.model");
 
 const DOC_TYPE_LABELS = {
@@ -257,6 +258,40 @@ YÊU CẦU: Trả về ĐÚNG DUY NHẤT một chuỗi JSON thuần (không có 
         suggestions: [rawOutput.substring(0, 300)],
         legalReview: [],
       };
+    }
+
+    // Tích hợp đối soát trực tiếp với Cơ sở dữ liệu Căn cứ Pháp luật trong hệ thống:
+    if (Array.isArray(auditData.legalReview) && auditData.legalReview.length > 0) {
+      try {
+        const dbBases = await LegalBasis.find();
+        auditData.legalReview = auditData.legalReview.map((rev) => {
+          const basisText = (rev.basis || "").toLowerCase();
+          // Tìm trong DB xem có khớp số hiệu văn bản không
+          const matched = dbBases.find((dbItem) => {
+            const dbCode = (dbItem.code || "").toLowerCase();
+            return basisText.includes(dbCode) || dbCode.includes(basisText);
+          });
+
+          if (matched) {
+            const statusMap = {
+              ACTIVE: "Còn hiệu lực",
+              EXPIRED: "Đã hết hiệu lực",
+              PARTIALLY_EXPIRED: "Hết hiệu lực một phần",
+            };
+            return {
+              ...rev,
+              status: statusMap[matched.status] || rev.status,
+              note: matched.notes || rev.note,
+              replacement: matched.replacedBy || rev.replacement,
+              dbVerified: true,
+              documentUrl: matched.documentUrl || "",
+            };
+          }
+          return rev;
+        });
+      } catch (dbErr) {
+        console.warn("Lỗi đối soát LegalBasis DB:", dbErr.message);
+      }
     }
 
     return res.json({

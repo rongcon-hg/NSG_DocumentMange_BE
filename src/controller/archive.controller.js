@@ -21,21 +21,44 @@ const getArchiveFolders = async (req, res) => {
       ];
     }
 
-    // Phân quyền theo quy chuẩn:
-    // 1. Hồ sơ của ai thì người đó thấy (OPEN, SUBMITTED, ARCHIVED)
-    // 2. Khi người dùng nộp lưu / gửi kho (SUBMITTED) hoặc đã duyệt kho (ARCHIVED): Manager (và Admin) thấy được
+    // Phân quyền theo quy chuẩn và phạm vi truy cập (accessScope):
+    // 1. Quản trị viên (admin) hoặc Văn thư lưu trữ (manager): Thấy tất cả hồ sơ nộp lưu/kho và hồ sơ của chính mình
+    // 2. Cán bộ/người dùng thông thường:
+    //    - Hồ sơ do chính mình tạo (creator: userId)
+    //    - Hồ sơ công khai toàn trường (accessScope: 'PUBLIC')
+    //    - Hồ sơ đơn vị mình (accessScope: 'DEPARTMENT' và department khớp đơn vị user)
+    //    - Hồ sơ chỉ định đơn vị user (allowedDepartments chứa userDepartment)
+    //    - Hồ sơ chỉ định user (allowedUsers chứa userId)
     const userRole = req.user?.role;
     const userId = req.user?._id;
+    const userDepartment = req.user?.department;
+
+    const accessConditions = [
+      { creator: userId },
+      { accessScope: 'PUBLIC' },
+      { allowedUsers: userId }
+    ];
+
+    if (userDepartment) {
+      accessConditions.push(
+        { accessScope: 'DEPARTMENT', department: userDepartment },
+        { allowedDepartments: userDepartment }
+      );
+    }
 
     if (userRole === "manager" || userRole === "admin") {
-      // Manager/Admin thấy hồ sơ của chính mình + tất cả hồ sơ đã nộp lưu (SUBMITTED) hoặc đã duyệt kho (ARCHIVED)
-      query.$or = [
-        { creator: userId },
-        { status: { $in: ["SUBMITTED", "ARCHIVED"] } }
+      // Manager/Admin thấy hồ sơ của chính mình + tất cả hồ sơ đã nộp lưu (SUBMITTED) hoặc đã duyệt kho (ARCHIVED) + các hồ sơ được cấp quyền
+      accessConditions.push({ status: { $in: ["SUBMITTED", "ARCHIVED"] } });
+    }
+
+    if (query.$or) {
+      query.$and = [
+        { $or: query.$or },
+        { $or: accessConditions }
       ];
+      delete query.$or;
     } else {
-      // Cán bộ/người dùng thông thường: CHỈ THẤY HỒ SƠ DO CHÍNH MÌNH TẠO
-      query.creator = userId;
+      query.$or = accessConditions;
     }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -83,11 +106,15 @@ const getArchiveFolderById = async (req, res) => {
     const isCreator = folder.creator?._id?.toString() === req.user?._id?.toString();
     const isManagerOrAdmin = ['manager', 'admin'].includes(req.user?.role);
     const isSubmittedOrArchived = ['SUBMITTED', 'ARCHIVED'].includes(folder.status);
+    const isPublic = folder.accessScope === 'PUBLIC';
+    const isDeptMatch = folder.accessScope === 'DEPARTMENT' && folder.department?.toString() === req.user?.department?.toString();
+    const isUserAllowed = folder.allowedUsers?.some(u => u.toString() === req.user?._id?.toString());
+    const isDeptAllowed = folder.allowedDepartments?.some(d => d.toString() === req.user?.department?.toString());
 
-    if (!isCreator && !(isManagerOrAdmin && isSubmittedOrArchived)) {
+    if (!isCreator && !(isManagerOrAdmin && isSubmittedOrArchived) && !isPublic && !isDeptMatch && !isUserAllowed && !isDeptAllowed) {
       return res.status(403).json({
         success: false,
-        message: 'Bạn không có quyền xem hồ sơ này. Chỉ người tạo và Manager (khi đã gửi kho) mới được xem.',
+        message: 'Bạn không có quyền xem hồ sơ này.',
       });
     }
 
@@ -103,7 +130,7 @@ const getArchiveFolderById = async (req, res) => {
  */
 const createArchiveFolder = async (req, res) => {
   try {
-    const { folderCode, title, academicYear, retentionPeriod, department, description } = req.body;
+    const { folderCode, title, academicYear, retentionPeriod, department, description, accessScope, allowedDepartments, allowedUsers } = req.body;
     const userId = req.user?._id || req.user?.id;
 
     if (!folderCode || !title) {
@@ -123,6 +150,9 @@ const createArchiveFolder = async (req, res) => {
       department: department || req.user?.department,
       creator: userId,
       description: description || '',
+      accessScope: accessScope || 'DEPARTMENT',
+      allowedDepartments: Array.isArray(allowedDepartments) ? allowedDepartments : [],
+      allowedUsers: Array.isArray(allowedUsers) ? allowedUsers : [],
       status: 'OPEN',
     });
 

@@ -1339,11 +1339,15 @@ const searchDocuments = async(req, res) => {
 
     const filter = {};
 
-    // ===== Tìm kiếm chung: Số/Ký hiệu & Trích yếu =====
+    // ===== Tìm kiếm thông minh toàn văn: Số/Ký hiệu, Trích yếu, Tóm tắt AI, Ý kiến chỉ đạo =====
     if (keyword) {
       const regex = new RegExp(createVietnameseRegex(keyword), "i");
       const orConditions = [
-        { shortDescription: regex }
+        { shortDescription: regex },
+        { principalIdea: regex },
+        { note: regex },
+        { "aiSummary.summaryText": regex },
+        { "aiSummary.keyPoints": regex },
       ];
       
       if (keyword.includes("/")) {

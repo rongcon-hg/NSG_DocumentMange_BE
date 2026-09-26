@@ -51,6 +51,23 @@ const archiveFolderSchema = new mongoose.Schema({
   closedAt: { type: Date }, // Ngày đóng hồ sơ
   archivedAt: { type: Date }, // Ngày duyệt nhập kho lưu trữ cơ quan
   description: { type: String, default: '' },
+  accessScope: {
+    type: String,
+    enum: ['PUBLIC', 'DEPARTMENT', 'RESTRICTED'],
+    default: 'DEPARTMENT',
+  }, // PUBLIC: Toàn trường xem được, DEPARTMENT: Chỉ đơn vị nộp lưu, RESTRICTED: Chỉ người được chỉ định & BGH
+  allowedDepartments: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Department',
+    }
+  ], // Các đơn vị được phép truy cập
+  allowedUsers: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    }
+  ], // Các cán bộ được cấp quyền xem riêng
   items: [archiveFileItemSchema], // Các tài liệu, công việc thành phần trong hồ sơ
 }, { timestamps: true });
 

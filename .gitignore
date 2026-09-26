@@ -17,3 +17,4 @@ deploy*.js
 run-vps.js
 *.sh
 *.tmp
+exec-vps.js

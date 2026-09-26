@@ -191,7 +191,14 @@ const documentSchema = new mongoose.Schema(
 );
 
 documentSchema.index(
-  { shortDescription: "text", docCode: "text" },
+  {
+    shortDescription: "text",
+    docCode: "text",
+    principalIdea: "text",
+    note: "text",
+    "aiSummary.summaryText": "text",
+    "aiSummary.keyPoints": "text",
+  },
   { name: "TextIndex", default_language: "none" }
 );
 
