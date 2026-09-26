@@ -3,6 +3,67 @@ const QuarterlyPlanItem = require("../models/quarterlyPlanItem.model");
 const Department = require("../models/department.model");
 const User = require("../models/user.model");
 const Position = require("../models/position.model");
+const Task = require("../models/task.model");
+const Notification = require("../models/notification.model");
+const { sendTaskNotificationEmail } = require("../service/NodeMailer.service/email");
+const { sendPushToUsers } = require("../service/webPush.service");
+const { syncTaskToGoogleCalendar } = require("../service/Notification.service");
+
+/**
+ * Tìm Cấp trưởng của các phòng ban (với fallback cấp phó / đại diện đơn vị nếu phòng ban chưa có cấp trưởng)
+ * Theo quy định: Cấp trưởng đơn vị gồm các vị trí TP, TK, GD, BT (Trưởng phòng, Trưởng khoa, Giám đốc, Bí thư Đoàn)
+ */
+const getDepartmentLeaders = async (deptIds) => {
+  if (!deptIds || deptIds.length === 0) return [];
+  const cleanDeptIds = deptIds.map((d) => (d._id ? d._id.toString() : d.toString())).filter(Boolean);
+  if (cleanDeptIds.length === 0) return [];
+
+  // Tìm các Position ID của Cấp trưởng
+  const leaderPositions = await Position.find({
+    $or: [
+      { positionCode: { $in: ["TP", "TK", "GD", "BT"] } },
+      { positionName: { $regex: /^(trưởng\s+(phòng|khoa|ban|trung tâm)|giám đốc|bí thư\s+đoàn)/i } },
+    ],
+  }).select("_id");
+  const leaderPosIds = leaderPositions.map((p) => p._id);
+
+  // Lấy các Cấp trưởng thuộc các phòng ban này
+  const leaders = await User.find({
+    department: { $in: cleanDeptIds },
+    position: { $in: leaderPosIds },
+    role: { $ne: "cappho" },
+  })
+    .populate("position", "positionName positionCode")
+    .populate("department", "departmentName departmentCode")
+    .select("_id name email position department role emailNotifications");
+
+  // Kiểm tra từng phòng ban, nếu phòng ban nào chưa tìm được Cấp trưởng thì fallback sang Cấp phó hoặc nhân sự đại diện
+  const foundDeptIds = new Set(leaders.map((u) => u.department?._id?.toString() || u.department?.toString()));
+  const missingDeptIds = cleanDeptIds.filter((dId) => !foundDeptIds.has(dId));
+
+  if (missingDeptIds.length > 0) {
+    const fallbackUsers = await User.find({
+      department: { $in: missingDeptIds },
+      role: { $in: ["cappho", "manager", "staff"] },
+    })
+      .populate("position", "positionName positionCode")
+      .populate("department", "departmentName departmentCode")
+      .select("_id name email position department role emailNotifications")
+      .sort({ role: 1 }); // ưu tiên cappho trước
+
+    // Chọn mỗi phòng ban thiếu 1 người đại diện
+    const fallbackDeptMap = new Map();
+    for (const u of fallbackUsers) {
+      const dId = u.department?._id?.toString() || u.department?.toString();
+      if (!fallbackDeptMap.has(dId)) {
+        fallbackDeptMap.set(dId, u);
+      }
+    }
+    leaders.push(...Array.from(fallbackDeptMap.values()));
+  }
+
+  return leaders;
+};
 
 /**
  * Kiểm tra xem người dùng có quyền quản trị/nhập kế hoạch quý không
@@ -187,7 +248,12 @@ const deleteQuarterlyPlan = async (req, res) => {
       return res.status(404).json({ success: false, message: "Không tìm thấy kế hoạch quý." });
     }
 
-    // Xóa tất cả các nhiệm vụ thuộc kế hoạch này
+    // Xóa tất cả các nhiệm vụ thuộc kế hoạch này và các task liên kết
+    const planItems = await QuarterlyPlanItem.find({ planId: id }).select("createdTaskId");
+    const taskIds = planItems.map((pi) => pi.createdTaskId).filter(Boolean);
+    if (taskIds.length > 0) {
+      await Task.deleteMany({ _id: { $in: taskIds } }).catch((e) => console.error("Error deleting linked tasks:", e));
+    }
     await QuarterlyPlanItem.deleteMany({ planId: id });
     await QuarterlyPlan.findByIdAndDelete(id);
 
@@ -221,6 +287,7 @@ const getQuarterlyPlanDetail = async (req, res) => {
         select: "_id name email position",
         populate: { path: "position", select: "positionName positionCode" },
       })
+      .populate("createdTaskId", "_id title status startDate endDate assignees collaborators")
       .populate("creator", "name email")
       .populate("history.actor", "name email role")
       .sort({ groupName: 1, order: 1, createdAt: 1 });
@@ -308,6 +375,144 @@ const createPlanItem = async (req, res) => {
     newItem.calculateAutoRemark();
     await newItem.save();
 
+    // ==========================================
+    // TỰ ĐỘNG TẠO CÔNG VIỆC MỚI GIAO CHO CẤP TRƯỞNG ĐƠN VỊ VÀ GỬI THÔNG BÁO
+    // ==========================================
+    let createdTaskId = null;
+    try {
+      const plan = await QuarterlyPlan.findById(planId);
+
+      // 1. Tìm Cấp trưởng của Đơn vị chủ trì thực hiện -> Người thực hiện chính (assignees)
+      const primaryLeaders = await getDepartmentLeaders(assignedDepartments || []);
+      const assigneeIds = primaryLeaders.map((u) => u._id);
+
+      // 2. Tìm Cấp trưởng của Đơn vị phối hợp -> Người phối hợp (collaborators)
+      const coordLeaders = await getDepartmentLeaders(coordinatingDepartments || []);
+      const coordLeaderIds = coordLeaders.map((u) => u._id.toString());
+
+      // 3. Ban Giám hiệu chỉ đạo -> Thêm vào danh sách phối hợp / theo dõi
+      const bghIds = (bghInCharge || []).map((id) => (id._id ? id._id.toString() : id.toString()));
+
+      // Gộp người phối hợp (loại trừ trùng lặp với người thực hiện chính)
+      const collaboratorIds = Array.from(new Set([...coordLeaderIds, ...bghIds]))
+        .filter((id) => !assigneeIds.some((aId) => aId.toString() === id.toString()));
+
+      // Chuẩn bị ngày bắt đầu và ngày hạn hoàn thành
+      const taskStart = startDate ? new Date(startDate) : (plan?.startDate || new Date());
+      const taskEnd = new Date(expectedDeadline);
+      taskEnd.setHours(23, 59, 59, 999);
+
+      // Mô tả chi tiết kèm thông tin kế hoạch quý
+      const planTitle = plan ? `${plan.title} (Quý ${plan.quarter}/${plan.academicYear})` : "Kế hoạch công tác quý";
+      const taskDescription = [
+        taskContent.trim(),
+        expectedOutcome ? `Sản phẩm / Kết quả đầu ra: ${expectedOutcome.trim()}` : "",
+        `Căn cứ Kế hoạch: ${planTitle}`,
+        groupName ? `Nhóm nhiệm vụ / Trọng tâm: ${groupName}` : "",
+        manualRemark ? `Ghi chú chỉ đạo: ${manualRemark}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n- ");
+
+      const newTask = new Task({
+        title: taskContent.trim(),
+        description: `- ${taskDescription}`,
+        startDate: taskStart,
+        endDate: taskEnd,
+        assignees: assigneeIds.length > 0 ? assigneeIds : [req.user._id],
+        collaborators: collaboratorIds,
+        files: (files || []).map((f) => ({
+          fileId: f.fileId,
+          fileName: f.fileName,
+          fileMimeType: f.fileMimeType || f.mimeType,
+        })),
+        priority: "NORMAL",
+        taskType: "REGULAR",
+        baseScore: 10,
+        outputResult: expectedOutcome || "",
+        focusAxis: groupName || "",
+        quarterlyPlanItem: newItem._id,
+        createdBy: req.user._id,
+        history: [
+          {
+            action: "Khởi tạo từ Kế hoạch quý",
+            user: req.user._id,
+            details: `Tạo tự động từ Kế hoạch quý: "${planTitle}"`,
+            timestamp: new Date(),
+          },
+        ],
+      });
+
+      await newTask.save();
+      createdTaskId = newTask._id;
+      newItem.createdTaskId = newTask._id;
+      await newItem.save();
+
+      // Thông báo Email, Chuông thông báo & Web Push cho Cấp trưởng và BGH được phân công
+      const populatedTask = await Task.findById(newTask._id)
+        .populate("assignees", "name email emailNotifications")
+        .populate("collaborators", "name email emailNotifications");
+
+      const uniqueRecipientsMap = new Map();
+      if (populatedTask.assignees) {
+        populatedTask.assignees.forEach((u) => uniqueRecipientsMap.set(u._id.toString(), u));
+      }
+      if (populatedTask.collaborators) {
+        populatedTask.collaborators.forEach((u) => uniqueRecipientsMap.set(u._id.toString(), u));
+      }
+
+      const allAssignedUsers = Array.from(uniqueRecipientsMap.values());
+      const creatorName = req.user.name || "Lãnh đạo Quản lý";
+
+      // Gửi Email thông báo phân công công việc
+      if (allAssignedUsers.length > 0) {
+        sendTaskNotificationEmail(allAssignedUsers, populatedTask, "create").catch((e) =>
+          console.error("Email quarterly plan task error:", e)
+        );
+        syncTaskToGoogleCalendar(populatedTask, allAssignedUsers);
+      }
+
+      // Gửi thông báo trong hệ thống (Chuông) & Web Push
+      const notifTargetIds = allAssignedUsers
+        .filter((u) => u._id.toString() !== req.user._id.toString())
+        .map((u) => u._id);
+
+      if (notifTargetIds.length > 0) {
+        const notifDocs = notifTargetIds.map((recId) => {
+          const isAssignee = Array.isArray(populatedTask.assignees) &&
+            populatedTask.assignees.some((a) => (a._id || a).toString() === recId.toString());
+          const roleTitle = isAssignee ? "người chủ trì thực hiện" : "người phối hợp";
+          return {
+            recipient: recId,
+            sender: req.user._id,
+            type: "TASK_ASSIGNED",
+            title: "Công việc mới từ Kế hoạch quý",
+            message: `${creatorName} đã phân công bạn làm ${roleTitle} cho nhiệm vụ: "${populatedTask.title}". Hạn hoàn thành: ${new Date(
+              populatedTask.endDate
+            ).toLocaleDateString("vi-VN")}.`,
+            task: populatedTask._id,
+            link: `/schedule?taskId=${populatedTask._id}`,
+            isRead: false,
+            metadata: {
+              quarterlyPlanItemId: newItem._id,
+              planId: planId,
+            },
+          };
+        });
+
+        await Notification.insertMany(notifDocs).catch((e) => console.error("Notif insert error:", e));
+
+        sendPushToUsers(notifTargetIds, {
+          title: "Công việc mới từ Kế hoạch quý",
+          body: `${creatorName} đã giao bạn nhiệm vụ: "${populatedTask.title}" trong Kế hoạch quý.`,
+          url: `/schedule?taskId=${populatedTask._id}`,
+        }).catch((e) => console.error("Push notify error:", e));
+      }
+    } catch (taskErr) {
+      console.error("Lỗi tự động tạo Task từ Kế hoạch quý:", taskErr);
+      // Không chặn phản hồi thành công của PlanItem nếu tạo task có vấn đề
+    }
+
     const populatedItem = await QuarterlyPlanItem.findById(newItem._id)
       .populate("assignedDepartments", "_id departmentName departmentCode")
       .populate("coordinatingDepartments", "_id departmentName departmentCode")
@@ -316,13 +521,15 @@ const createPlanItem = async (req, res) => {
         select: "_id name email position",
         populate: { path: "position", select: "positionName positionCode" },
       })
+      .populate("createdTaskId", "_id title status startDate endDate assignees collaborators")
       .populate("creator", "name email")
       .populate("history.actor", "name email role");
 
     return res.status(201).json({
       success: true,
-      message: "Đã thêm nhiệm vụ vào kế hoạch quý!",
+      message: "Đã thêm nhiệm vụ vào kế hoạch quý và tự động tạo công việc cho Cấp trưởng đơn vị!",
       data: populatedItem,
+      createdTaskId: createdTaskId,
     });
   } catch (error) {
     console.error("Lỗi createPlanItem:", error);
@@ -486,6 +693,10 @@ const deletePlanItem = async (req, res) => {
     }
 
     const { itemId } = req.params;
+    const item = await QuarterlyPlanItem.findById(itemId);
+    if (item && item.createdTaskId) {
+      await Task.findByIdAndDelete(item.createdTaskId).catch((e) => console.error("Error deleting linked task:", e));
+    }
     await QuarterlyPlanItem.findByIdAndDelete(itemId);
 
     return res.status(200).json({
@@ -507,7 +718,7 @@ const importPlanItems = async (req, res) => {
       return res.status(403).json({ success: false, message: "Chỉ Quản lý mới có quyền import nhiệm vụ." });
     }
 
-    const { planId, items } = req.body;
+    const { planId, items, autoCreateTasks = true } = req.body;
     if (!planId) {
       return res.status(400).json({ success: false, message: "Thiếu mã kế hoạch quý (planId)." });
     }
@@ -595,6 +806,64 @@ const importPlanItems = async (req, res) => {
 
       newItem.calculateAutoRemark();
       await newItem.save();
+
+      // Nếu bật tự động tạo công việc
+      if (autoCreateTasks) {
+        try {
+          const primaryLeaders = await getDepartmentLeaders(assignedIds);
+          const assigneeIds = primaryLeaders.map((u) => u._id);
+          const coordLeaders = await getDepartmentLeaders(coordIds);
+          const coordLeaderIds = coordLeaders.map((u) => u._id.toString());
+          const bghStrIds = bghIds.map((id) => id.toString());
+
+          const collaboratorIds = Array.from(new Set([...coordLeaderIds, ...bghStrIds]))
+            .filter((id) => !assigneeIds.some((aId) => aId.toString() === id.toString()));
+
+          const taskStart = newItem.startDate || plan.startDate || new Date();
+          const taskEnd = new Date(newItem.expectedDeadline);
+          taskEnd.setHours(23, 59, 59, 999);
+
+          const planTitle = `${plan.title} (Quý ${plan.quarter}/${plan.academicYear})`;
+          const taskDescription = [
+            newItem.taskContent,
+            newItem.expectedOutcome ? `Sản phẩm / Kết quả đầu ra: ${newItem.expectedOutcome}` : "",
+            `Căn cứ Kế hoạch: ${planTitle}`,
+            newItem.groupName ? `Nhóm nhiệm vụ: ${newItem.groupName}` : "",
+          ]
+            .filter(Boolean)
+            .join("\n- ");
+
+          const newTask = new Task({
+            title: newItem.taskContent,
+            description: `- ${taskDescription}`,
+            startDate: taskStart,
+            endDate: taskEnd,
+            assignees: assigneeIds.length > 0 ? assigneeIds : [req.user._id],
+            collaborators: collaboratorIds,
+            priority: "NORMAL",
+            taskType: "REGULAR",
+            baseScore: 10,
+            outputResult: newItem.expectedOutcome || "",
+            focusAxis: newItem.groupName || "",
+            quarterlyPlanItem: newItem._id,
+            createdBy: req.user._id,
+            history: [
+              {
+                action: "Khởi tạo từ Import Kế hoạch quý",
+                user: req.user._id,
+                details: `Import từ Kế hoạch quý: "${planTitle}"`,
+                timestamp: new Date(),
+              },
+            ],
+          });
+          await newTask.save();
+          newItem.createdTaskId = newTask._id;
+          await newItem.save();
+        } catch (tErr) {
+          console.error("Lỗi tạo Task khi import:", tErr);
+        }
+      }
+
       createdItems.push(newItem);
     }
 

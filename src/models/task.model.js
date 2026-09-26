@@ -53,6 +53,10 @@ const taskSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Document",
     },
+    quarterlyPlanItem: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "QuarterlyPlanItem",
+    },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

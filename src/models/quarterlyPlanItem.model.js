@@ -142,6 +142,12 @@ const quarterlyPlanItemSchema = new mongoose.Schema(
       type: String, // Lưu ngày dạng YYYY-MM-DD đã gửi nhắc nhở gần nhất
       default: null,
     },
+    // ID của công việc tự động được tạo ra trong phân hệ Công Việc (/schedule)
+    createdTaskId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Task",
+      default: null,
+    },
   },
   {
     timestamps: true,
