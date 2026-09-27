@@ -208,12 +208,14 @@ const cron = require('node-cron');
 const { executeTaskReminders, executeAutoBackup } = require('./src/service/TaskCron.service');
 const { executeRecurringTasksGeneration } = require('./src/service/recurringTask.service');
 const { executeQuarterlyPlanReminders } = require('./src/service/quarterlyPlanCron.service');
+const { autoUpdateEffectiveStatuses } = require('./src/controller/legalBasis.controller');
 
-// Chạy hàng ngày vào lúc 00:05 (Nhắc việc, Kế hoạch quý & Sao lưu)
+// Chạy hàng ngày vào lúc 00:05 (Nhắc việc, Kế hoạch quý, Cập nhật hiệu lực căn cứ pháp luật & Sao lưu)
 cron.schedule('5 0 * * *', async () => {
     console.log('--- Bắt đầu chạy Cron Jobs (Nhắc nhở & Backup) ---');
     await executeTaskReminders();
     await executeQuarterlyPlanReminders();
+    await autoUpdateEffectiveStatuses();
     await executeAutoBackup();
     console.log('--- Hoàn tất Cron Jobs ---');
 });
@@ -223,6 +225,7 @@ cron.schedule('30 6 * * *', async () => {
     console.log('--- Bắt đầu quét & sinh Công việc định kỳ hàng ngày (06:30) ---');
     await executeRecurringTasksGeneration();
     await executeQuarterlyPlanReminders();
+    await autoUpdateEffectiveStatuses();
     console.log('--- Hoàn tất sinh Công việc định kỳ & Quét Kế hoạch quý ---');
 });
 

@@ -1,10 +1,37 @@
 const LegalBasis = require("../models/legalBasis.model");
 
 /**
+ * Hàm tiện ích tự động chuẩn hóa trạng thái hiệu lực theo ngày:
+ * Nếu trạng thái là PENDING mà ngày hiện tại >= ngày có hiệu lực -> tự động chuyển thành ACTIVE (Còn hiệu lực).
+ * Hoặc nếu trạng thái là ACTIVE mà ngày có hiệu lực ở tương lai -> có thể gợi ý/chuyển thành PENDING.
+ */
+const autoUpdateEffectiveStatuses = async () => {
+  try {
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+    // Tìm các văn bản đang PENDING mà ngày có hiệu lực <= ngày hôm nay
+    await LegalBasis.updateMany(
+      {
+        status: "PENDING",
+        effectiveDate: { $lte: today },
+      },
+      {
+        $set: { status: "ACTIVE" },
+      }
+    );
+  } catch (err) {
+    console.error("Lỗi autoUpdateEffectiveStatuses:", err);
+  }
+};
+
+/**
  * Lấy danh sách căn cứ pháp luật (hỗ trợ phân trang, lọc theo trạng thái, cơ quan, tìm kiếm)
  */
 const getLegalBases = async (req, res) => {
   try {
+    // Tự động kiểm tra và chuyển các văn bản Sắp hiệu lực thành Còn hiệu lực nếu đã đến ngày có hiệu lực
+    await autoUpdateEffectiveStatuses();
+
     const { page = 1, limit = 20, status, docType, search } = req.query;
     const query = {};
 
@@ -51,10 +78,17 @@ const getLegalBases = async (req, res) => {
 const getLegalBasisById = async (req, res) => {
   try {
     const { id } = req.params;
-    const item = await LegalBasis.findById(id).populate("createdBy", "name email");
+    let item = await LegalBasis.findById(id).populate("createdBy", "name email");
     if (!item) {
       return res.status(404).json({ success: false, message: "Không tìm thấy căn cứ pháp luật" });
     }
+
+    // Nếu văn bản đang là PENDING mà đã đến ngày có hiệu lực thì cập nhật thành ACTIVE
+    if (item.status === "PENDING" && item.effectiveDate && new Date(item.effectiveDate) <= new Date()) {
+      item.status = "ACTIVE";
+      await item.save();
+    }
+
     return res.json({ success: true, data: item });
   } catch (error) {
     console.error("Lỗi getLegalBasisById:", error);
@@ -79,14 +113,29 @@ const createLegalBasis = async (req, res) => {
       return res.status(400).json({ success: false, message: `Văn bản có số hiệu "${code}" đã tồn tại trong cơ sở dữ liệu!` });
     }
 
+    const effDateObj = effectiveDate ? new Date(effectiveDate) : null;
+    let finalStatus = status || "ACTIVE";
+
+    // Tự động kiểm tra: Nếu chọn PENDING nhưng ngày có hiệu lực đã đến (<= hôm nay) thì chuyển luôn thành ACTIVE
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    if (finalStatus === "PENDING" && effDateObj) {
+      const effZero = new Date(effDateObj);
+      effZero.setHours(0, 0, 0, 0);
+      if (effZero.getTime() <= today.getTime()) {
+        finalStatus = "ACTIVE";
+      }
+    }
+
     const newItem = await LegalBasis.create({
       code: code.trim(),
       title: title.trim(),
       docType: docType || "NGHI_DINH",
       issuingAuthority: issuingAuthority || "",
       issuedDate: issuedDate ? new Date(issuedDate) : null,
-      effectiveDate: effectiveDate ? new Date(effectiveDate) : null,
-      status: status || "ACTIVE",
+      effectiveDate: effDateObj,
+      status: finalStatus,
       replacedBy: replacedBy || "",
       documentUrl: documentUrl || "",
       notes: notes || "",
@@ -113,6 +162,18 @@ const updateLegalBasis = async (req, res) => {
     const updateData = { ...req.body };
     delete updateData._id;
     delete updateData.createdBy;
+
+    if (updateData.effectiveDate) {
+      updateData.effectiveDate = new Date(updateData.effectiveDate);
+      // Nếu trạng thái đang là PENDING mà ngày hiệu lực <= hôm nay thì tự chuyển thành ACTIVE
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const effZero = new Date(updateData.effectiveDate);
+      effZero.setHours(0, 0, 0, 0);
+      if (updateData.status === "PENDING" && effZero.getTime() <= today.getTime()) {
+        updateData.status = "ACTIVE";
+      }
+    }
 
     const updated = await LegalBasis.findByIdAndUpdate(id, updateData, { new: true });
     if (!updated) {
@@ -175,4 +236,5 @@ module.exports = {
   updateLegalBasis,
   deleteLegalBasis,
   checkLegalBasesStatus,
+  autoUpdateEffectiveStatuses,
 };

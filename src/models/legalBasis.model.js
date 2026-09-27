@@ -31,10 +31,10 @@ const legalBasisSchema = new mongoose.Schema(
     }, // Ngày có hiệu lực
     status: {
       type: String,
-      enum: ["ACTIVE", "EXPIRED", "PARTIALLY_EXPIRED"],
+      enum: ["ACTIVE", "EXPIRED", "PARTIALLY_EXPIRED", "PENDING"],
       default: "ACTIVE",
       index: true,
-    }, // Trạng thái hiệu lực: Còn hiệu lực (ACTIVE), Hết hiệu lực (EXPIRED), Hết hiệu lực một phần (PARTIALLY_EXPIRED)
+    }, // Trạng thái hiệu lực: Còn hiệu lực (ACTIVE), Hết hiệu lực (EXPIRED), Hết hiệu lực một phần (PARTIALLY_EXPIRED), Sắp hiệu lực (PENDING)
     replacedBy: {
       type: String,
       default: "",
