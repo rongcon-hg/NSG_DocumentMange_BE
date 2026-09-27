@@ -144,14 +144,18 @@ const createLegalBasis = async (req, res) => {
     const effDateObj = effectiveDate ? new Date(effectiveDate) : null;
     let finalStatus = status || "ACTIVE";
 
-    // Tự động kiểm tra: Nếu chọn PENDING nhưng ngày có hiệu lực đã đến (<= hôm nay) thì chuyển luôn thành ACTIVE
+    // Tự động xác định Tình trạng hiệu lực dựa vào ngày có hiệu lực khi thêm mới:
+    // Nếu có ngày hiệu lực và ngày đó ở tương lai (> hôm nay) -> Sắp hiệu lực (PENDING)
+    // Nếu ngày hiệu lực <= hôm nay và không thuộc diện hết hiệu lực -> Còn hiệu lực (ACTIVE)
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    if (finalStatus === "PENDING" && effDateObj) {
+    if (effDateObj) {
       const effZero = new Date(effDateObj);
       effZero.setHours(0, 0, 0, 0);
-      if (effZero.getTime() <= today.getTime()) {
+      if (effZero.getTime() > today.getTime()) {
+        finalStatus = "PENDING";
+      } else if (finalStatus === "PENDING") {
         finalStatus = "ACTIVE";
       }
     }
