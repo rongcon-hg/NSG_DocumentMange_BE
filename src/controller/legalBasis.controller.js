@@ -47,18 +47,44 @@ const getLegalBases = async (req, res) => {
     }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
-    const [items, total] = await Promise.all([
+    const [items, total, statsAggregation] = await Promise.all([
       LegalBasis.find(query)
         .populate("createdBy", "name email")
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(parseInt(limit)),
       LegalBasis.countDocuments(query),
+      LegalBasis.aggregate([
+        {
+          $group: {
+            _id: "$status",
+            count: { $sum: 1 },
+          },
+        },
+      ]),
     ]);
+
+    const stats = {
+      total: 0,
+      ACTIVE: 0,
+      PENDING: 0,
+      EXPIRED: 0,
+      PARTIALLY_EXPIRED: 0,
+    };
+
+    if (Array.isArray(statsAggregation)) {
+      statsAggregation.forEach((s) => {
+        if (s._id && stats[s._id] !== undefined) {
+          stats[s._id] = s.count;
+        }
+        stats.total += s.count;
+      });
+    }
 
     return res.json({
       success: true,
       data: items,
+      stats,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -162,6 +188,20 @@ const updateLegalBasis = async (req, res) => {
     const updateData = { ...req.body };
     delete updateData._id;
     delete updateData.createdBy;
+
+    if (updateData.code) {
+      const existing = await LegalBasis.findOne({
+        code: updateData.code.trim(),
+        _id: { $ne: id },
+      });
+      if (existing) {
+        return res.status(400).json({
+          success: false,
+          message: `Văn bản có số hiệu "${updateData.code}" đã có trong CSDL!`,
+        });
+      }
+      updateData.code = updateData.code.trim();
+    }
 
     if (updateData.effectiveDate) {
       updateData.effectiveDate = new Date(updateData.effectiveDate);
