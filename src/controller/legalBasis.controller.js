@@ -32,17 +32,19 @@ const getLegalBases = async (req, res) => {
     // Tự động kiểm tra và chuyển các văn bản Sắp hiệu lực thành Còn hiệu lực nếu đã đến ngày có hiệu lực
     await autoUpdateEffectiveStatuses();
 
-    const { page = 1, limit = 20, status, docType, search } = req.query;
+    const { page = 1, limit = 15, status, docType, search } = req.query;
     const query = {};
 
     if (status) query.status = status;
     if (docType) query.docType = docType;
-    if (search) {
+    if (search && search.trim()) {
+      const cleanSearch = search.trim();
+      const escapedSearch = cleanSearch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       query.$or = [
-        { code: { $regex: search, $options: "i" } },
-        { title: { $regex: search, $options: "i" } },
-        { issuingAuthority: { $regex: search, $options: "i" } },
-        { replacedBy: { $regex: search, $options: "i" } },
+        { code: { $regex: escapedSearch, $options: "i" } },
+        { title: { $regex: escapedSearch, $options: "i" } },
+        { issuingAuthority: { $regex: escapedSearch, $options: "i" } },
+        { replacedBy: { $regex: escapedSearch, $options: "i" } },
       ];
     }
 
