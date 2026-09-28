@@ -31,13 +31,14 @@ const getDriveAuth = async () => {
     throw new Error("Chưa cấu hình Google Drive Service Account");
 };
 
-// Danh sách tất cả các model Gemini khả dụng được Google hỗ trợ cho phương thức generateContent:
-// Danh sách các model Gemini khả dụng theo khuyến nghị mới nhất từ Google:
+// Danh sách các model Gemini khả dụng ổn định cao:
 const GEMINI_MODELS = [
-    "gemini-2.5-flash",
-    "gemini-3.1-pro-preview",
-    "gemini-3.5-flash",
+    "gemini-3.6-flash",
     "gemini-3.5-flash-lite",
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.5-flash",
+    "gemini-3.1-pro-preview",
     "gemini-flash-latest",
     "gemini-pro-latest",
 ];
