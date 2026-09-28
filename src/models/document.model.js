@@ -182,13 +182,14 @@ const documentSchema = new mongoose.Schema(
 
   {
     timestamps: true,
-    indexes: [
-      { key: { createdAt: 1 } },
-      { key: { "assignedToUsers.userId": 1 } },
-      { key: { sentBy: 1 } }
-    ]
   }
 );
+
+documentSchema.index({ "assignedToUsers.userId": 1, createdAt: -1 });
+documentSchema.index({ createdAt: -1 });
+documentSchema.index({ docType: 1 });
+documentSchema.index({ sentBy: 1 });
+documentSchema.index({ "assignedToUsers.userId": 1, "assignedToUsers.isRead": 1 });
 
 documentSchema.index(
   {

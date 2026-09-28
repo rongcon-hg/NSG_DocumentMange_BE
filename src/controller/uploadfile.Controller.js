@@ -1143,22 +1143,25 @@ const getDocumentsByAssignedTo = async (req, res) => {
         });
       }
   
-      const documents = await Document.find({ "assignedToUsers.userId": userId })
-        .populate("docVariant")
-        .populate("signer", "name email")
-        .populate("position", "positionName")
-        .populate("departments", "departmentName")
-        .populate("executors.executorId", "name")
-        .populate("assignedToUsers.userId", "name email")
-        .populate("sentBy", "name")
-        .populate("unit", "unitName")
-        .populate("history.actor", "name")
-        .sort({ createdAt: -1 })
-        .skip((pageNumber - 1) * pageSize)
-        .limit(pageSize)
-        .lean();
-  
-      const totalDocuments = await Document.countDocuments({ "assignedToUsers.userId": userId });
+      const filter = { "assignedToUsers.userId": userId };
+
+      const [documents, totalDocuments] = await Promise.all([
+        Document.find(filter)
+          .populate("docVariant")
+          .populate("signer", "name email")
+          .populate("position", "positionName")
+          .populate("departments", "departmentName")
+          .populate("executors.executorId", "name")
+          .populate("assignedToUsers.userId", "name email")
+          .populate("sentBy", "name")
+          .populate("unit", "unitName")
+          .populate("history.actor", "name")
+          .sort({ createdAt: -1 })
+          .skip((pageNumber - 1) * pageSize)
+          .limit(pageSize)
+          .lean(),
+        Document.countDocuments(filter),
+      ]);
       const totalPages = Math.ceil(totalDocuments / pageSize);
   
       res.status(200).json({
