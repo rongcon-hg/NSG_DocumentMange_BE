@@ -139,9 +139,6 @@ async function uploadToDrive(req, res) {
     }
     console.log("signer:", signer);
 
-    const auth = await authorize();
-    const drive = google.drive({ version: "v3", auth });
-
     // Parse fields only if they are strings
     const parsedExecutors = parseJSON(executors);
     const parsedAssignedToUsers = parseJSON(assignedToUsers);
@@ -205,7 +202,10 @@ async function uploadToDrive(req, res) {
     const verificationCode = docType === "sent" ? generateVerificationCode() : undefined;
     const feBaseUrl = process.env.FE_URL || "https://qlvb.namsaigon.edu.vn";
 
+    // Chỉ kết nối Google Drive nếu có file cần tải lên qua backend
     if (req.files && req.files.length > 0) {
+      const auth = await authorize();
+      const drive = google.drive({ version: "v3", auth });
       const monthFolderId = await getOrCreateMonthFolder(drive);
 
       for (let i = 0; i < req.files.length; i++) {
@@ -293,61 +293,71 @@ async function uploadToDrive(req, res) {
 
     await newDocument.save();
 
-    // Liên kết 2 chiều giữa các văn bản trong cùng chuỗi hồ sơ
-    if (parsedRelatedDocs && parsedRelatedDocs.length > 0) {
-      try {
-        await Document.updateMany(
-          { _id: { $in: parsedRelatedDocs } },
-          { $addToSet: { relatedDocuments: newDocument._id } }
-        );
-      } catch (err) {
-        console.error("Error cross-linking related documents:", err);
-      }
-    }
-    if (parentDocument) {
-      try {
-        await Document.findByIdAndUpdate(parentDocument, {
-          $addToSet: { relatedDocuments: newDocument._id }
-        });
-      } catch (err) {
-        console.error("Error linking parent document:", err);
-      }
-    }
-
-    // Nếu văn bản này được phát hành từ một văn bản trình ký, cập nhật trạng thái isIssued
-    if (repliedDocId) {
-      try {
-        const RepliedDoc = require("../models/repliedDoc.model");
-        await RepliedDoc.findByIdAndUpdate(repliedDocId, { isIssued: true });
-      } catch (err) {
-        console.error("Error updating RepliedDoc isIssued state:", err);
-      }
-    }
-
-    // Nếu văn bản này được phát hành từ một hồ sơ trực tuyến, cập nhật trạng thái isIssued
-    if (onlineRecordId) {
-      try {
-        const OnlineRecord = require("../models/onlineRecord.model");
-        await OnlineRecord.findByIdAndUpdate(onlineRecordId, { 
-          isIssued: true,
-          issuedDocumentId: newDocument._id
-        });
-      } catch (err) {
-        console.error("Error updating OnlineRecord isIssued state:", err);
-      }
-    }
-
-    // Trigger notifications for new document
-    const { triggerDocumentNotifications } = require("../service/Notification.service");
-    triggerDocumentNotifications(newDocument);
-
+    // Phản hồi thành công ngay lập tức cho client để không phải chờ đợi
     res.status(201).json({
       message: "Files uploaded successfully!",
       document: newDocument,
     });
+
+    // Chạy các tác vụ hậu kỳ (liên kết văn bản, cập nhật trạng thái hồ sơ, thông báo) ở chế độ background
+    setImmediate(async () => {
+      try {
+        // Liên kết 2 chiều giữa các văn bản trong cùng chuỗi hồ sơ
+        if (parsedRelatedDocs && parsedRelatedDocs.length > 0) {
+          try {
+            await Document.updateMany(
+              { _id: { $in: parsedRelatedDocs } },
+              { $addToSet: { relatedDocuments: newDocument._id } }
+            );
+          } catch (err) {
+            console.error("Error cross-linking related documents:", err);
+          }
+        }
+        if (parentDocument) {
+          try {
+            await Document.findByIdAndUpdate(parentDocument, {
+              $addToSet: { relatedDocuments: newDocument._id }
+            });
+          } catch (err) {
+            console.error("Error linking parent document:", err);
+          }
+        }
+
+        // Nếu văn bản này được phát hành từ một văn bản trình ký, cập nhật trạng thái isIssued
+        if (repliedDocId) {
+          try {
+            const RepliedDoc = require("../models/repliedDoc.model");
+            await RepliedDoc.findByIdAndUpdate(repliedDocId, { isIssued: true });
+          } catch (err) {
+            console.error("Error updating RepliedDoc isIssued state:", err);
+          }
+        }
+
+        // Nếu văn bản này được phát hành từ một hồ sơ trực tuyến, cập nhật trạng thái isIssued
+        if (onlineRecordId) {
+          try {
+            const OnlineRecord = require("../models/onlineRecord.model");
+            await OnlineRecord.findByIdAndUpdate(onlineRecordId, { 
+              isIssued: true,
+              issuedDocumentId: newDocument._id
+            });
+          } catch (err) {
+            console.error("Error updating OnlineRecord isIssued state:", err);
+          }
+        }
+
+        // Trigger notifications for new document
+        const { triggerDocumentNotifications } = require("../service/Notification.service");
+        triggerDocumentNotifications(newDocument);
+      } catch (bgErr) {
+        console.error("Error in background post-processing after uploadToDrive:", bgErr);
+      }
+    });
   } catch (error) {
     console.error("Error in uploadToDrive:", error);
-    res.status(500).json({ message: "Error uploading files", error: error.message });
+    if (!res.headersSent) {
+      res.status(500).json({ message: "Error uploading files", error: error.message });
+    }
   }
 }
 
@@ -400,17 +410,13 @@ const getAllDocuments = async (req, res) => {
 
     const [documents, totalDocuments] = await Promise.all([
       Document.find(filter)
-        .populate("docVariant")
+        .populate("docVariant", "docVariantName docVariantCode")
         .populate("signer", "name email")
         .populate("position", "positionName")
         .populate("departments", "departmentName")
-        .populate("executors.executorId", "name")
+        .populate("executors.executorId", "name email")
         .populate("assignedToUsers.userId", "name email")
-        .populate("sentBy", "name")
-        .populate("urgency", "urgency")
-        .populate("docCode", "docCode")
-        .populate("saveAt", "saveAt")
-        .populate("createAt", "createAt")
+        .populate("sentBy", "name email")
         .populate("unit", "unitName")
         .populate("history.actor", "name")
         .sort({ createdAt: -1 })
@@ -630,26 +636,24 @@ const getDocumentsByUserAndType = async (req, res) => {
             };
         }
 
-        // 🔹 Truy vấn văn bản
-        const documents = await Document.find(filterCondition)
-            .populate("sentBy", "name ")
-            .populate("docVariant")
+        // 🔹 Truy vấn văn bản song song với đếm tài liệu, áp dụng lean() để giảm tải RAM/CPU
+        const [documents, totalDocuments] = await Promise.all([
+          Document.find(filterCondition)
+            .populate("sentBy", "name email")
+            .populate("docVariant", "docVariantName docVariantCode")
             .populate("signer", "name email")
             .populate("position", "positionName")
             .populate("departments", "departmentName")
-            .populate("executors.executorId", "name")
+            .populate("executors.executorId", "name email")
             .populate("assignedToUsers.userId", "name email")
-            .populate("sentBy", "name")
-            .populate("docCode", "docCode")
             .populate("unit", "unitName")
-            .populate("urgency", "urgency")
-            .populate("saveAt", "saveAt")
-            .populate("createAt", "createAt")
             .sort({ createdAt: -1 })
             .skip((pageNumber - 1) * pageSize)
-            .limit(pageSize);
+            .limit(pageSize)
+            .lean(),
+          Document.countDocuments(filterCondition),
+        ]);
 
-        const totalDocuments = await Document.countDocuments(filterCondition);
         const totalPages = Math.ceil(totalDocuments / pageSize);
 
         res.status(200).json({
@@ -699,28 +703,26 @@ const getFilteredDocuments = async (req, res) => {
       if (departments) filter.departments = { $in: departments.split(",") }; // Cho phép chọn nhiều ID phòng ban
       if (unit) filter.unit = unit;
   
-      // ✅ Đếm tổng số tài liệu để tính tổng trang
-      const totalDocuments = await Document.countDocuments(filter);
+      // ✅ Đếm tổng số tài liệu và truy vấn dữ liệu song song (sử dụng lean() để giảm thiểu CPU/RAM)
+      const [documents, totalDocuments] = await Promise.all([
+        Document.find(filter)
+          .populate("docVariant", "docVariantName docVariantCode")
+          .populate("signer", "name email")
+          .populate("position", "positionName")
+          .populate("departments", "departmentName")
+          .populate("executors.executorId", "name email")
+          .populate("assignedToUsers.userId", "name email")
+          .populate("sentBy", "name email")
+          .populate("unit", "unitName")
+          .populate("history.actor", "name")
+          .sort({ createdAt: -1 })
+          .skip((pageNumber - 1) * pageSize)
+          .limit(pageSize)
+          .lean(),
+        Document.countDocuments(filter),
+      ]);
+
       const totalPages = Math.ceil(totalDocuments / pageSize);
-  
-      // ✅ Lấy dữ liệu với filter, phân trang & sắp xếp
-      const documents = await Document.find(filter)
-        .populate("docVariant")
-        .populate("signer", "name email")
-        .populate("position", "positionName")
-        .populate("departments", "departmentName")
-        .populate("executors.executorId", "name")
-        .populate("assignedToUsers.userId", "name email")
-        .populate("sentBy", "name")
-        .populate("urgency", "urgency")
-        .populate("docCode", "docCode")
-        .populate("saveAt", "saveAt")
-        .populate("createAt", "createAt")
-        .populate("unit", "unitName")
-        .populate("history.actor", "name")
-        .sort({ createdAt: -1 }) // Sắp xếp theo điều kiện
-        .skip((pageNumber - 1) * pageSize) // Áp dụng phân trang
-        .limit(pageSize); // Giới hạn số tài liệu mỗi trang
   
       res.status(200).json({
         success: true,

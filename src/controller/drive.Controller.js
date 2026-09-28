@@ -4,9 +4,15 @@ const dotenv = require("dotenv");
 
 dotenv.config();
 
+let cachedMonthFolder = {
+    folderName: null,
+    folderId: null,
+    fetchedAt: 0,
+};
+
 exports.getDriveToken = async (req, res) => {
     try {
-        const config = await DriveConfig.findOne();
+        const config = await DriveConfig.findOne().lean();
         if (!config || !config.clientEmail || !config.privateKey) {
             return res.status(400).json({ message: "Chưa cấu hình Service Account cho Google Drive." });
         }
@@ -20,38 +26,48 @@ exports.getDriveToken = async (req, res) => {
         const token = await auth.getAccessToken();
         const rootFolderId = config.folderId || process.env.DRIVE_FOLDER_ID;
 
-        // Create Google Drive client
-        const drive = google.drive({ version: 'v3', auth });
-
         // Get or Create Month Folder
         const date = new Date();
         const folderName = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
         
         let monthFolderId = rootFolderId;
+        const now = Date.now();
+        // Caching folder ID trong 1 giờ để tránh query Drive API mỗi lần người dùng bấm nút
         if (rootFolderId) {
-            const query = `name='${folderName}' and '${rootFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
-            const response = await drive.files.list({
-                q: query,
-                fields: 'files(id, name)',
-                spaces: 'drive',
-                supportsAllDrives: true,
-                includeItemsFromAllDrives: true
-            });
-
-            if (response.data.files && response.data.files.length > 0) {
-                monthFolderId = response.data.files[0].id;
+            if (cachedMonthFolder.folderName === folderName && cachedMonthFolder.folderId && (now - cachedMonthFolder.fetchedAt < 3600000)) {
+                monthFolderId = cachedMonthFolder.folderId;
             } else {
-                const folderMetadata = {
-                    name: folderName,
-                    mimeType: 'application/vnd.google-apps.folder',
-                    parents: [rootFolderId],
-                };
-                const createResponse = await drive.files.create({
-                    requestBody: folderMetadata,
-                    fields: 'id',
-                    supportsAllDrives: true
+                const drive = google.drive({ version: 'v3', auth });
+                const query = `name='${folderName}' and '${rootFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+                const response = await drive.files.list({
+                    q: query,
+                    fields: 'files(id, name)',
+                    spaces: 'drive',
+                    supportsAllDrives: true,
+                    includeItemsFromAllDrives: true
                 });
-                monthFolderId = createResponse.data.id;
+
+                if (response.data.files && response.data.files.length > 0) {
+                    monthFolderId = response.data.files[0].id;
+                } else {
+                    const folderMetadata = {
+                        name: folderName,
+                        mimeType: 'application/vnd.google-apps.folder',
+                        parents: [rootFolderId],
+                    };
+                    const createResponse = await drive.files.create({
+                        requestBody: folderMetadata,
+                        fields: 'id',
+                        supportsAllDrives: true
+                    });
+                    monthFolderId = createResponse.data.id;
+                }
+
+                cachedMonthFolder = {
+                    folderName,
+                    folderId: monthFolderId,
+                    fetchedAt: now,
+                };
             }
         }
 
