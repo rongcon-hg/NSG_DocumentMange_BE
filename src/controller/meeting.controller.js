@@ -358,12 +358,28 @@ const toggleSpeakRequest = async (req, res) => {
       return res.status(404).json({ success: false, message: "Không tìm thấy phiên họp" });
     }
 
-    const attendee = meeting.attendees.find((a) => a.user.toString() === currentUserId.toString());
+    let attendee = meeting.attendees.find((a) => a.user.toString() === currentUserId.toString());
     if (attendee) {
       attendee.isSpeakingRequested = Boolean(isRequested);
       attendee.speakRequestTime = isRequested ? new Date() : null;
-      await meeting.save();
+    } else if (isRequested) {
+      // Nếu user chưa có trong danh sách đại biểu, tự động thêm vào với quyền GUEST/MEMBER
+      const userDoc = await User.findById(currentUserId).populate("department", "departmentName");
+      attendee = {
+        user: currentUserId,
+        name: userDoc?.name || "Đại biểu",
+        email: userDoc?.email || "",
+        departmentName: userDoc?.department?.departmentName || "",
+        roleInMeeting: "MEMBER",
+        attendanceStatus: "ATTENDED",
+        checkInTime: new Date(),
+        checkInMethod: "AUTO_JOIN",
+        isSpeakingRequested: true,
+        speakRequestTime: new Date(),
+      };
+      meeting.attendees.push(attendee);
     }
+    await meeting.save();
 
     return res.status(200).json({
       success: true,
