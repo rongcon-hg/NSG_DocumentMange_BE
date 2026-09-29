@@ -14,6 +14,7 @@ router.post("/", meetingController.createMeeting);
 router.put("/:id", meetingController.updateMeeting);
 router.patch("/:id/status", meetingController.updateMeetingStatus);
 router.delete("/:id", meetingController.deleteMeeting);
+router.post("/:id/documents", meetingController.addMeetingDocument);
 
 // Điểm danh & Đăng ký phát biểu
 router.post("/:id/check-in", meetingController.checkInMeeting);

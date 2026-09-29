@@ -590,6 +590,46 @@ const deleteMeeting = async (req, res) => {
   }
 };
 
+/**
+ * 13. Thêm tài liệu đính kèm vào phiên họp
+ */
+const addMeetingDocument = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, fileId, fileUrl, fileName, fileSize, mimeType, isConfidential } = req.body;
+    const currentUserId = req.user?.userId || req.user?._id;
+
+    const meeting = await Meeting.findById(id);
+    if (!meeting) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy phiên họp" });
+    }
+
+    const newDoc = {
+      title: title || fileName || "Tài liệu phiên họp",
+      fileId: fileId || "",
+      fileUrl: fileUrl || (fileId ? `https://drive.google.com/file/d/${fileId}/view?usp=sharing` : ""),
+      fileName: fileName || title || "document.pdf",
+      fileSize: fileSize || "",
+      mimeType: mimeType || "application/pdf",
+      isConfidential: Boolean(isConfidential),
+      uploadedBy: currentUserId,
+      uploadedAt: new Date(),
+    };
+
+    meeting.documents.push(newDoc);
+    await meeting.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Thêm tài liệu vào phiên họp thành công!",
+      data: meeting.documents,
+    });
+  } catch (error) {
+    console.error("Lỗi addMeetingDocument:", error);
+    return res.status(500).json({ success: false, message: "Lỗi thêm tài liệu phiên họp", error: error.message });
+  }
+};
+
 module.exports = {
   getMeetings,
   getMeetingById,
@@ -603,4 +643,5 @@ module.exports = {
   closeVote,
   saveMinutesAndActionItems,
   deleteMeeting,
+  addMeetingDocument,
 };
