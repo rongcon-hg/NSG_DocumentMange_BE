@@ -232,8 +232,32 @@ const onlineRecordSchema = new mongoose.Schema(
 onlineRecordSchema.pre("save", async function (next) {
   if (!this.recordCode) {
     const year = new Date().getFullYear();
-    const count = await mongoose.model("OnlineRecord").countDocuments();
-    this.recordCode = `HS-${year}-${String(count + 1).padStart(4, "0")}`;
+    const prefix = `HS-${year}-`;
+    // Tìm record có recordCode lớn nhất trong năm hiện tại
+    const lastRecord = await mongoose
+      .model("OnlineRecord")
+      .findOne({ recordCode: { $regex: `^${prefix}` } })
+      .sort({ recordCode: -1 })
+      .select("recordCode")
+      .lean();
+
+    let nextNum = 1;
+    if (lastRecord && lastRecord.recordCode) {
+      const parts = lastRecord.recordCode.split("-");
+      const lastNum = parseInt(parts[parts.length - 1], 10);
+      if (!isNaN(lastNum)) {
+        nextNum = lastNum + 1;
+      }
+    }
+
+    // Đảm bảo không trùng với bất kỳ record nào đã có
+    let candidateCode = `${prefix}${String(nextNum).padStart(4, "0")}`;
+    while (await mongoose.model("OnlineRecord").exists({ recordCode: candidateCode })) {
+      nextNum += 1;
+      candidateCode = `${prefix}${String(nextNum).padStart(4, "0")}`;
+    }
+
+    this.recordCode = candidateCode;
   }
   next();
 });

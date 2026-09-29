@@ -216,7 +216,7 @@ const addItemToFolder = async (req, res) => {
 const updateArchiveFolder = async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, academicYear, retentionPeriod, description, accessScope, allowedDepartments, allowedUsers } = req.body;
+    const { title, academicYear, retentionPeriod, description, accessScope, allowedDepartments, allowedUsers, status } = req.body;
 
     const folder = await ArchiveFolder.findById(id);
     if (!folder) {
@@ -232,9 +232,9 @@ const updateArchiveFolder = async (req, res) => {
       return res.status(403).json({ success: false, message: 'Bạn không có quyền chỉnh sửa hồ sơ này' });
     }
 
-    // Nếu hồ sơ đã ARCHIVED thì chỉ admin mới được sửa
-    if (folder.status === 'ARCHIVED' && req.user?.role !== 'admin') {
-      return res.status(400).json({ success: false, message: 'Hồ sơ đã nhập kho lưu trữ cơ quan, chỉ Quản trị viên mới được điều chỉnh.' });
+    // Nếu hồ sơ đã ARCHIVED thì chỉ admin hoặc manager mới được sửa
+    if (folder.status === 'ARCHIVED' && !isAdminOrManager) {
+      return res.status(400).json({ success: false, message: 'Hồ sơ đã nhập kho lưu trữ cơ quan, chỉ Quản trị viên/Văn thư mới được điều chỉnh.' });
     }
 
     if (title) folder.title = title.trim();
@@ -247,6 +247,15 @@ const updateArchiveFolder = async (req, res) => {
     }
     if (allowedUsers !== undefined) {
       folder.allowedUsers = Array.isArray(allowedUsers) ? allowedUsers : [];
+    }
+    if (status && isAdminOrManager) {
+      folder.status = status;
+      if (status === 'ARCHIVED') {
+        folder.archivedAt = folder.archivedAt || new Date();
+        folder.closedAt = folder.closedAt || new Date();
+      } else if (status === 'SUBMITTED') {
+        folder.closedAt = folder.closedAt || new Date();
+      }
     }
 
     await folder.save();
