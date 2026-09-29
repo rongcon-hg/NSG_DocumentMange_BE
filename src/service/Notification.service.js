@@ -41,6 +41,11 @@ const triggerDocumentNotifications = async (document) => {
         if (uniqueUsers.length > 0) {
             sendNewDocumentEmail(uniqueUsers, document, senderName).catch(err => console.error("Email Notify Error:", err));
             
+            // Số hiệu văn bản đầy đủ bao gồm cả phần số và phần ký hiệu (vd: 123/TB-NSG)
+            const fullDocCode = (document.docNum && document.docCode)
+                ? `${document.docNum}/${document.docCode}`
+                : (document.docNum || document.docCode || "Thông báo");
+
             // Gửi Web Push Notification tức thời đến thiết bị
             try {
                 const { sendPushToUsers } = require("./webPush.service");
@@ -49,7 +54,7 @@ const triggerDocumentNotifications = async (document) => {
                     .map(u => u._id);
                 if (recipientIds.length > 0) {
                     sendPushToUsers(recipientIds, {
-                        title: `Văn bản mới: ${document.docCode || "Thông báo"}`,
+                        title: `Văn bản mới: ${fullDocCode}`,
                         body: document.shortDescription || document.principalIdea || "Bạn có văn bản mới cần xử lý",
                         url: `/documents/ReceivedDocumentList`
                     }).catch(err => console.error("Push Notify Error:", err));
@@ -59,8 +64,8 @@ const triggerDocumentNotifications = async (document) => {
                         recipient: recId,
                         sender: senderUser ? senderUser._id : undefined,
                         type: "GENERAL",
-                        title: `Văn bản mới: ${document.docCode || "Thông báo"}`,
-                        message: document.shortDescription || document.principalIdea || "Bạn có một văn bản mới được gửi đến.",
+                        title: `Văn bản mới: ${fullDocCode}`,
+                        message: `${fullDocCode} - ${document.shortDescription || document.principalIdea || "Bạn có một văn bản mới được gửi đến."}`,
                         link: "/documents/ReceivedDocumentList",
                         isRead: false,
                         isPopupShown: false,
@@ -88,7 +93,7 @@ const triggerDocumentNotifications = async (document) => {
             }
 
             if (taskUsers.length > 0) {
-                await createTasksAndSyncGoogleCalendar(document, taskUsers);
+                await createTasksAndSyncGoogleCalendar(document, taskUsers, senderName);
             }
         }
 
@@ -97,7 +102,7 @@ const triggerDocumentNotifications = async (document) => {
     }
 };
 
-const createTasksAndSyncGoogleCalendar = async (document, uniqueUsers) => {
+const createTasksAndSyncGoogleCalendar = async (document, uniqueUsers, senderName = "Hệ thống") => {
     try {
         // Create an internal Task
         const fullDocCode = (document.docNum && document.docCode) 
