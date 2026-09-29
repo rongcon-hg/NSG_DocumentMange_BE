@@ -326,8 +326,11 @@ const disableUser = async (req, res) => {
         return res.status(404).json({ success: false, message: "User not found." });
       }
   
-      user.role = null;
-      await user.save();
+      await User.findByIdAndUpdate(
+        userId,
+        { $set: { role: null } },
+        { runValidators: false, new: true }
+      );
   
       res.status(200).json({
         success: true,
@@ -354,13 +357,16 @@ const restoreUser = async (req, res) => {
         return res.status(400).json({ message: "Invalid role for restoration." });
       }
   
-      user.role = role;
-      await user.save();
+      const updatedUser = await User.findByIdAndUpdate(
+        userId,
+        { $set: { role: role } },
+        { runValidators: false, new: true }
+      );
   
       return res.status(200).json({
         success: true,
         message: "User account has been restored.",
-        user,
+        user: updatedUser,
       });
     } catch (error) {
       console.error("Error restoring user:", error.message);

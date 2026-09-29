@@ -137,7 +137,7 @@ const googleCallback = async (req, res) => {
 
       return res.redirect(`${feOrigin}/login?token=${accessToken}&name=${encodeURIComponent(user.name)}`);
     } else {
-      // Logic ủy quyền (Authorize) từ trang Profile
+      // Logic ủy quyền (Authorize) từ trang Profile: Chỉ cập nhật nếu user đã tồn tại
       await User.findOneAndUpdate(
         { email: profile.email },
         {
@@ -148,7 +148,7 @@ const googleCallback = async (req, res) => {
             "google.tokenExpiryDate": tokens.expiry_date ? new Date(tokens.expiry_date) : null,
           },
         },
-        { upsert: true, new: true } // Vẫn giữ nguyên logic cũ nếu muốn
+        { upsert: false, new: true }
       );
 
       return res.redirect(`${feOrigin}/members`);
