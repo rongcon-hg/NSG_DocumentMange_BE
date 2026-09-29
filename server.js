@@ -181,6 +181,11 @@ const quarterlyPlanRoutes = require('./src/routes/quarterlyPlan.routes');
 app.use('/api/quarterly-plans', quarterlyPlanRoutes);
 app.use('/quarterly-plans', quarterlyPlanRoutes);
 
+// Paperless Meeting (Phòng họp không giấy tờ) routes
+const meetingRoutes = require('./src/routes/meeting.routes');
+app.use('/api/meetings', meetingRoutes);
+app.use('/meetings', meetingRoutes);
+
 // Cron endpoint for Vercel
 const cronRoutes = require('./src/routes/cronRoutes');
 app.use('/api/cron', cronRoutes);
