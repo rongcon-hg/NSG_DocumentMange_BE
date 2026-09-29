@@ -211,6 +211,63 @@ const addItemToFolder = async (req, res) => {
 };
 
 /**
+ * Cập nhật thông tin hồ sơ (tiêu đề, thời hạn, phạm vi truy cập, đơn vị được xem...)
+ */
+const updateArchiveFolder = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, academicYear, retentionPeriod, description, accessScope, allowedDepartments, allowedUsers } = req.body;
+
+    const folder = await ArchiveFolder.findById(id);
+    if (!folder) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy hồ sơ lưu trữ' });
+    }
+
+    const userId = req.user?._id || req.user?.id;
+    const isCreator = folder.creator?.toString() === userId?.toString();
+    const isAdminOrManager = ['admin', 'manager'].includes(req.user?.role);
+
+    // Chỉ người tạo hoặc Admin/Manager mới được chỉnh sửa
+    if (!isCreator && !isAdminOrManager) {
+      return res.status(403).json({ success: false, message: 'Bạn không có quyền chỉnh sửa hồ sơ này' });
+    }
+
+    // Nếu hồ sơ đã ARCHIVED thì chỉ admin mới được sửa
+    if (folder.status === 'ARCHIVED' && req.user?.role !== 'admin') {
+      return res.status(400).json({ success: false, message: 'Hồ sơ đã nhập kho lưu trữ cơ quan, chỉ Quản trị viên mới được điều chỉnh.' });
+    }
+
+    if (title) folder.title = title.trim();
+    if (academicYear) folder.academicYear = academicYear;
+    if (retentionPeriod) folder.retentionPeriod = retentionPeriod;
+    if (description !== undefined) folder.description = description;
+    if (accessScope) folder.accessScope = accessScope;
+    if (allowedDepartments !== undefined) {
+      folder.allowedDepartments = Array.isArray(allowedDepartments) ? allowedDepartments : [];
+    }
+    if (allowedUsers !== undefined) {
+      folder.allowedUsers = Array.isArray(allowedUsers) ? allowedUsers : [];
+    }
+
+    await folder.save();
+
+    const updated = await ArchiveFolder.findById(id)
+      .populate('creator', 'name email role position')
+      .populate('department', 'departmentName')
+      .populate('allowedDepartments', 'departmentName');
+
+    return res.json({
+      success: true,
+      message: 'Cập nhật thông tin hồ sơ lưu trữ thành công',
+      data: updated,
+    });
+  } catch (error) {
+    console.error('Lỗi updateArchiveFolder:', error);
+    return res.status(500).json({ success: false, message: 'Lỗi khi cập nhật hồ sơ lưu trữ' });
+  }
+};
+
+/**
  * Cập nhật trạng thái hồ sơ (Nộp lưu / Duyệt nhập kho / Đóng hồ sơ)
  */
 const updateFolderStatus = async (req, res) => {
@@ -281,6 +338,7 @@ module.exports = {
   getArchiveFolders,
   getArchiveFolderById,
   createArchiveFolder,
+  updateArchiveFolder,
   addItemToFolder,
   updateFolderStatus,
   deleteArchiveFolder,
