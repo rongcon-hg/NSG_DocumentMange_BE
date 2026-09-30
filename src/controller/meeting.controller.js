@@ -469,13 +469,13 @@ const logMeetingAccess = async (req, res) => {
 };
 
 /**
- * 7. Đăng ký phát biểu / Hủy đăng ký phát biểu
+ * 7. Đăng ký phát biểu / Hủy đăng ký phát biểu (Hỗ trợ cả đại biểu đăng nhập và khách)
  */
 const toggleSpeakRequest = async (req, res) => {
   try {
     const { id } = req.params;
     const currentUserId = req.user?.userId || req.user?._id;
-    const { isRequested } = req.body;
+    const { isRequested, guestId } = req.body;
 
     const meeting = await Meeting.findById(id);
     if (!meeting) {
@@ -484,31 +484,52 @@ const toggleSpeakRequest = async (req, res) => {
 
     const isNowSpeaking = Boolean(isRequested);
 
-    let attendee = meeting.attendees.find((a) => a.user.toString() === currentUserId.toString());
+    let attendee = meeting.attendees.find((a) => {
+      if (currentUserId && a.user && a.user.toString() === currentUserId.toString()) return true;
+      if (guestId && a.guestId && a.guestId === guestId) return true;
+      return false;
+    });
+
     if (attendee) {
       attendee.isSpeakingRequested = isNowSpeaking;
       attendee.speakRequestTime = isNowSpeaking ? new Date() : null;
     } else if (isNowSpeaking) {
-      // Nếu user chưa có trong danh sách đại biểu, tự động thêm vào với quyền GUEST/MEMBER
-      const userDoc = await User.findById(currentUserId).populate("department", "departmentName");
-      attendee = {
-        user: currentUserId,
-        name: userDoc?.name || "Đại biểu",
-        email: userDoc?.email || "",
-        departmentName: userDoc?.department?.departmentName || "",
-        roleInMeeting: "MEMBER",
-        attendanceStatus: "ATTENDED",
-        checkInTime: new Date(),
-        checkInMethod: "AUTO_JOIN",
-        isSpeakingRequested: true,
-        speakRequestTime: new Date(),
-      };
-      meeting.attendees.push(attendee);
+      // Nếu user/khách chưa có trong danh sách đại biểu, tự động thêm vào
+      if (currentUserId) {
+        const userDoc = await User.findById(currentUserId).populate("department", "departmentName");
+        attendee = {
+          user: currentUserId,
+          name: userDoc?.name || "Đại biểu",
+          email: userDoc?.email || "",
+          departmentName: userDoc?.department?.departmentName || "",
+          roleInMeeting: "MEMBER",
+          attendanceStatus: "ATTENDED",
+          checkInTime: new Date(),
+          checkInMethod: "AUTO_JOIN",
+          isSpeakingRequested: true,
+          speakRequestTime: new Date(),
+        };
+        meeting.attendees.push(attendee);
+      } else if (guestId) {
+        attendee = {
+          guestId: guestId,
+          name: req.body?.name || "Khách mời",
+          roleInMeeting: "GUEST",
+          attendanceStatus: "ATTENDED",
+          checkInTime: new Date(),
+          checkInMethod: "QR_SCAN",
+          isSpeakingRequested: true,
+          speakRequestTime: new Date(),
+        };
+        meeting.attendees.push(attendee);
+      } else {
+        return res.status(400).json({ success: false, message: "Không xác định được danh tính người tham gia" });
+      }
     }
     await meeting.save();
 
     // Nếu là Đăng ký phát biểu (isNowSpeaking === true), gửi thông báo đẩy đến Chủ tọa (Host) và Thư ký
-    if (isNowSpeaking) {
+    if (isNowSpeaking && attendee) {
       (async () => {
         try {
           const attendeeName = attendee.name || req.user?.name || "Một đại biểu";
@@ -516,17 +537,21 @@ const toggleSpeakRequest = async (req, res) => {
           const secretaryId = meeting.secretary?._id || meeting.secretary;
 
           const notifyUserIds = [];
-          if (hostId && hostId.toString() !== currentUserId.toString()) {
+          if (hostId && (!currentUserId || hostId.toString() !== currentUserId.toString())) {
             notifyUserIds.push(hostId.toString());
           }
-          if (secretaryId && secretaryId.toString() !== currentUserId.toString() && !notifyUserIds.includes(secretaryId.toString())) {
+          if (
+            secretaryId &&
+            (!currentUserId || secretaryId.toString() !== currentUserId.toString()) &&
+            !notifyUserIds.includes(secretaryId.toString())
+          ) {
             notifyUserIds.push(secretaryId.toString());
           }
 
           if (notifyUserIds.length > 0) {
             const notifs = notifyUserIds.map((uId) => ({
               recipient: uId,
-              sender: currentUserId,
+              sender: currentUserId || null,
               type: "GENERAL",
               title: `Đăng ký phát biểu: ${meeting.title}`,
               message: `Đại biểu ${attendeeName} vừa đăng ký xin phát biểu trong phiên họp.`,
@@ -603,13 +628,20 @@ const createOrOpenVote = async (req, res) => {
 };
 
 /**
- * 9. Đại biểu bỏ phiếu / Biểu quyết
+ * 9. Đại biểu bỏ phiếu / Biểu quyết (Hỗ trợ cả đại biểu đăng nhập và khách)
  */
 const submitVote = async (req, res) => {
   try {
     const { id, voteId } = req.params;
     const currentUserId = req.user?.userId || req.user?._id;
+    const guestId = req.body?.guestId;
     const { selectedOptionIndexes } = req.body; // Mảng các index lựa chọn [0, 1]
+
+    const voterIdentifier = currentUserId ? currentUserId.toString() : (guestId ? guestId.toString() : null);
+
+    if (!voterIdentifier) {
+      return res.status(400).json({ success: false, message: "Không xác định được danh tính người bỏ phiếu" });
+    }
 
     const meeting = await Meeting.findById(id);
     if (!meeting) {
@@ -621,9 +653,9 @@ const submitVote = async (req, res) => {
       return res.status(400).json({ success: false, message: "Phiên biểu quyết không còn mở!" });
     }
 
-    // Kiểm tra xem đại biểu đã bỏ phiếu chưa
+    // Kiểm tra xem đại biểu hoặc khách đã bỏ phiếu chưa
     const alreadyVoted = vote.options.some((opt) =>
-      opt.voters.some((vId) => vId.toString() === currentUserId.toString())
+      opt.voters.some((vId) => vId && vId.toString() === voterIdentifier)
     );
 
     if (alreadyVoted) {
@@ -634,7 +666,7 @@ const submitVote = async (req, res) => {
     indexes.forEach((idx) => {
       if (vote.options[idx]) {
         vote.options[idx].voteCount += 1;
-        vote.options[idx].voters.push(currentUserId);
+        vote.options[idx].voters.push(voterIdentifier);
       }
     });
 

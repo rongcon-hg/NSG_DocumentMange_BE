@@ -40,7 +40,7 @@ const meetingVoteOptionSchema = new mongoose.Schema(
   {
     optionText: { type: String, required: true },
     voteCount: { type: Number, default: 0 },
-    voters: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }], // Danh sách người bỏ phiếu (nếu không ẩn danh)
+    voters: [{ type: mongoose.Schema.Types.Mixed }], // Danh sách người bỏ phiếu (UserId hoặc guestId nếu là khách)
   },
   { _id: true }
 );
