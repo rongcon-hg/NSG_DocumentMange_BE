@@ -912,6 +912,14 @@ const guestJoinMeeting = async (req, res) => {
       return res.status(404).json({ success: false, message: "Không tìm thấy phiên họp" });
     }
 
+    // Kiểm tra trạng thái cuộc họp: Nếu đã bế mạc hoặc hủy thì mã QR hết hiệu lực
+    if (meeting.status === "CONCLUDED" || meeting.status === "CANCELLED") {
+      return res.status(400).json({
+        success: false,
+        message: "Phiên họp này đã bế mạc hoặc kết thúc. Mã QR tham gia không còn hiệu lực!",
+      });
+    }
+
     // Kiểm tra mã PIN nếu phòng họp có cài đặt PIN
     if (meeting.pinCode && meeting.pinCode.trim()) {
       if (!pinCode || pinCode.trim() !== meeting.pinCode.trim()) {
