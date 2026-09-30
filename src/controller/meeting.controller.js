@@ -85,7 +85,14 @@ const getMeetingById = async (req, res) => {
       .populate("secretary", "name email position avatar")
       .populate("department", "departmentName")
       .populate("createdBy", "name email")
-      .populate("attendees.user", "name email position department avatar")
+      .populate({
+        path: "attendees.user",
+        select: "name email position department avatar",
+        populate: [
+          { path: "department", select: "departmentName" },
+          { path: "position", select: "positionName" },
+        ],
+      })
       .populate("votes.options.voters", "name email");
 
     if (!meeting) {
@@ -864,6 +871,14 @@ const getPublicMeeting = async (req, res) => {
     const meeting = await Meeting.findById(id)
       .populate("host", "name email department position")
       .populate("secretary", "name email department position")
+      .populate({
+        path: "attendees.user",
+        select: "name email position department avatar",
+        populate: [
+          { path: "department", select: "departmentName" },
+          { path: "position", select: "positionName" },
+        ],
+      })
       .select("-minutes.actionItems.createdTaskId");
 
     if (!meeting) {
