@@ -507,6 +507,55 @@ const QUARTERLY_PLAN_REMINDER_EMAIL_TEMPLATE = `
 </html>
 `;
 
+const MEETING_REMINDER_EMAIL_TEMPLATE = `
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Thông Báo Cuộc Họp: {meetingTitle}</title>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 650px; margin: 0 auto; padding: 20px;">
+  <div style="background: linear-gradient(to right, {headerColorStart}, {headerColorEnd}); padding: 22px; text-align: center; border-radius: 8px 8px 0 0;">
+    <h1 style="color: #fff; margin: 0; font-size: 20px; text-transform: uppercase; letter-spacing: 0.5px;">{headerTitle}</h1>
+  </div>
+  <div style="background-color: #f9fbfd; padding: 24px; border-radius: 0 0 8px 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid #e1e8ed; border-top: none;">
+    <p>Kính gửi: <strong>Quý Đại biểu / Thành viên tham dự</strong>,</p>
+    <p>{systemName} xin trân trọng thông báo về lịch họp sắp diễn ra:</p>
+    
+    <div style="background: #fff; padding: 18px; border-left: 4px solid {headerBorderColor}; margin: 20px 0; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+      <p style="margin: 6px 0;"><strong>Tên cuộc họp:</strong> <span style="font-weight: bold; color: #1e3a8a; font-size: 15px;">{meetingTitle}</span></p>
+      <p style="margin: 6px 0;"><strong>Mã phiên họp:</strong> <span style="background-color: #e0f2fe; color: #0369a1; padding: 2px 8px; border-radius: 4px; font-weight: bold;">{meetingCode}</span></p>
+      <p style="margin: 6px 0;"><strong>Thời gian:</strong> <span style="font-weight: bold; color: #b91c1c;">{timeRangeStr}</span></p>
+      <p style="margin: 6px 0;"><strong>Địa điểm / Phòng họp:</strong> <span style="font-weight: 600; color: #374151;">{location}</span></p>
+      <p style="margin: 6px 0;"><strong>Hình thức:</strong> {roomTypeStr}</p>
+      <p style="margin: 6px 0;"><strong>Chủ tọa phiên họp:</strong> <span style="color: #1e293b; font-weight: 600;">{hostName}</span></p>
+      {secretaryRowHtml}
+      {onlineUrlHtml}
+
+      <div style="margin: 14px 0; padding: 12px 14px; background-color: {alertBg}; border: 1px solid {alertBorder}; border-radius: 6px;">
+        <p style="margin: 4px 0; font-weight: bold; color: {alertColor}; font-size: 14px;">🔔 {reminderNote}</p>
+        <p style="margin: 4px 0; font-size: 13px; color: #475569;">Mã PIN vào phòng họp nhanh: <strong style="letter-spacing: 2px; font-size: 16px; color: #1e40af;">{pinCode}</strong></p>
+      </div>
+
+      {agendasHtml}
+    </div>
+
+    <div style="text-align: center; margin: 25px 0;">
+      <a href="{meetingUrl}" target="_blank" style="background-color: {headerBorderColor}; color: #ffffff; padding: 12px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block; box-shadow: 0 2px 4px rgba(0,0,0,0.2); font-size: 15px;">
+        Vào Phòng Họp Không Giấy Tờ
+      </a>
+    </div>
+
+    <p style="font-size: 13px; color: #64748b;">Quý Đại biểu vui lòng truy cập phòng họp đúng giờ để nghiên cứu trước tài liệu số, điểm danh và biểu quyết điện tử.</p>
+    <p style="margin-top: 20px;">Trân trọng,<br><strong>{systemName}</strong></p>
+  </div>
+  <div style="text-align: center; margin-top: 15px; color: #888; font-size: 11px;">
+    <p>Đây là thông báo tự động từ {systemName}, vui lòng không trả lời trực tiếp email này.</p>
+  </div>
+</body>
+</html>
+`;
+
 module.exports = {
   TEMPPASSWORD_EMAIL_TEMPLATE,
   NEW_DOCUMENT_EMAIL_TEMPLATE,
@@ -519,5 +568,7 @@ module.exports = {
   ONLINE_RECORD_SUBMIT_EMAIL_TEMPLATE,
   ONLINE_RECORD_STATUS_EMAIL_TEMPLATE,
   QUARTERLY_PLAN_REMINDER_EMAIL_TEMPLATE,
+  MEETING_REMINDER_EMAIL_TEMPLATE,
 };
+
 

@@ -4,6 +4,7 @@ const { executeTaskReminders, executeAutoBackup } = require('../service/TaskCron
 const { executeRecurringTasksGeneration } = require('../service/recurringTask.service');
 const { executeQuarterlyPlanReminders } = require('../service/quarterlyPlanCron.service');
 const { autoUpdateEffectiveStatuses } = require('../controller/legalBasis.controller');
+const { executeMeetingReminders } = require('../service/meetingReminder.service');
 
 // Middleware xác thực Cron: Chấp nhận header Authorization (CRON_SECRET hoặc Vercel Cron header) hoặc Admin token
 const verifyCronSecret = (req, res, next) => {
@@ -38,6 +39,7 @@ router.get('/reminders', verifyCronSecret, async (req, res) => {
     await executeTaskReminders();
     await executeQuarterlyPlanReminders();
     await autoUpdateEffectiveStatuses();
+    await executeMeetingReminders();
     await executeAutoBackup();
     await executeRecurringTasksGeneration();
     return res.status(200).json({ success: true, message: 'Cron jobs executed successfully' });

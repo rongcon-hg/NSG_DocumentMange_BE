@@ -10,6 +10,7 @@ const {
     ONLINE_RECORD_SUBMIT_EMAIL_TEMPLATE,
     ONLINE_RECORD_STATUS_EMAIL_TEMPLATE,
     QUARTERLY_PLAN_REMINDER_EMAIL_TEMPLATE,
+    MEETING_REMINDER_EMAIL_TEMPLATE,
 } = require("./emailTemplate");
 const nodemailer = require("nodemailer");
 const dotenv = require("dotenv");
@@ -1144,6 +1145,155 @@ const sendQuarterlyPlanReminderEmail = async (recipientEmails, planData, itemDat
     }
 };
 
+/**
+ * Gửi email nhắc nhở lịch họp cho đại biểu tham dự
+ * @param {Array<string>} recipientEmails Danh sách email nhận
+ * @param {Object} meeting Dữ liệu cuộc họp
+ * @param {string} reminderType '1_day' | '30_min' | 'start'
+ */
+const sendMeetingReminderEmail = async (recipientEmails, meeting, reminderType = "30_min") => {
+    try {
+        const validEmails = recipientEmails.filter((e) => typeof e === "string" && e.includes("@"));
+        if (validEmails.length === 0) return false;
+
+        const { transporter, sender } = await getTransporterAndSender();
+        const brandName = await getSystemBrandName();
+
+        let headerTitle = "THÔNG BÁO CUỘC HỌP";
+        let headerColorStart = "#2563eb";
+        let headerColorEnd = "#3b82f6";
+        let headerBorderColor = "#2563eb";
+        let alertBg = "#eff6ff";
+        let alertBorder = "#bfdbfe";
+        let alertColor = "#1e40af";
+        let reminderNote = "Cuộc họp sắp diễn ra. Quý Đại biểu vui lòng lưu ý thời gian.";
+        let subjectPrefix = "[THÔNG BÁO]";
+
+        if (reminderType === "1_day") {
+            headerTitle = "NHẮC HỌP: TRƯỚC 1 NGÀY";
+            headerColorStart = "#0284c7";
+            headerColorEnd = "#38bdf8";
+            headerBorderColor = "#0284c7";
+            alertBg = "#f0f9ff";
+            alertBorder = "#bae6fd";
+            alertColor = "#0369a1";
+            reminderNote = "Cuộc họp sẽ bắt đầu sau 1 ngày nữa (ngày mai). Quý Đại biểu vui lòng sắp xếp thời gian.";
+            subjectPrefix = "[NHẮC HỌP TRƯỚC 1 NGÀY]";
+        } else if (reminderType === "30_min") {
+            headerTitle = "NHẮC HỌP: CÒN 30 PHÚT";
+            headerColorStart = "#ea580c";
+            headerColorEnd = "#f97316";
+            headerBorderColor = "#ea580c";
+            alertBg = "#fff7ed";
+            alertBorder = "#fed7aa";
+            alertColor = "#c2410c";
+            reminderNote = "Chỉ còn 30 phút nữa cuộc họp sẽ chính thức bắt đầu. Quý Đại biểu vui lòng chuẩn bị vào phòng họp.";
+            subjectPrefix = "[SẮP BẮT ĐẦU - 30 PHÚT]";
+        } else if (reminderType === "start") {
+            headerTitle = "PHIÊN HỌP ĐANG BẮT ĐẦU";
+            headerColorStart = "#16a34a";
+            headerColorEnd = "#22c55e";
+            headerBorderColor = "#16a34a";
+            alertBg = "#f0fdf4";
+            alertBorder = "#bbf7d0";
+            alertColor = "#15803d";
+            reminderNote = "Cuộc họp đang chính thức bắt đầu! Quý Đại biểu vui lòng vào phòng họp và điểm danh.";
+            subjectPrefix = "[BẮT ĐẦU PHIÊN HỌP]";
+        }
+
+        const startTimeStr = new Date(meeting.startTime).toLocaleString("vi-VN", {
+            hour: "2-digit",
+            minute: "2-digit",
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+        });
+        const endTimeStr = new Date(meeting.endTime).toLocaleString("vi-VN", {
+            hour: "2-digit",
+            minute: "2-digit",
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+        });
+        const timeRangeStr = `${startTimeStr} - ${endTimeStr}`;
+
+        const roomTypeStr =
+            meeting.roomType === "ONLINE"
+                ? "Trực tuyến 100%"
+                : meeting.roomType === "HYBRID"
+                ? "Kết hợp Trực tiếp & Trực tuyến"
+                : "Họp trực tiếp tại phòng";
+
+        const secretaryName = meeting.secretary?.name || meeting.secretaryName || "";
+        const secretaryRowHtml = secretaryName
+            ? `<p style="margin: 6px 0;"><strong>Thư ký phiên họp:</strong> <span style="color: #475569;">${secretaryName}</span></p>`
+            : "";
+
+        const onlineUrlHtml = meeting.onlineMeetingUrl
+            ? `<p style="margin: 6px 0;"><strong>Link họp trực tuyến:</strong> <a href="${meeting.onlineMeetingUrl}" target="_blank" style="color: #2563eb; font-weight: 600;">${meeting.onlineMeetingUrl}</a></p>`
+            : "";
+
+        let agendasHtml = "";
+        if (meeting.agendas && meeting.agendas.length > 0) {
+            const listItems = meeting.agendas
+                .map(
+                    (ag, i) =>
+                        `<li style="margin-bottom: 6px;"><strong>${i + 1}. ${ag.title}</strong> ${
+                            ag.presenter ? `(${ag.presenter})` : ""
+                        } - <em>${ag.durationMinutes || 15} phút</em></li>`
+                )
+                .join("");
+            agendasHtml = `
+            <div style="margin-top: 14px; border-top: 1px dashed #cbd5e1; padding-top: 10px;">
+              <p style="margin: 4px 0; font-weight: bold; color: #334155;">Chương trình cuộc họp:</p>
+              <ol style="margin: 6px 0; padding-left: 20px; font-size: 13px; color: #475569;">
+                ${listItems}
+              </ol>
+            </div>
+            `;
+        }
+
+        const meetingUrl = `https://qlvb.namsaigon.edu.vn/meetings/${meeting._id}`;
+
+        let htmlContent = MEETING_REMINDER_EMAIL_TEMPLATE
+            .replace(/{headerTitle}/g, headerTitle)
+            .replace(/{headerColorStart}/g, headerColorStart)
+            .replace(/{headerColorEnd}/g, headerColorEnd)
+            .replace(/{headerBorderColor}/g, headerBorderColor)
+            .replace(/{alertBg}/g, alertBg)
+            .replace(/{alertBorder}/g, alertBorder)
+            .replace(/{alertColor}/g, alertColor)
+            .replace(/{reminderNote}/g, reminderNote)
+            .replace(/{meetingTitle}/g, meeting.title || "Cuộc họp")
+            .replace(/{meetingCode}/g, meeting.meetingCode || "PH")
+            .replace(/{timeRangeStr}/g, timeRangeStr)
+            .replace(/{location}/g, meeting.location || "Phòng họp số")
+            .replace(/{roomTypeStr}/g, roomTypeStr)
+            .replace(/{hostName}/g, meeting.host?.name || meeting.hostName || "Chủ tọa")
+            .replace(/{secretaryRowHtml}/g, secretaryRowHtml)
+            .replace(/{onlineUrlHtml}/g, onlineUrlHtml)
+            .replace(/{pinCode}/g, meeting.pinCode || "—")
+            .replace(/{agendasHtml}/g, agendasHtml)
+            .replace(/{meetingUrl}/g, meetingUrl);
+
+        const subject = `${subjectPrefix} ${meeting.title} - ${startTimeStr}`;
+
+        const mailOptions = {
+            from: sender,
+            to: validEmails.join(", "),
+            subject: subject,
+            html: applySystemBranding(htmlContent, brandName),
+        };
+
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`[Email] Đã gửi nhắc lịch họp "${meeting.title}" (${reminderType}) tới ${validEmails.length} email:`, info?.messageId);
+        return true;
+    } catch (error) {
+        console.error("Error in sendMeetingReminderEmail:", error);
+        return false;
+    }
+};
+
 module.exports = {
     sentTempPassword,
     sendRestoreOtpEmail,
@@ -1158,4 +1308,5 @@ module.exports = {
     sendOnlineRecordSubmitEmail,
     sendOnlineRecordStatusEmail,
     sendQuarterlyPlanReminderEmail,
+    sendMeetingReminderEmail,
 };

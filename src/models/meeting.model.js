@@ -227,6 +227,11 @@ const meetingSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "WorkSchedule",
     },
+
+    // Trạng thái gửi thông báo và email nhắc họp
+    reminder1DaySent: { type: Boolean, default: false }, // Nhắc trước 1 ngày
+    reminder30MinSent: { type: Boolean, default: false }, // Nhắc trước 30 phút
+    reminderStartSent: { type: Boolean, default: false }, // Nhắc khi cuộc họp bắt đầu
   },
   {
     timestamps: true,

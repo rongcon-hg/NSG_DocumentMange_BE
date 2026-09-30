@@ -214,6 +214,16 @@ const { executeTaskReminders, executeAutoBackup } = require('./src/service/TaskC
 const { executeRecurringTasksGeneration } = require('./src/service/recurringTask.service');
 const { executeQuarterlyPlanReminders } = require('./src/service/quarterlyPlanCron.service');
 const { autoUpdateEffectiveStatuses } = require('./src/controller/legalBasis.controller');
+const { executeMeetingReminders } = require('./src/service/meetingReminder.service');
+
+// Quét nhắc lịch họp mỗi 5 phút (trước 1 ngày, trước 30 phút và khi bắt đầu)
+cron.schedule('*/5 * * * *', async () => {
+    try {
+        await executeMeetingReminders();
+    } catch (e) {
+        console.error('Lỗi chạy Cron nhắc lịch họp:', e);
+    }
+});
 
 // Chạy hàng ngày vào lúc 00:05 (Nhắc việc, Kế hoạch quý, Cập nhật hiệu lực căn cứ pháp luật & Sao lưu)
 cron.schedule('5 0 * * *', async () => {
@@ -221,6 +231,7 @@ cron.schedule('5 0 * * *', async () => {
     await executeTaskReminders();
     await executeQuarterlyPlanReminders();
     await autoUpdateEffectiveStatuses();
+    await executeMeetingReminders();
     await executeAutoBackup();
     console.log('--- Hoàn tất Cron Jobs ---');
 });
@@ -231,6 +242,7 @@ cron.schedule('30 6 * * *', async () => {
     await executeRecurringTasksGeneration();
     await executeQuarterlyPlanReminders();
     await autoUpdateEffectiveStatuses();
+    await executeMeetingReminders();
     console.log('--- Hoàn tất sinh Công việc định kỳ & Quét Kế hoạch quý ---');
 });
 
