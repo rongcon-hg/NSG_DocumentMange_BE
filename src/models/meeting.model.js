@@ -83,11 +83,37 @@ const meetingAttendeeSchema = new mongoose.Schema(
       default: "ABSENT",
     },
     checkInTime: { type: Date },
+    checkOutTime: { type: Date }, // Thời gian rời phòng họp gần nhất
     checkInMethod: {
       type: String,
       enum: ["QR_SCAN", "MANUAL", "AUTO_JOIN"],
       default: "MANUAL",
     },
+    checkInLocation: { type: String, default: "" }, // Tên địa điểm / Tọa độ GPS / Trình duyệt vị trí
+    checkInCoords: {
+      latitude: { type: Number },
+      longitude: { type: Number },
+      accuracy: { type: Number },
+    },
+    checkInIp: { type: String, default: "" },
+    // Nhật ký lịch sử các lần ra - vào phòng họp
+    accessLogs: [
+      {
+        action: {
+          type: String,
+          enum: ["JOIN", "LEAVE", "CHECK_IN"],
+          default: "JOIN",
+        },
+        time: { type: Date, default: Date.now },
+        location: { type: String, default: "" },
+        coords: {
+          latitude: { type: Number },
+          longitude: { type: Number },
+        },
+        ip: { type: String, default: "" },
+        device: { type: String, default: "" },
+      },
+    ],
     isSpeakingRequested: { type: Boolean, default: false }, // Đang bấm nút đăng ký phát biểu
     speakRequestTime: { type: Date },
     hasSpoken: { type: Boolean, default: false },

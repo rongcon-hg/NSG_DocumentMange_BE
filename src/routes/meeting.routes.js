@@ -16,8 +16,9 @@ router.patch("/:id/status", meetingController.updateMeetingStatus);
 router.delete("/:id", meetingController.deleteMeeting);
 router.post("/:id/documents", meetingController.addMeetingDocument);
 
-// Điểm danh & Đăng ký phát biểu
+// Điểm danh, Đăng ký phát biểu & Nhật ký Ra/Vào
 router.post("/:id/check-in", meetingController.checkInMeeting);
+router.post("/:id/access-log", meetingController.logMeetingAccess);
 router.post("/:id/speak-request", meetingController.toggleSpeakRequest);
 
 // Biểu quyết & Bỏ phiếu

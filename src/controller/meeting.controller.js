@@ -294,13 +294,13 @@ const updateMeetingStatus = async (req, res) => {
 };
 
 /**
- * 6. Điểm danh tham dự cuộc họp (QR Scan hoặc Tự điểm danh)
+ * 6. Điểm danh tham dự cuộc họp (QR Scan hoặc Tự điểm danh kèm Vị trí & Thiết bị)
  */
 const checkInMeeting = async (req, res) => {
   try {
     const { id } = req.params;
     const currentUserId = req.user?.userId || req.user?._id;
-    const { pinCode, method } = req.body;
+    const { pinCode, method, location, coords, device } = req.body;
 
     const meeting = await Meeting.findById(id);
     if (!meeting) {
@@ -311,24 +311,60 @@ const checkInMeeting = async (req, res) => {
       return res.status(400).json({ success: false, message: "Mã PIN phòng họp không chính xác!" });
     }
 
-    const attendee = meeting.attendees.find((a) => a.user.toString() === currentUserId.toString());
+    const clientIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "";
+    const now = new Date();
+
+    let attendee = meeting.attendees.find((a) => a.user.toString() === currentUserId.toString());
     if (attendee) {
       attendee.attendanceStatus = "ATTENDED";
-      attendee.checkInTime = new Date();
-      attendee.checkInMethod = method || "QR_SCAN";
+      attendee.checkInTime = now;
+      attendee.checkInMethod = method || "AUTO_JOIN";
+      if (location) attendee.checkInLocation = location;
+      if (coords && coords.latitude && coords.longitude) {
+        attendee.checkInCoords = {
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+          accuracy: coords.accuracy || 0,
+        };
+      }
+      attendee.checkInIp = clientIp;
+
+      if (!attendee.accessLogs) attendee.accessLogs = [];
+      attendee.accessLogs.push({
+        action: "CHECK_IN",
+        time: now,
+        location: location || "",
+        coords: coords ? { latitude: coords.latitude, longitude: coords.longitude } : undefined,
+        ip: clientIp,
+        device: device || req.headers["user-agent"] || "",
+      });
     } else {
       // Nếu là khách mời chưa có trong danh sách
       const userDoc = await User.findById(currentUserId).populate("department", "departmentName");
-      meeting.attendees.push({
+      attendee = {
         user: currentUserId,
         name: userDoc?.name || "Đại biểu",
         email: userDoc?.email || "",
         departmentName: userDoc?.department?.departmentName || "",
         roleInMeeting: "GUEST",
         attendanceStatus: "ATTENDED",
-        checkInTime: new Date(),
-        checkInMethod: method || "QR_SCAN",
-      });
+        checkInTime: now,
+        checkInMethod: method || "AUTO_JOIN",
+        checkInLocation: location || "",
+        checkInCoords: coords ? { latitude: coords.latitude, longitude: coords.longitude, accuracy: coords.accuracy } : undefined,
+        checkInIp: clientIp,
+        accessLogs: [
+          {
+            action: "CHECK_IN",
+            time: now,
+            location: location || "",
+            coords: coords ? { latitude: coords.latitude, longitude: coords.longitude } : undefined,
+            ip: clientIp,
+            device: device || req.headers["user-agent"] || "",
+          },
+        ],
+      };
+      meeting.attendees.push(attendee);
     }
 
     await meeting.save();
@@ -341,6 +377,65 @@ const checkInMeeting = async (req, res) => {
   } catch (error) {
     console.error("Lỗi checkInMeeting:", error);
     return res.status(500).json({ success: false, message: "Lỗi điểm danh", error: error.message });
+  }
+};
+
+/**
+ * 6.1 Ghi nhận thời gian Ra / Vào phòng họp (Access Log)
+ */
+const logMeetingAccess = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const currentUserId = req.user?.userId || req.user?._id;
+    const { action, location, coords, device } = req.body; // action: "JOIN" hoặc "LEAVE"
+
+    const meeting = await Meeting.findById(id);
+    if (!meeting) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy phiên họp" });
+    }
+
+    const clientIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "";
+    const now = new Date();
+
+    let attendee = meeting.attendees.find((a) => a.user.toString() === currentUserId.toString());
+    if (!attendee) {
+      const userDoc = await User.findById(currentUserId).populate("department", "departmentName");
+      attendee = {
+        user: currentUserId,
+        name: userDoc?.name || "Đại biểu",
+        email: userDoc?.email || "",
+        departmentName: userDoc?.department?.departmentName || "",
+        roleInMeeting: "GUEST",
+        attendanceStatus: "ABSENT",
+        accessLogs: [],
+      };
+      meeting.attendees.push(attendee);
+    }
+
+    if (action === "LEAVE") {
+      attendee.checkOutTime = now;
+    }
+
+    if (!attendee.accessLogs) attendee.accessLogs = [];
+    attendee.accessLogs.push({
+      action: action || "JOIN",
+      time: now,
+      location: location || "",
+      coords: coords && coords.latitude ? { latitude: coords.latitude, longitude: coords.longitude } : undefined,
+      ip: clientIp,
+      device: device || req.headers["user-agent"] || "",
+    });
+
+    await meeting.save();
+
+    return res.status(200).json({
+      success: true,
+      message: action === "LEAVE" ? "Đã ghi nhận rời phòng họp" : "Đã ghi nhận vào phòng họp",
+      data: attendee.accessLogs,
+    });
+  } catch (error) {
+    console.error("Lỗi logMeetingAccess:", error);
+    return res.status(500).json({ success: false, message: "Lỗi ghi nhận truy cập phòng họp", error: error.message });
   }
 };
 
@@ -660,4 +755,5 @@ module.exports = {
   saveMinutesAndActionItems,
   deleteMeeting,
   addMeetingDocument,
+  logMeetingAccess,
 };
