@@ -1,11 +1,13 @@
 const express = require("express");
 const router = express.Router();
-const { verifyToken } = require("../middleware/authMiddleware");
+const { verifyToken, optionalVerifyToken } = require("../middleware/authMiddleware");
 const meetingController = require("../controller/meeting.controller");
 
 // Các endpoint công khai (quét mã QR không cần đăng nhập)
 router.get("/public/:id", meetingController.getPublicMeeting);
 router.post("/public/:id/guest-join", meetingController.guestJoinMeeting);
+router.post("/public/:id/access-log", optionalVerifyToken, meetingController.logMeetingAccess);
+router.post("/:id/access-log", optionalVerifyToken, meetingController.logMeetingAccess);
 
 router.use(verifyToken);
 

@@ -30,6 +30,25 @@ const middlewareController = {
       res.status(401).json({ message: "You're not authenticated" });
     }
   },
+  optionalVerifyToken: async (req, res, next) => {
+    const token = req.headers.authorization;
+    if (token) {
+      const accessToken = token.split(" ")[1];
+      try {
+        const decoded = jwt.verify(
+          accessToken,
+          process.env.ACCESS_TOKEN_SECRET
+        );
+        const user = await User.findById(decoded.userId).select("-password");
+        if (user && VALID_ROLES.includes(user.role)) {
+          req.user = user;
+        }
+      } catch (error) {
+        // Token không hợp lệ thì coi như khách không có token
+      }
+    }
+    next();
+  },
   verifyAdmin: (req, res, next) => {
     middlewareController.verifyToken(req, res, () => {
       if (req.user && req.user.role === "admin") {
