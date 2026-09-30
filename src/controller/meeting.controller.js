@@ -397,36 +397,58 @@ const logMeetingAccess = async (req, res) => {
     const clientIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "";
     const now = new Date();
 
-    let attendee = meeting.attendees.find((a) => a.user.toString() === currentUserId.toString());
-    if (!attendee) {
-      const userDoc = await User.findById(currentUserId).populate("department", "departmentName");
-      attendee = {
-        user: currentUserId,
-        name: userDoc?.name || "Đại biểu",
-        email: userDoc?.email || "",
-        departmentName: userDoc?.department?.departmentName || "",
-        roleInMeeting: "GUEST",
-        attendanceStatus: "ABSENT",
-        accessLogs: [],
-      };
-      meeting.attendees.push(attendee);
-    }
-
-    if (action === "LEAVE") {
-      attendee.checkOutTime = now;
-    }
-
-    if (!attendee.accessLogs) attendee.accessLogs = [];
-    attendee.accessLogs.push({
-      action: action || "JOIN",
-      time: now,
-      location: location || "",
-      coords: coords && coords.latitude ? { latitude: coords.latitude, longitude: coords.longitude } : undefined,
-      ip: clientIp,
-      device: device || req.headers["user-agent"] || "",
+    const guestId = req.body?.guestId;
+    let attendee = meeting.attendees.find((a) => {
+      if (currentUserId && a.user && a.user.toString() === currentUserId.toString()) return true;
+      if (guestId && a.guestId && a.guestId === guestId) return true;
+      return false;
     });
 
-    await meeting.save();
+    if (!attendee) {
+      if (currentUserId) {
+        const userDoc = await User.findById(currentUserId).populate("department", "departmentName");
+        attendee = {
+          user: currentUserId,
+          name: userDoc?.name || "Đại biểu",
+          email: userDoc?.email || "",
+          departmentName: userDoc?.department?.departmentName || "",
+          roleInMeeting: "GUEST",
+          attendanceStatus: "ATTENDED",
+          accessLogs: [],
+          totalAttendanceMinutes: 0,
+        };
+        meeting.attendees.push(attendee);
+      }
+    }
+
+    if (attendee) {
+      if (!attendee.accessLogs) attendee.accessLogs = [];
+
+      if (action === "LEAVE") {
+        attendee.checkOutTime = now;
+
+        // Tìm lần JOIN hoặc CHECK_IN gần nhất chưa tính thời gian
+        const lastJoinLog = [...attendee.accessLogs]
+          .reverse()
+          .find((l) => l.action === "JOIN" || l.action === "CHECK_IN");
+
+        if (lastJoinLog && lastJoinLog.time) {
+          const sessionMinutes = Math.max(1, Math.round((now.getTime() - new Date(lastJoinLog.time).getTime()) / 60000));
+          attendee.totalAttendanceMinutes = (attendee.totalAttendanceMinutes || 0) + sessionMinutes;
+        }
+      }
+
+      attendee.accessLogs.push({
+        action: action || "JOIN",
+        time: now,
+        location: location || "",
+        coords: coords && coords.latitude ? { latitude: coords.latitude, longitude: coords.longitude } : undefined,
+        ip: clientIp,
+        device: device || req.headers["user-agent"] || "",
+      });
+
+      await meeting.save();
+    }
 
     return res.status(200).json({
       success: true,
@@ -453,11 +475,13 @@ const toggleSpeakRequest = async (req, res) => {
       return res.status(404).json({ success: false, message: "Không tìm thấy phiên họp" });
     }
 
+    const isNowSpeaking = Boolean(isRequested);
+
     let attendee = meeting.attendees.find((a) => a.user.toString() === currentUserId.toString());
     if (attendee) {
-      attendee.isSpeakingRequested = Boolean(isRequested);
-      attendee.speakRequestTime = isRequested ? new Date() : null;
-    } else if (isRequested) {
+      attendee.isSpeakingRequested = isNowSpeaking;
+      attendee.speakRequestTime = isNowSpeaking ? new Date() : null;
+    } else if (isNowSpeaking) {
       // Nếu user chưa có trong danh sách đại biểu, tự động thêm vào với quyền GUEST/MEMBER
       const userDoc = await User.findById(currentUserId).populate("department", "departmentName");
       attendee = {
@@ -476,9 +500,50 @@ const toggleSpeakRequest = async (req, res) => {
     }
     await meeting.save();
 
+    // Nếu là Đăng ký phát biểu (isNowSpeaking === true), gửi thông báo đẩy đến Chủ tọa (Host) và Thư ký
+    if (isNowSpeaking) {
+      (async () => {
+        try {
+          const attendeeName = attendee.name || req.user?.name || "Một đại biểu";
+          const hostId = meeting.host?._id || meeting.host;
+          const secretaryId = meeting.secretary?._id || meeting.secretary;
+
+          const notifyUserIds = [];
+          if (hostId && hostId.toString() !== currentUserId.toString()) {
+            notifyUserIds.push(hostId.toString());
+          }
+          if (secretaryId && secretaryId.toString() !== currentUserId.toString() && !notifyUserIds.includes(secretaryId.toString())) {
+            notifyUserIds.push(secretaryId.toString());
+          }
+
+          if (notifyUserIds.length > 0) {
+            const notifs = notifyUserIds.map((uId) => ({
+              recipient: uId,
+              sender: currentUserId,
+              type: "GENERAL",
+              title: `Đăng ký phát biểu: ${meeting.title}`,
+              message: `Đại biểu ${attendeeName} vừa đăng ký xin phát biểu trong phiên họp.`,
+              link: `/meetings/${meeting._id}`,
+              isRead: false,
+              isPopupShown: false,
+            }));
+            await Notification.insertMany(notifs);
+
+            sendPushToUsers(notifyUserIds, {
+              title: `Đăng ký phát biểu: ${meeting.title}`,
+              body: `Đại biểu ${attendeeName} xin phát biểu. Nhấp để mời phát biểu.`,
+              url: `/meetings/${meeting._id}`,
+            }).catch((err) => console.error("Push Error on speak request:", err));
+          }
+        } catch (pushErr) {
+          console.error("Lỗi gửi thông báo xin phát biểu:", pushErr);
+        }
+      })();
+    }
+
     return res.status(200).json({
       success: true,
-      message: isRequested ? "Đã gửi yêu cầu đăng ký phát biểu đến Chủ tọa" : "Đã hủy đăng ký phát biểu",
+      message: isNowSpeaking ? "Đã gửi yêu cầu đăng ký phát biểu đến Chủ tọa" : "Đã hủy đăng ký phát biểu",
       data: meeting.attendees,
     });
   } catch (error) {
@@ -741,6 +806,176 @@ const addMeetingDocument = async (req, res) => {
   }
 };
 
+/**
+ * 14. Xóa tài liệu khỏi phiên họp (Chủ trì, Quản lý/Manager, Admin, hoặc người tải lên)
+ */
+const deleteMeetingDocument = async (req, res) => {
+  try {
+    const { id, docId } = req.params;
+    const currentUserId = req.user?.userId || req.user?._id;
+    const currentUserRole = req.user?.role;
+
+    const meeting = await Meeting.findById(id);
+    if (!meeting) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy phiên họp" });
+    }
+
+    const docIndex = meeting.documents.findIndex(
+      (d) => d._id?.toString() === docId || d.fileId === docId
+    );
+
+    if (docIndex === -1) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy tài liệu này trong phiên họp" });
+    }
+
+    const targetDoc = meeting.documents[docIndex];
+    const isOwner = targetDoc.uploadedBy && targetDoc.uploadedBy.toString() === currentUserId.toString();
+    const isHost = (meeting.host?._id || meeting.host)?.toString() === currentUserId.toString();
+    const isCreator = (meeting.createdBy?._id || meeting.createdBy)?.toString() === currentUserId.toString();
+    const isPrivileged = ["admin", "manager"].includes(currentUserRole);
+
+    if (!isHost && !isPrivileged && !isCreator && !isOwner) {
+      return res.status(403).json({
+        success: false,
+        message: "Bạn không có quyền xóa tài liệu này! Chỉ Chủ tọa, Manager hoặc người tải lên mới có quyền.",
+      });
+    }
+
+    meeting.documents.splice(docIndex, 1);
+    await meeting.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Đã xóa tài liệu khỏi phiên họp thành công!",
+      data: meeting.documents,
+    });
+  } catch (error) {
+    console.error("Lỗi deleteMeetingDocument:", error);
+    return res.status(500).json({ success: false, message: "Lỗi xóa tài liệu phiên họp", error: error.message });
+  }
+};
+
+/**
+ * 15. Lấy thông tin phiên họp công khai (dành cho khách quét QR)
+ */
+const getPublicMeeting = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const meeting = await Meeting.findById(id)
+      .populate("host", "name email department position")
+      .populate("secretary", "name email department position")
+      .select("-minutes.actionItems.createdTaskId");
+
+    if (!meeting) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy phiên họp" });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: meeting,
+    });
+  } catch (error) {
+    console.error("Lỗi getPublicMeeting:", error);
+    return res.status(500).json({ success: false, message: "Lỗi tải thông tin phiên họp", error: error.message });
+  }
+};
+
+/**
+ * 16. Khách tham gia phiên họp qua mã QR (nhập PIN, Họ tên, Chức vụ, Đơn vị)
+ */
+const guestJoinMeeting = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { pinCode, name, position, department, location, coords, guestId, device } = req.body;
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({ success: false, message: "Vui lòng nhập Họ và tên của bạn!" });
+    }
+
+    const meeting = await Meeting.findById(id);
+    if (!meeting) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy phiên họp" });
+    }
+
+    // Kiểm tra mã PIN nếu phòng họp có cài đặt PIN
+    if (meeting.pinCode && meeting.pinCode.trim()) {
+      if (!pinCode || pinCode.trim() !== meeting.pinCode.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: "Mã xác nhận PIN phòng họp không chính xác! Vui lòng kiểm tra trên màn hình hoặc mã QR.",
+        });
+      }
+    }
+
+    const clientIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "";
+    const now = new Date();
+    const finalGuestId = guestId || `guest_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+    // Tìm xem khách này đã có trong danh sách chưa
+    let attendee = meeting.attendees.find((a) => a.guestId === finalGuestId);
+    if (attendee) {
+      attendee.name = name.trim();
+      if (position) attendee.positionName = position.trim();
+      if (department) attendee.departmentName = department.trim();
+      attendee.attendanceStatus = "ATTENDED";
+      if (!attendee.checkInTime) attendee.checkInTime = now;
+      if (location) attendee.checkInLocation = location;
+      if (coords && coords.latitude) {
+        attendee.checkInCoords = {
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+          accuracy: coords.accuracy || 0,
+        };
+      }
+    } else {
+      attendee = {
+        guestId: finalGuestId,
+        name: name.trim(),
+        positionName: position ? position.trim() : "",
+        departmentName: department ? department.trim() : "",
+        roleInMeeting: "GUEST",
+        attendanceStatus: "ATTENDED",
+        checkInTime: now,
+        checkInMethod: "QR_SCAN",
+        checkInLocation: location || "",
+        checkInCoords: coords && coords.latitude ? {
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+          accuracy: coords.accuracy || 0,
+        } : undefined,
+        checkInIp: clientIp,
+        totalAttendanceMinutes: 0,
+        accessLogs: [
+          {
+            action: "CHECK_IN",
+            time: now,
+            location: location || "",
+            coords: coords && coords.latitude ? { latitude: coords.latitude, longitude: coords.longitude } : undefined,
+            ip: clientIp,
+            device: device || req.headers["user-agent"] || "QR Guest Scan",
+          },
+        ],
+      };
+      meeting.attendees.push(attendee);
+    }
+
+    await meeting.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Chào mừng quý khách đến với phiên họp!",
+      data: {
+        meeting,
+        guest: attendee,
+        guestId: finalGuestId,
+      },
+    });
+  } catch (error) {
+    console.error("Lỗi guestJoinMeeting:", error);
+    return res.status(500).json({ success: false, message: "Lỗi đăng ký tham gia phiên họp", error: error.message });
+  }
+};
+
 module.exports = {
   getMeetings,
   getMeetingById,
@@ -755,5 +990,8 @@ module.exports = {
   saveMinutesAndActionItems,
   deleteMeeting,
   addMeetingDocument,
+  deleteMeetingDocument,
   logMeetingAccess,
+  getPublicMeeting,
+  guestJoinMeeting,
 };

@@ -3,6 +3,10 @@ const router = express.Router();
 const { verifyToken } = require("../middleware/authMiddleware");
 const meetingController = require("../controller/meeting.controller");
 
+// Các endpoint công khai (quét mã QR không cần đăng nhập)
+router.get("/public/:id", meetingController.getPublicMeeting);
+router.post("/public/:id/guest-join", meetingController.guestJoinMeeting);
+
 router.use(verifyToken);
 
 // Danh sách & chi tiết cuộc họp
@@ -15,6 +19,7 @@ router.put("/:id", meetingController.updateMeeting);
 router.patch("/:id/status", meetingController.updateMeetingStatus);
 router.delete("/:id", meetingController.deleteMeeting);
 router.post("/:id/documents", meetingController.addMeetingDocument);
+router.delete("/:id/documents/:docId", meetingController.deleteMeetingDocument);
 
 // Điểm danh, Đăng ký phát biểu & Nhật ký Ra/Vào
 router.post("/:id/check-in", meetingController.checkInMeeting);

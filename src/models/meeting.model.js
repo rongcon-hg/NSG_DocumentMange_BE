@@ -67,9 +67,11 @@ const meetingVoteSchema = new mongoose.Schema(
 // Schema thành viên tham dự & Điểm danh
 const meetingAttendeeSchema = new mongoose.Schema(
   {
-    user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+    user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: false },
+    guestId: { type: String, default: "" }, // Mã định danh khách (nếu tham gia qua quét QR công khai không có tài khoản)
     name: { type: String, default: "" },
     email: { type: String, default: "" },
+    positionName: { type: String, default: "" },
     departmentName: { type: String, default: "" },
     roleInMeeting: {
       type: String,
@@ -96,6 +98,7 @@ const meetingAttendeeSchema = new mongoose.Schema(
       accuracy: { type: Number },
     },
     checkInIp: { type: String, default: "" },
+    totalAttendanceMinutes: { type: Number, default: 0 }, // Tổng thời gian tham gia cuộc họp (tính theo phút)
     // Nhật ký lịch sử các lần ra - vào phòng họp
     accessLogs: [
       {
