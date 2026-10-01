@@ -460,7 +460,7 @@ const logMeetingAccess = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: action === "LEAVE" ? "Đã ghi nhận rời phòng họp" : "Đã ghi nhận vào phòng họp",
-      data: attendee.accessLogs,
+      data: attendee ? (attendee.accessLogs || []) : [],
     });
   } catch (error) {
     console.error("Lỗi logMeetingAccess:", error);

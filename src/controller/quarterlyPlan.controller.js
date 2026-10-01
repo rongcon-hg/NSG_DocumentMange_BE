@@ -405,8 +405,8 @@ const createPlanItem = async (req, res) => {
       // Mô tả chi tiết kèm thông tin kế hoạch quý
       const planTitle = plan ? `${plan.title} (Quý ${plan.quarter}/${plan.academicYear})` : "Kế hoạch công tác quý";
       const taskDescription = [
-        taskContent.trim(),
-        expectedOutcome ? `Sản phẩm / Kết quả đầu ra: ${expectedOutcome.trim()}` : "",
+        taskContent ? `Đầu việc: ${taskContent.trim()}` : "",
+        expectedOutcome ? `Trình tự thực hiện: ${expectedOutcome.trim()}` : "",
         `Căn cứ Kế hoạch: ${planTitle}`,
         groupName ? `Nhóm nhiệm vụ / Trọng tâm: ${groupName}` : "",
         manualRemark ? `Ghi chú chỉ đạo: ${manualRemark}` : "",
@@ -414,8 +414,11 @@ const createPlanItem = async (req, res) => {
         .filter(Boolean)
         .join("\n- ");
 
+      // Khi tạo công việc từ Kế hoạch quý: Trình tự thực hiện đưa vào Tiêu đề công việc
+      const taskMainTitle = (expectedOutcome && expectedOutcome.trim()) ? expectedOutcome.trim() : taskContent.trim();
+
       const newTask = new Task({
-        title: taskContent.trim(),
+        title: taskMainTitle,
         description: `- ${taskDescription}`,
         startDate: taskStart,
         endDate: taskEnd,
@@ -661,6 +664,139 @@ const updatePlanItem = async (req, res) => {
     item.calculateAutoRemark();
     await item.save();
 
+    // ==========================================
+    // TỰ ĐỘNG ĐỒNG BỘ THAY ĐỔI SANG CÔNG VIỆC CÓ LIÊN QUAN (TASK)
+    // ==========================================
+    try {
+      const linkedTask = item.createdTaskId
+        ? await Task.findById(item.createdTaskId)
+        : await Task.findOne({ quarterlyPlanItem: item._id });
+
+      if (linkedTask) {
+        let taskUpdated = false;
+
+        // 1. Cập nhật Tiêu đề công việc = Trình tự thực hiện (expectedOutcome) hoặc Đầu việc (taskContent)
+        const expectedTitle = (item.expectedOutcome && item.expectedOutcome.trim())
+          ? item.expectedOutcome.trim()
+          : item.taskContent.trim();
+        if (linkedTask.title !== expectedTitle) {
+          linkedTask.title = expectedTitle;
+          taskUpdated = true;
+        }
+
+        // 2. Cập nhật outputResult và focusAxis
+        if (linkedTask.outputResult !== (item.expectedOutcome || "")) {
+          linkedTask.outputResult = item.expectedOutcome || "";
+          taskUpdated = true;
+        }
+        if (linkedTask.focusAxis !== (item.groupName || "")) {
+          linkedTask.focusAxis = item.groupName || "";
+          taskUpdated = true;
+        }
+
+        // 3. Cập nhật ngày bắt đầu và hạn hoàn thành
+        if (item.startDate) {
+          const newStart = new Date(item.startDate);
+          if (!linkedTask.startDate || linkedTask.startDate.getTime() !== newStart.getTime()) {
+            linkedTask.startDate = newStart;
+            taskUpdated = true;
+          }
+        }
+        if (item.expectedDeadline) {
+          const newEnd = new Date(item.expectedDeadline);
+          newEnd.setHours(23, 59, 59, 999);
+          if (!linkedTask.endDate || linkedTask.endDate.getTime() !== newEnd.getTime()) {
+            linkedTask.endDate = newEnd;
+            taskUpdated = true;
+          }
+        }
+
+        // 4. Cập nhật Người thực hiện chính (assignees) từ Đơn vị chủ trì
+        const primaryLeaders = await getDepartmentLeaders(item.assignedDepartments || []);
+        const newAssigneeIds = primaryLeaders.map((u) => u._id);
+
+        // 5. Cập nhật Người phối hợp (collaborators) từ Đơn vị phối hợp & BGH phụ trách
+        const coordLeaders = await getDepartmentLeaders(item.coordinatingDepartments || []);
+        const coordLeaderIds = coordLeaders.map((u) => u._id.toString());
+        const bghIds = (item.bghInCharge || []).map((id) => (id._id ? id._id.toString() : id.toString()));
+
+        const newCollaboratorIds = Array.from(new Set([...coordLeaderIds, ...bghIds]))
+          .filter((id) => !newAssigneeIds.some((aId) => aId.toString() === id.toString()));
+
+        if (newAssigneeIds.length > 0) {
+          linkedTask.assignees = newAssigneeIds;
+          taskUpdated = true;
+        }
+        linkedTask.collaborators = newCollaboratorIds;
+        taskUpdated = true;
+
+        // 6. Cập nhật trạng thái công việc (status) nếu có thay đổi
+        if (item.status === "COMPLETED") {
+          if (linkedTask.status !== "DONE") {
+            linkedTask.status = "DONE";
+            linkedTask.completedAt = item.actualCompletedDate ? new Date(item.actualCompletedDate) : new Date();
+            taskUpdated = true;
+          }
+        } else if (item.status === "IN_PROGRESS" || item.status === "PAUSED") {
+          if (linkedTask.status !== "IN_PROGRESS") {
+            linkedTask.status = "IN_PROGRESS";
+            linkedTask.completedAt = null;
+            taskUpdated = true;
+          }
+        } else if (item.status === "NOT_STARTED") {
+          if (linkedTask.status !== "TODO") {
+            linkedTask.status = "TODO";
+            linkedTask.completedAt = null;
+            taskUpdated = true;
+          }
+        }
+
+        // 7. Cập nhật tệp đính kèm nếu có
+        if (item.files && item.files.length > 0) {
+          linkedTask.files = item.files.map((f) => ({
+            fileId: f.fileId,
+            fileName: f.fileName,
+            fileMimeType: f.fileMimeType || f.mimeType,
+          }));
+          taskUpdated = true;
+        }
+
+        // 8. Cập nhật lại description chi tiết
+        const plan = await QuarterlyPlan.findById(item.planId);
+        const planTitle = plan ? `${plan.title} (Quý ${plan.quarter}/${plan.academicYear})` : "Kế hoạch công tác quý";
+        const taskDescription = [
+          item.taskContent ? `Đầu việc: ${item.taskContent.trim()}` : "",
+          item.expectedOutcome ? `Trình tự thực hiện: ${item.expectedOutcome.trim()}` : "",
+          `Căn cứ Kế hoạch: ${planTitle}`,
+          item.groupName ? `Nhóm nhiệm vụ / Trọng tâm: ${item.groupName}` : "",
+          item.manualRemark ? `Ghi chú chỉ đạo: ${item.manualRemark}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n- ");
+        linkedTask.description = `- ${taskDescription}`;
+        taskUpdated = true;
+
+        if (taskUpdated) {
+          if (!linkedTask.history) linkedTask.history = [];
+          linkedTask.history.push({
+            action: "Đồng bộ từ Kế hoạch quý",
+            user: req.user._id,
+            details: `Tự động cập nhật thông tin theo thay đổi tại Kế hoạch quý: ${changes.join("; ") || "Cập nhật dữ liệu"}`,
+            timestamp: new Date(),
+          });
+          await linkedTask.save();
+
+          // Đảm bảo item lưu createdTaskId nếu trước đó chưa có
+          if (!item.createdTaskId) {
+            item.createdTaskId = linkedTask._id;
+            await item.save();
+          }
+        }
+      }
+    } catch (syncErr) {
+      console.error("Lỗi đồng bộ sang Task khi cập nhật QuarterlyPlanItem:", syncErr);
+    }
+
     const populatedItem = await QuarterlyPlanItem.findById(item._id)
       .populate("assignedDepartments", "_id departmentName departmentCode")
       .populate("coordinatingDepartments", "_id departmentName departmentCode")
@@ -825,16 +961,20 @@ const importPlanItems = async (req, res) => {
 
           const planTitle = `${plan.title} (Quý ${plan.quarter}/${plan.academicYear})`;
           const taskDescription = [
-            newItem.taskContent,
-            newItem.expectedOutcome ? `Sản phẩm / Kết quả đầu ra: ${newItem.expectedOutcome}` : "",
+            newItem.taskContent ? `Đầu việc: ${newItem.taskContent}` : "",
+            newItem.expectedOutcome ? `Trình tự thực hiện: ${newItem.expectedOutcome}` : "",
             `Căn cứ Kế hoạch: ${planTitle}`,
             newItem.groupName ? `Nhóm nhiệm vụ: ${newItem.groupName}` : "",
           ]
             .filter(Boolean)
             .join("\n- ");
 
+          const taskMainTitle = (newItem.expectedOutcome && newItem.expectedOutcome.trim())
+            ? newItem.expectedOutcome.trim()
+            : newItem.taskContent.trim();
+
           const newTask = new Task({
-            title: newItem.taskContent,
+            title: taskMainTitle,
             description: `- ${taskDescription}`,
             startDate: taskStart,
             endDate: taskEnd,

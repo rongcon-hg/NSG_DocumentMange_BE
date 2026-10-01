@@ -8,7 +8,9 @@ router.get("/public/:id", meetingController.getPublicMeeting);
 router.post("/public/:id/guest-join", meetingController.guestJoinMeeting);
 router.post("/public/:id/access-log", optionalVerifyToken, meetingController.logMeetingAccess);
 router.post("/:id/access-log", optionalVerifyToken, meetingController.logMeetingAccess);
+router.post("/public/:id/speak-request", optionalVerifyToken, meetingController.toggleSpeakRequest);
 router.post("/:id/speak-request", optionalVerifyToken, meetingController.toggleSpeakRequest);
+router.post("/public/:id/votes/:voteId/submit", optionalVerifyToken, meetingController.submitVote);
 router.post("/:id/votes/:voteId/submit", optionalVerifyToken, meetingController.submitVote);
 
 router.use(verifyToken);
