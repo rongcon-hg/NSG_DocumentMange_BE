@@ -31,6 +31,12 @@ const quarterlyPlanItemSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    // Kết quả đầu ra / Sản phẩm (Phụ lục 3)
+    outputResult: {
+      type: String,
+      default: "",
+      trim: true,
+    },
     // Đơn vị thực hiện (Phòng, Khoa, Trung tâm)
     assignedDepartments: [
       {

@@ -326,6 +326,7 @@ const createPlanItem = async (req, res) => {
       order,
       taskContent,
       expectedOutcome,
+      outputResult,
       assignedDepartments,
       coordinatingDepartments,
       bghInCharge,
@@ -351,6 +352,7 @@ const createPlanItem = async (req, res) => {
       order: order || 0,
       taskContent: taskContent.trim(),
       expectedOutcome: expectedOutcome || "",
+      outputResult: outputResult || "",
       assignedDepartments: assignedDepartments || [],
       coordinatingDepartments: coordinatingDepartments || [],
       bghInCharge: bghInCharge || [],
@@ -432,7 +434,7 @@ const createPlanItem = async (req, res) => {
         priority: "NORMAL",
         taskType: "REGULAR",
         baseScore: 10,
-        outputResult: expectedOutcome || "",
+        outputResult: outputResult || expectedOutcome || "",
         focusAxis: groupName || "",
         quarterlyPlanItem: newItem._id,
         createdBy: req.user._id,
@@ -564,6 +566,7 @@ const updatePlanItem = async (req, res) => {
       order,
       taskContent,
       expectedOutcome,
+      outputResult,
       assignedDepartments,
       coordinatingDepartments,
       bghInCharge,
@@ -599,8 +602,12 @@ const updatePlanItem = async (req, res) => {
         item.order = order;
       }
       if (expectedOutcome !== undefined && expectedOutcome !== item.expectedOutcome) {
-        changes.push(`Đổi kết quả đầu ra: "${expectedOutcome}"`);
+        changes.push(`Đổi trình tự thực hiện: "${expectedOutcome}"`);
         item.expectedOutcome = expectedOutcome;
+      }
+      if (outputResult !== undefined && outputResult !== item.outputResult) {
+        changes.push(`Đổi kết quả đầu ra: "${outputResult}"`);
+        item.outputResult = outputResult;
       }
       if (assignedDepartments !== undefined) item.assignedDepartments = assignedDepartments;
       if (coordinatingDepartments !== undefined) item.coordinatingDepartments = coordinatingDepartments;
@@ -685,8 +692,9 @@ const updatePlanItem = async (req, res) => {
         }
 
         // 2. Cập nhật outputResult và focusAxis
-        if (linkedTask.outputResult !== (item.expectedOutcome || "")) {
-          linkedTask.outputResult = item.expectedOutcome || "";
+        const targetOutput = item.outputResult || item.expectedOutcome || "";
+        if (linkedTask.outputResult !== targetOutput) {
+          linkedTask.outputResult = targetOutput;
           taskUpdated = true;
         }
         if (linkedTask.focusAxis !== (item.groupName || "")) {
@@ -920,6 +928,7 @@ const importPlanItems = async (req, res) => {
         order: raw.order || (createdItems.length + 1),
         taskContent: raw.taskContent.trim(),
         expectedOutcome: raw.expectedOutcome || "",
+        outputResult: raw.outputResult || "",
         assignedDepartments: assignedIds,
         coordinatingDepartments: coordIds,
         bghInCharge: bghIds,
@@ -983,7 +992,7 @@ const importPlanItems = async (req, res) => {
             priority: "NORMAL",
             taskType: "REGULAR",
             baseScore: 10,
-            outputResult: newItem.expectedOutcome || "",
+            outputResult: newItem.outputResult || newItem.expectedOutcome || "",
             focusAxis: newItem.groupName || "",
             quarterlyPlanItem: newItem._id,
             createdBy: req.user._id,
