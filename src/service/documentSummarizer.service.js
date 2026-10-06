@@ -365,7 +365,8 @@ Hãy đọc kỹ tệp đính kèm (hoặc trang đầu) và trích xuất chín
   "signerPosition": "Chức vụ người ký (Hiệu trưởng, Phó Hiệu trưởng, Giám đốc, Trưởng phòng...)",
   "shortDescription": "Trích yếu nội dung văn bản (văn phong hành chính rõ ràng, súc tích)",
   "urgency": "normal | high | immediately (mặc định normal; nếu có dấu Khẩn thì high; Hỏa tốc/Thượng khẩn thì immediately)",
-  "deadlineDay": "Hạn báo cáo/xử lý theo định dạng YYYY-MM-DD nếu trong nội dung có quy định mốc thời gian hoàn thành (hoặc null)",
+  "rawDeadlineText": "Đoạn văn bản gốc thể hiện mốc thời hạn báo cáo/xử lý (Ví dụ: 'trước ngày 12 tháng 10 năm 2026', 'trước ngày 15/10/2026', 'ngày 20/10/2026' hoặc null nếu không có)",
+  "deadlineDay": "Hạn báo cáo/xử lý theo định dạng YYYY-MM-DD. QUY TẮC ĐẶC BIỆT: Nếu trong văn bản có chữ 'trước' (hoặc trước ngày / hoàn thành trước ngày / gửi trước ngày...) thì hạn xử lý deadlineDay BẮT BUỘC phải là ngày liền kề trước đó (sớm hơn 1 ngày). Ví dụ: 'trước ngày 12/10/2026' hoặc 'trước ngày 12 tháng 10 năm 2026' thì ghi nhận deadlineDay là '2026-10-11'. Nếu không có chữ 'trước' (ví dụ: 'chậm nhất ngày 12/10/2026' hay 'đến ngày 12/10/2026') thì lấy đúng ngày '2026-10-12'. Nếu không có thời hạn thì để null.",
   "relatedDocReferences": ["Mảng các số hiệu văn bản được viện dẫn hoặc phúc đáp trong văn bản, ví dụ: ['123/NSG-TCHC', '45/KH-SGDDT']"]
 }
 
@@ -451,6 +452,35 @@ LƯU Ý CỰC KỲ QUAN TRỌNG:
             }
         }
 
+        // Xử lý chuẩn hóa mốc thời hạn deadlineDay:
+        // Nếu trong văn bản có chữ "trước" (ví dụ: "trước ngày 12/10/2026", "trước ngày 12 tháng 10 năm 2026")
+        // thì hệ thống đảm bảo mốc thời hạn xử lý luôn sớm hơn 1 ngày (ví dụ: ngày 11/10/2026).
+        let finalDeadlineDay = parsed.deadlineDay || null;
+        const rawDeadline = String(parsed.rawDeadlineText || "").toLowerCase();
+        const shortDesc = String(parsed.shortDescription || "").toLowerCase();
+        const hasTruocWord = rawDeadline.includes("trước") || 
+            /trước\s+ngày\s+\d+/i.test(rawDeadline) || 
+            /trước\s+ngày\s+\d+/i.test(shortDesc);
+
+        if (finalDeadlineDay && hasTruocWord) {
+            // Kiểm tra nếu Gemini chưa trừ 1 ngày từ rawDeadlineText
+            const matchDate = rawDeadline.match(/(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})/) ||
+                              rawDeadline.match(/ngày\s+(\d{1,2})\s+tháng\s+(\d{1,2})\s+năm\s+(\d{4})/i);
+            if (matchDate) {
+                const day = parseInt(matchDate[1], 10);
+                const month = parseInt(matchDate[2], 10);
+                const year = parseInt(matchDate[3], 10);
+                const mentionedDateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                
+                // Nếu Gemini trả về deadlineDay bằng đúng ngày được nêu trong văn bản -> Lùi lại 1 ngày
+                if (finalDeadlineDay === mentionedDateStr) {
+                    const d = new Date(Date.UTC(year, month - 1, day));
+                    d.setUTCDate(d.getUTCDate() - 1);
+                    finalDeadlineDay = d.toISOString().split("T")[0];
+                }
+            }
+        }
+
         return {
             raw: parsed,
             usedModel,
@@ -468,7 +498,8 @@ LƯU Ý CỰC KỲ QUAN TRỌNG:
                 signerPosition: parsed.signerPosition || "",
                 shortDescription: parsed.shortDescription || "",
                 urgency: parsed.urgency || "normal",
-                deadlineDay: parsed.deadlineDay || null,
+                rawDeadlineText: parsed.rawDeadlineText || null,
+                deadlineDay: finalDeadlineDay,
                 relatedDocReferences: parsed.relatedDocReferences || [],
                 matchedRelatedDocs: matchedRelatedDocs
             }
