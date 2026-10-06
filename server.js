@@ -98,6 +98,7 @@ const trainingRegistrationRoutes = require("./src/routes/trainingRegistration.ro
 const onlineRecordRoutes = require("./src/routes/onlineRecord.routes");
 const externalMenuRoutes = require("./src/routes/externalMenu.routes");
 const focusAxisRoutes = require("./src/routes/focusAxis.routes");
+const quarterlyTaskGroupRoutes = require("./src/routes/quarterlyTaskGroup.routes");
 
 // Ensure DB connection is established before handling requests in Vercel Serverless
 app.use(async (req, res, next) => {
@@ -139,6 +140,8 @@ app.use('/api/training/registrations', trainingRegistrationRoutes);
 app.use('/api/online-records', onlineRecordRoutes);
 app.use('/api/external-menus', externalMenuRoutes);
 app.use('/api/focus-axes', focusAxisRoutes);
+app.use('/api/quarterly-task-groups', quarterlyTaskGroupRoutes);
+app.use('/quarterly-task-groups', quarterlyTaskGroupRoutes);
 const recurringTaskRoutes = require('./src/routes/recurringTaskRoutes');
 app.use('/api/recurring-tasks', recurringTaskRoutes);
 app.use('/recurring-tasks', recurringTaskRoutes);

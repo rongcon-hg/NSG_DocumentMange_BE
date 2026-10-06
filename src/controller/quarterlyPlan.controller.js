@@ -854,6 +854,45 @@ const deletePlanItem = async (req, res) => {
 };
 
 /**
+ * Xóa nhiều mục nhiệm vụ cùng lúc (Chỉ Manager / Admin)
+ */
+const deleteMultiplePlanItems = async (req, res) => {
+  try {
+    if (!isManagerOrAdmin(req.user)) {
+      return res.status(403).json({ success: false, message: "Chỉ Quản lý mới có quyền xóa nhiệm vụ." });
+    }
+
+    const { itemIds } = req.body;
+    if (!Array.isArray(itemIds) || itemIds.length === 0) {
+      return res.status(400).json({ success: false, message: "Danh sách nhiệm vụ cần xóa không hợp lệ." });
+    }
+
+    // Tìm các task liên kết để xóa
+    const items = await QuarterlyPlanItem.find({ _id: { $in: itemIds } });
+    const linkedTaskIds = items
+      .map((item) => item.createdTaskId)
+      .filter(Boolean);
+
+    if (linkedTaskIds.length > 0) {
+      await Task.deleteMany({ _id: { $in: linkedTaskIds } }).catch((e) =>
+        console.error("Error deleting linked tasks:", e)
+      );
+    }
+
+    const deleteResult = await QuarterlyPlanItem.deleteMany({ _id: { $in: itemIds } });
+
+    return res.status(200).json({
+      success: true,
+      message: `Đã xóa thành công ${deleteResult.deletedCount} nhiệm vụ được chọn!`,
+      data: { deletedCount: deleteResult.deletedCount },
+    });
+  } catch (error) {
+    console.error("Lỗi deleteMultiplePlanItems:", error);
+    return res.status(500).json({ success: false, message: "Lỗi xóa nhiều nhiệm vụ", error: error.message });
+  }
+};
+
+/**
  * Import danh sách nhiệm vụ từ Excel vào Kế hoạch quý (Chỉ Manager / Admin)
  */
 const importPlanItems = async (req, res) => {
@@ -1060,6 +1099,7 @@ module.exports = {
   createPlanItem,
   updatePlanItem,
   deletePlanItem,
+  deleteMultiplePlanItems,
   importPlanItems,
   triggerPlanReminders,
 };

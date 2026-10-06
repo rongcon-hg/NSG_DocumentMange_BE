@@ -23,6 +23,8 @@ router.post("/trigger-reminders", quarterlyPlanController.triggerPlanReminders);
 // Nhiệm vụ con trong kế hoạch quý
 router.post("/items", quarterlyPlanController.createPlanItem);
 router.post("/items/import", quarterlyPlanController.importPlanItems);
+router.post("/items/delete-multiple", quarterlyPlanController.deleteMultiplePlanItems);
+router.delete("/items/delete-multiple", quarterlyPlanController.deleteMultiplePlanItems);
 router.put("/items/:itemId", quarterlyPlanController.updatePlanItem);
 router.delete("/items/:itemId", quarterlyPlanController.deletePlanItem);
 
