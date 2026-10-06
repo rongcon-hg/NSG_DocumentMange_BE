@@ -245,6 +245,12 @@ const createTask = async (req, res) => {
         const focusAxis = req.body.focusAxis ? String(req.body.focusAxis).trim() : '';
         const difficultyRate = req.body.difficultyRate !== undefined ? Number(req.body.difficultyRate) : 1.0;
 
+        const initialAssigneeStatuses = (assignees || []).map(a => ({
+            user: a._id || a,
+            status: "TODO",
+            updatedAt: new Date()
+        }));
+
         const newTask = new Task({
             title,
             description,
@@ -252,6 +258,7 @@ const createTask = async (req, res) => {
             startDate,
             endDate,
             assignees,
+            assigneeStatuses: initialAssigneeStatuses,
             collaborators,
             subtasks,
             files: uploadedFiles,
@@ -355,7 +362,8 @@ const createTask = async (req, res) => {
             .populate("history.user", "name email")
             .populate("relatedDocument", "docCode docNum shortDescription title files docVariant sentBy")
             .populate("subtasks.assignee", "name email")
-            .populate("subtasks.createdBy", "name email");
+            .populate("subtasks.createdBy", "name email")
+            .populate("assigneeStatuses.user", "name email avatar");
 
         res.status(201).json({ success: true, message: "Task created successfully", data: fullPopulatedTask || newTask });
     } catch (error) {
@@ -389,6 +397,7 @@ const getTasks = async (req, res) => {
             .populate("relatedDocument", "docCode docNum shortDescription title files docVariant sentBy")
             .populate("subtasks.assignee", "name email")
             .populate("subtasks.createdBy", "name email")
+            .populate("assigneeStatuses.user", "name email avatar")
             .sort({ updatedAt: -1, completedAt: -1, startDate: -1 });
 
         res.status(200).json({ success: true, data: tasks });
@@ -516,8 +525,128 @@ const updateTask = async (req, res) => {
         // 2. Thu thập danh sách thay đổi chi tiết
         const changes = [];
 
-        // Thay đổi trạng thái
+        // Xử lý trạng thái công việc nhiều người thực hiện (assigneeStatuses)
+        const effectiveAssigneeList = (updates.assignees !== undefined ? updates.assignees : (existingTask.assignees || [])).map(a => (a._id || a).toString());
+        let currentAssigneeStatuses = Array.isArray(existingTask.assigneeStatuses) ? [...existingTask.assigneeStatuses.map(s => ({
+            user: (s.user?._id || s.user).toString(),
+            status: s.status || "TODO",
+            completedAt: s.completedAt,
+            updatedAt: s.updatedAt
+        }))] : [];
+
+        // Đảm bảo tất cả người thực hiện hiện tại đều có trong danh sách assigneeStatuses
+        effectiveAssigneeList.forEach(userIdStr => {
+            if (!currentAssigneeStatuses.some(s => s.user === userIdStr)) {
+                currentAssigneeStatuses.push({
+                    user: userIdStr,
+                    status: existingTask.status === "DONE" ? "DONE" : "TODO",
+                    updatedAt: new Date()
+                });
+            }
+        });
+        // Lọc bỏ những người không còn trong danh sách assignees
+        currentAssigneeStatuses = currentAssigneeStatuses.filter(s => effectiveAssigneeList.includes(s.user));
+
+        // Kiểm tra xem có cập nhật trạng thái cá nhân (myStatus) hoặc cập nhật assigneeStatuses không
+        const isManagerOrCreator = isCreator || isAdminOrManager;
+        const reqMyStatus = req.body.myStatus;
+        const reqAssigneeStatuses = req.body.assigneeStatuses ? parseJSON(req.body.assigneeStatuses) : null;
+        let myStatusUpdated = false;
+
+        if (reqMyStatus && isAssignee) {
+            const myEntry = currentAssigneeStatuses.find(s => s.user === updater.toString());
+            if (myEntry && myEntry.status !== reqMyStatus) {
+                myEntry.status = reqMyStatus;
+                myEntry.updatedAt = new Date();
+                if (reqMyStatus === 'DONE') myEntry.completedAt = new Date();
+                else myEntry.completedAt = null;
+                myStatusUpdated = true;
+                const statusLabels = { 'TODO': 'Chưa làm', 'IN_PROGRESS': 'Đang làm', 'DONE': 'Hoàn thành' };
+                changes.push(`Cá nhân cập nhật tiến độ phần việc sang "${statusLabels[reqMyStatus] || reqMyStatus}"`);
+            }
+        } else if (Array.isArray(reqAssigneeStatuses)) {
+            reqAssigneeStatuses.forEach(r => {
+                const rUserId = (r.user?._id || r.user || '').toString();
+                const target = currentAssigneeStatuses.find(s => s.user === rUserId);
+                if (target) {
+                    // Nếu là người thực hiện chỉ được đổi trạng thái của chính mình trừ khi là creator/manager
+                    if (rUserId === updater.toString() || isManagerOrCreator) {
+                        if (target.status !== r.status) {
+                            target.status = r.status;
+                            target.updatedAt = new Date();
+                            if (r.status === 'DONE') target.completedAt = new Date();
+                            else target.completedAt = null;
+                            myStatusUpdated = true;
+                        }
+                    }
+                }
+            });
+        }
+
+        // Quyết định trạng thái tổng thể (overall status)
         let statusChanged = false;
+
+        if (updates.status && updates.status === 'DONE') {
+            // Trường hợp người dùng yêu cầu chuyển trạng thái tổng thể sang DONE:
+            // Nếu có nhiều hơn 1 người thực hiện:
+            if (effectiveAssigneeList.length > 1) {
+                if (isManagerOrCreator) {
+                    // Người tạo hoặc Manager/Admin được quyền hoàn thành cho tất cả
+                    currentAssigneeStatuses.forEach(s => {
+                        s.status = 'DONE';
+                        if (!s.completedAt) s.completedAt = new Date();
+                        s.updatedAt = new Date();
+                    });
+                } else {
+                    // Người thực hiện bình thường không phải creator/manager
+                    // Cập nhật phần việc của chính họ thành DONE
+                    const myEntry = currentAssigneeStatuses.find(s => s.user === updater.toString());
+                    if (myEntry) {
+                        myEntry.status = 'DONE';
+                        if (!myEntry.completedAt) myEntry.completedAt = new Date();
+                        myEntry.updatedAt = new Date();
+                    }
+                    // Kiểm tra xem tất cả người thực hiện đã xong chưa
+                    const allDone = currentAssigneeStatuses.length > 0 && currentAssigneeStatuses.every(s => s.status === 'DONE');
+                    if (!allDone) {
+                        // Chưa xong hết -> chỉ giữ ở mức IN_PROGRESS
+                        updates.status = 'IN_PROGRESS';
+                        changes.push(`Cá nhân đánh dấu hoàn tất phần việc của mình (chờ các thành viên khác hoàn thành)`);
+                    }
+                }
+            } else if (effectiveAssigneeList.length === 1) {
+                currentAssigneeStatuses.forEach(s => {
+                    s.status = 'DONE';
+                    if (!s.completedAt) s.completedAt = new Date();
+                    s.updatedAt = new Date();
+                });
+            }
+        } else if (myStatusUpdated && effectiveAssigneeList.length > 1 && !updates.status) {
+            // Khi chỉ cập nhật trạng thái cá nhân mà không truyền updates.status cụ thể:
+            const allDone = currentAssigneeStatuses.length > 0 && currentAssigneeStatuses.every(s => s.status === 'DONE');
+            const allTodo = currentAssigneeStatuses.length > 0 && currentAssigneeStatuses.every(s => s.status === 'TODO');
+            if (allDone) {
+                updates.status = 'DONE';
+            } else if (allTodo) {
+                updates.status = 'TODO';
+            } else {
+                updates.status = 'IN_PROGRESS';
+            }
+        } else if (updates.status && updates.status !== 'DONE' && effectiveAssigneeList.length > 1) {
+            // Nếu người tạo/manager đổi trạng thái tổng thể thành TODO hoặc IN_PROGRESS
+            if (isManagerOrCreator) {
+                if (updates.status === 'TODO') {
+                    currentAssigneeStatuses.forEach(s => {
+                        s.status = 'TODO';
+                        s.completedAt = null;
+                        s.updatedAt = new Date();
+                    });
+                }
+            }
+        }
+
+        updates.assigneeStatuses = currentAssigneeStatuses;
+
         if (updates.status && updates.status !== existingTask.status) {
             // Ràng buộc khi chuyển sang trạng thái Hoàn thành
             if (updates.status === 'DONE') {
@@ -787,7 +916,8 @@ const updateTask = async (req, res) => {
             .populate("evaluation.evaluatedBy", "name email")
             .populate("relatedDocument", "docCode docNum shortDescription title files docVariant sentBy")
             .populate("subtasks.assignee", "name email")
-            .populate("subtasks.createdBy", "name email");
+            .populate("subtasks.createdBy", "name email")
+            .populate("assigneeStatuses.user", "name email avatar");
 
         try {
             const uniqueUsersMap = new Map();

@@ -26,6 +26,27 @@ const taskSchema = new mongoose.Schema(
         ref: "User",
       },
     ],
+    assigneeStatuses: [
+      {
+        user: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+          required: true,
+        },
+        status: {
+          type: String,
+          enum: ["TODO", "IN_PROGRESS", "DONE"],
+          default: "TODO",
+        },
+        completedAt: {
+          type: Date,
+        },
+        updatedAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
     collaborators: [
       {
         type: mongoose.Schema.Types.ObjectId,
