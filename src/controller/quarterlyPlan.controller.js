@@ -838,14 +838,20 @@ const deletePlanItem = async (req, res) => {
 
     const { itemId } = req.params;
     const item = await QuarterlyPlanItem.findById(itemId);
-    if (item && item.createdTaskId) {
-      await Task.findByIdAndDelete(item.createdTaskId).catch((e) => console.error("Error deleting linked task:", e));
+    if (item) {
+      const taskDeleteConditions = [{ quarterlyPlanItem: item._id }];
+      if (item.createdTaskId) {
+        taskDeleteConditions.push({ _id: item.createdTaskId });
+      }
+      await Task.deleteMany({ $or: taskDeleteConditions }).catch((e) =>
+        console.error("Error deleting linked task in deletePlanItem:", e)
+      );
     }
     await QuarterlyPlanItem.findByIdAndDelete(itemId);
 
     return res.status(200).json({
       success: true,
-      message: "Đã xóa nhiệm vụ khỏi kế hoạch quý!",
+      message: "Đã xóa nhiệm vụ và công việc liên quan thành công!",
     });
   } catch (error) {
     console.error("Lỗi deletePlanItem:", error);
@@ -867,23 +873,26 @@ const deleteMultiplePlanItems = async (req, res) => {
       return res.status(400).json({ success: false, message: "Danh sách nhiệm vụ cần xóa không hợp lệ." });
     }
 
-    // Tìm các task liên kết để xóa
+    // Tìm các task liên kết để xóa (cả theo createdTaskId và quarterlyPlanItem)
     const items = await QuarterlyPlanItem.find({ _id: { $in: itemIds } });
     const linkedTaskIds = items
       .map((item) => item.createdTaskId)
       .filter(Boolean);
 
-    if (linkedTaskIds.length > 0) {
-      await Task.deleteMany({ _id: { $in: linkedTaskIds } }).catch((e) =>
-        console.error("Error deleting linked tasks:", e)
-      );
-    }
+    await Task.deleteMany({
+      $or: [
+        { _id: { $in: linkedTaskIds } },
+        { quarterlyPlanItem: { $in: itemIds } },
+      ],
+    }).catch((e) =>
+      console.error("Error deleting linked tasks in deleteMultiplePlanItems:", e)
+    );
 
     const deleteResult = await QuarterlyPlanItem.deleteMany({ _id: { $in: itemIds } });
 
     return res.status(200).json({
       success: true,
-      message: `Đã xóa thành công ${deleteResult.deletedCount} nhiệm vụ được chọn!`,
+      message: `Đã xóa thành công ${deleteResult.deletedCount} nhiệm vụ và các công việc liên quan!`,
       data: { deletedCount: deleteResult.deletedCount },
     });
   } catch (error) {

@@ -3,6 +3,7 @@ const User = require("../models/user.model");
 const Notification = require("../models/notification.model");
 const Department = require("../models/department.model");
 const Position = require("../models/position.model");
+const QuarterlyPlanItem = require("../models/quarterlyPlanItem.model");
 const { google } = require("googleapis");
 const { Readable } = require("stream");
 const mongoose = require("mongoose");
@@ -851,6 +852,64 @@ const updateTask = async (req, res) => {
             console.error("Lỗi gửi email/thông báo cập nhật task:", emailErr);
         }
 
+        // ==========================================
+        // ĐỒNG BỘ 2 CHIỀU: NẾU TASK THUỘC KẾ HOẠCH QUÝ -> CẬP NHẬT NGƯỢC LẠI PLAN ITEM
+        // ==========================================
+        try {
+            const planItemId = populatedTask.quarterlyPlanItem;
+            const targetPlanItem = planItemId 
+                ? await QuarterlyPlanItem.findById(planItemId) 
+                : await QuarterlyPlanItem.findOne({ createdTaskId: populatedTask._id });
+
+            if (targetPlanItem) {
+                let planItemUpdated = false;
+
+                // Đồng bộ trạng thái: DONE -> COMPLETED, IN_PROGRESS -> IN_PROGRESS, TODO -> NOT_STARTED
+                if (statusChanged || populatedTask.status) {
+                    let mappedStatus = targetPlanItem.status;
+                    if (populatedTask.status === "DONE") {
+                        mappedStatus = "COMPLETED";
+                        targetPlanItem.actualCompletedDate = populatedTask.completedAt || new Date();
+                        targetPlanItem.progressPercent = 100;
+                    } else if (populatedTask.status === "IN_PROGRESS") {
+                        mappedStatus = "IN_PROGRESS";
+                        targetPlanItem.actualCompletedDate = null;
+                        if (targetPlanItem.progressPercent === 100) targetPlanItem.progressPercent = 50;
+                    } else if (populatedTask.status === "TODO") {
+                        mappedStatus = "NOT_STARTED";
+                        targetPlanItem.actualCompletedDate = null;
+                        targetPlanItem.progressPercent = 0;
+                    }
+
+                    if (targetPlanItem.status !== mappedStatus) {
+                        targetPlanItem.status = mappedStatus;
+                        planItemUpdated = true;
+                    }
+                }
+
+                // Đồng bộ outputResult nếu có thay đổi
+                if (updates.outputResult !== undefined && updates.outputResult !== targetPlanItem.outputResult) {
+                    targetPlanItem.outputResult = updates.outputResult;
+                    planItemUpdated = true;
+                }
+
+                if (planItemUpdated) {
+                    targetPlanItem.calculateAutoRemark();
+                    if (!targetPlanItem.history) targetPlanItem.history = [];
+                    targetPlanItem.history.push({
+                        action: "Đồng bộ từ Công việc",
+                        actor: updater,
+                        actorName: updaterName || "Hệ thống",
+                        details: `Đồng bộ trạng thái công việc [${populatedTask.status}] -> [${targetPlanItem.status}]`,
+                        timestamp: new Date()
+                    });
+                    await targetPlanItem.save();
+                }
+            }
+        } catch (planSyncErr) {
+            console.error("Lỗi đồng bộ từ Task sang QuarterlyPlanItem:", planSyncErr);
+        }
+
         res.status(200).json({ success: true, message: "Task updated", data: populatedTask });
     } catch (error) {
         console.error("Error updating task:", error);
@@ -1017,6 +1076,30 @@ const evaluateTask = async (req, res) => {
             }
         } catch (emailErr) {
             console.error("Lỗi gửi email đánh giá task:", emailErr);
+        }
+
+        // Đồng bộ kết quả đánh giá sang QuarterlyPlanItem nếu có
+        try {
+            const planItemId = populatedTask.quarterlyPlanItem;
+            const targetPlanItem = planItemId 
+                ? await QuarterlyPlanItem.findById(planItemId) 
+                : await QuarterlyPlanItem.findOne({ createdTaskId: populatedTask._id });
+            if (targetPlanItem) {
+                if (feedback) {
+                    targetPlanItem.manualRemark = targetPlanItem.manualRemark 
+                        ? `${targetPlanItem.manualRemark}\n[Đánh giá KPI]: ${feedback}`
+                        : `[Đánh giá KPI]: ${feedback}`;
+                }
+                if (populatedTask.status === "DONE" && targetPlanItem.status !== "COMPLETED") {
+                    targetPlanItem.status = "COMPLETED";
+                    targetPlanItem.actualCompletedDate = populatedTask.completedAt || new Date();
+                    targetPlanItem.progressPercent = 100;
+                }
+                targetPlanItem.calculateAutoRemark();
+                await targetPlanItem.save();
+            }
+        } catch (planEvalErr) {
+            console.error("Lỗi đồng bộ đánh giá sang QuarterlyPlanItem:", planEvalErr);
         }
 
         res.status(200).json({ success: true, message: "Đánh giá công việc thành công", data: populatedTask });
@@ -1630,6 +1713,18 @@ const deleteTask = async (req, res) => {
         }
 
         await Task.findByIdAndDelete(taskId);
+
+        // Nếu task này liên kết với một đầu việc trong Kế hoạch quý, cập nhật un-link để đầu việc không bị trỏ sai
+        if (existingTask.quarterlyPlanItem) {
+            await QuarterlyPlanItem.findByIdAndUpdate(existingTask.quarterlyPlanItem, {
+                $unset: { createdTaskId: "" }
+            }).catch(e => console.error("Error unlinking quarterly plan item:", e));
+        } else {
+            await QuarterlyPlanItem.updateMany(
+                { createdTaskId: taskId },
+                { $unset: { createdTaskId: "" } }
+            ).catch(e => console.error("Error unlinking quarterly plan items:", e));
+        }
 
         res.status(200).json({ success: true, message: "Task deleted successfully" });
     } catch (error) {
