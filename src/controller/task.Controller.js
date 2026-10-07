@@ -687,29 +687,21 @@ const updateTask = async (req, res) => {
         if (updates.status && updates.status === 'DONE') {
             // Trường hợp người dùng yêu cầu chuyển trạng thái tổng thể sang DONE:
             if (effectiveAssigneeList.length > 1) {
-                if (canOverrideAllMembers) {
-                    // Người tạo hoặc Manager/Admin được quyền hoàn thành cho tất cả
+                if (canOverrideAllMembers && !Array.isArray(reqAssigneeStatuses)) {
+                    // Người tạo hoặc Manager/Admin chủ động hoàn thành cho tất cả các thành viên (khi không gửi kèm mảng cá nhân riêng lẻ)
                     currentAssigneeStatuses.forEach(s => {
                         s.status = 'DONE';
                         if (!s.completedAt) s.completedAt = new Date();
                         s.updatedAt = new Date();
                     });
-                } else {
-                    // Người thực hiện hoặc cấp trưởng (nếu có thành viên ngoài đơn vị)
-                    // Cập nhật phần việc của chính mình hoặc các cấp dưới được phép
+                } else if (!canOverrideAllMembers) {
+                    // Thành viên thường hoặc người thực hiện: cập nhật hoàn thành phần việc của bản thân
                     for (const s of currentAssigneeStatuses) {
                         if (await canUpdateTargetAssignee(s.user)) {
                             s.status = 'DONE';
                             if (!s.completedAt) s.completedAt = new Date();
                             s.updatedAt = new Date();
                         }
-                    }
-                    // Kiểm tra xem tất cả người thực hiện đã xong chưa
-                    const allDone = currentAssigneeStatuses.length > 0 && currentAssigneeStatuses.every(s => s.status === 'DONE');
-                    if (!allDone) {
-                        // Chưa xong hết -> chỉ giữ ở mức IN_PROGRESS
-                        updates.status = 'IN_PROGRESS';
-                        changes.push(`Cập nhật hoàn tất phần việc (chờ các thành viên khác hoàn thành)`);
                     }
                 }
             } else if (effectiveAssigneeList.length === 1) {
@@ -719,27 +711,48 @@ const updateTask = async (req, res) => {
                     s.updatedAt = new Date();
                 });
             }
-        } else if (myStatusUpdated && effectiveAssigneeList.length > 1) {
-            // Khi có cập nhật trạng thái của từng thành viên (assigneeStatuses hoặc myStatus),
-            // tự động đồng bộ trạng thái tổng thể theo tiến độ thực tế của các thành viên:
-            const allDone = currentAssigneeStatuses.length > 0 && currentAssigneeStatuses.every(s => s.status === 'DONE');
-            const allTodo = currentAssigneeStatuses.length > 0 && currentAssigneeStatuses.every(s => s.status === 'TODO');
-            if (allDone) {
-                updates.status = 'DONE';
-            } else if (allTodo) {
-                updates.status = 'TODO';
-            } else {
-                updates.status = 'IN_PROGRESS';
-            }
-        } else if (updates.status && updates.status !== 'DONE' && effectiveAssigneeList.length > 1) {
-            // Nếu người tạo/manager đổi trạng thái tổng thể mà không gửi kèm assigneeStatuses
+        } else if (updates.status && updates.status === 'TODO' && effectiveAssigneeList.length > 1) {
+            // Nếu người tạo/manager đổi trạng thái tổng thể sang TODO mà không gửi kèm assigneeStatuses
             if (canOverrideAllMembers && !Array.isArray(reqAssigneeStatuses)) {
-                if (updates.status === 'TODO') {
-                    currentAssigneeStatuses.forEach(s => {
-                        s.status = 'TODO';
-                        s.completedAt = null;
-                        s.updatedAt = new Date();
-                    });
+                currentAssigneeStatuses.forEach(s => {
+                    s.status = 'TODO';
+                    s.completedAt = null;
+                    s.updatedAt = new Date();
+                });
+            }
+        }
+
+        // QUY TẮC BẮT BUỘC: Công việc nhiều người thực hiện CHỈ ĐƯỢC HOÀN THÀNH TỔNG THỂ khi TẤT CẢ người thực hiện đều ở trạng thái Hoàn thành (DONE)
+        if (effectiveAssigneeList.length > 1) {
+            const allAssigneesDone = currentAssigneeStatuses.length > 0 &&
+                effectiveAssigneeList.every(uId => {
+                    const s = currentAssigneeStatuses.find(item => item.user === uId);
+                    return s && s.status === 'DONE';
+                });
+            const allAssigneesTodo = currentAssigneeStatuses.length > 0 &&
+                effectiveAssigneeList.every(uId => {
+                    const s = currentAssigneeStatuses.find(item => item.user === uId);
+                    return !s || s.status === 'TODO';
+                });
+
+            if (allAssigneesDone) {
+                // Chỉ khi tất cả người thực hiện đã Hoàn thành thì công việc tổng thể mới được ghi nhận DONE
+                if (updates.status !== undefined || existingTask.status !== 'DONE') {
+                    updates.status = 'DONE';
+                }
+            } else {
+                // Vẫn còn người thực hiện chưa xong -> Tuyệt đối không được để tổng thể là DONE
+                if (updates.status === 'DONE') {
+                    updates.status = 'IN_PROGRESS';
+                    changes.push(`Đang chờ các thành viên khác hoàn thành phần việc`);
+                } else if (updates.status === undefined) {
+                    if (existingTask.status === 'DONE') {
+                        updates.status = 'IN_PROGRESS';
+                    }
+                } else if (allAssigneesTodo && updates.status !== 'IN_PROGRESS') {
+                    updates.status = 'TODO';
+                } else if (updates.status !== 'TODO') {
+                    updates.status = 'IN_PROGRESS';
                 }
             }
         }
