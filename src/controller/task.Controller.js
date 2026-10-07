@@ -479,8 +479,9 @@ const updateTask = async (req, res) => {
         const currentUserRole = req.user ? req.user.role : '';
 
         // 1. Kiểm tra quyền thay đổi thời gian: Chỉ người tạo, người chủ trì (assignees) hoặc admin/manager
-        const isCreator = existingTask.createdBy && (existingTask.createdBy._id || existingTask.createdBy).toString() === updater.toString();
-        const isAssignee = Array.isArray(existingTask.assignees) && existingTask.assignees.some(a => (a._id || a).toString() === updater.toString());
+        const creatorId = (existingTask.createdBy?._id || existingTask.createdBy || '').toString();
+        const isCreator = creatorId && creatorId === (updater?._id || updater || '').toString();
+        const isAssignee = Array.isArray(existingTask.assignees) && existingTask.assignees.some(a => (a._id || a).toString() === (updater?._id || updater || '').toString());
         const isAdminOrManager = ['admin', 'manager', 'cappho'].includes(currentUserRole);
 
         // Kiểm tra validation người thực hiện
@@ -624,6 +625,7 @@ const updateTask = async (req, res) => {
                 changes.push(`Cá nhân cập nhật tiến độ phần việc sang "${statusLabels[reqMyStatus] || reqMyStatus}"`);
             }
         } else if (Array.isArray(reqAssigneeStatuses)) {
+            const statusLabels = { 'TODO': 'Chưa làm', 'IN_PROGRESS': 'Đang làm', 'DONE': 'Hoàn thành' };
             for (const r of reqAssigneeStatuses) {
                 const rUserId = (r.user?._id || r.user || '').toString();
                 const target = currentAssigneeStatuses.find(s => s.user === rUserId);
@@ -635,6 +637,11 @@ const updateTask = async (req, res) => {
                         if (r.status === 'DONE') target.completedAt = new Date();
                         else target.completedAt = null;
                         myStatusUpdated = true;
+
+                        // Tìm tên người thực hiện để ghi log lịch sử rõ ràng
+                        const targetUserObj = await User.findById(rUserId).select("name").lean();
+                        const targetName = targetUserObj?.name || 'Thành viên';
+                        changes.push(`Cập nhật tiến độ của ${targetName} sang "${statusLabels[r.status] || r.status}"`);
                     }
                 }
             }
@@ -678,8 +685,9 @@ const updateTask = async (req, res) => {
                     s.updatedAt = new Date();
                 });
             }
-        } else if (myStatusUpdated && effectiveAssigneeList.length > 1 && !updates.status) {
-            // Khi chỉ cập nhật trạng thái cá nhân mà không truyền updates.status cụ thể:
+        } else if (myStatusUpdated && effectiveAssigneeList.length > 1) {
+            // Khi có cập nhật trạng thái của từng thành viên (assigneeStatuses hoặc myStatus),
+            // tự động đồng bộ trạng thái tổng thể theo tiến độ thực tế của các thành viên:
             const allDone = currentAssigneeStatuses.length > 0 && currentAssigneeStatuses.every(s => s.status === 'DONE');
             const allTodo = currentAssigneeStatuses.length > 0 && currentAssigneeStatuses.every(s => s.status === 'TODO');
             if (allDone) {
@@ -690,8 +698,8 @@ const updateTask = async (req, res) => {
                 updates.status = 'IN_PROGRESS';
             }
         } else if (updates.status && updates.status !== 'DONE' && effectiveAssigneeList.length > 1) {
-            // Nếu người tạo/manager đổi trạng thái tổng thể thành TODO hoặc IN_PROGRESS
-            if (canOverrideAllMembers) {
+            // Nếu người tạo/manager đổi trạng thái tổng thể mà không gửi kèm assigneeStatuses
+            if (canOverrideAllMembers && !Array.isArray(reqAssigneeStatuses)) {
                 if (updates.status === 'TODO') {
                     currentAssigneeStatuses.forEach(s => {
                         s.status = 'TODO';
