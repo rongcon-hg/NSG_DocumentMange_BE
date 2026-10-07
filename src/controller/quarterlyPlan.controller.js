@@ -697,7 +697,8 @@ const updatePlanItem = async (req, res) => {
           linkedTask.outputResult = targetOutput;
           taskUpdated = true;
         }
-        if (linkedTask.focusAxis !== (item.groupName || "")) {
+        // Không đồng bộ / ghi đè focusAxis nếu công việc đã hoàn thành (DONE)
+        if (linkedTask.status !== "DONE" && linkedTask.focusAxis !== (item.groupName || "")) {
           linkedTask.focusAxis = item.groupName || "";
           taskUpdated = true;
         }

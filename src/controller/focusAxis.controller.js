@@ -202,6 +202,7 @@ const resetDefaultFocusAxes = async (req, res) => {
 };
 
 module.exports = {
+  DEFAULT_FOCUS_AXES,
   getAllFocusAxes,
   createFocusAxis,
   updateFocusAxis,

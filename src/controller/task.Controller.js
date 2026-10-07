@@ -4,6 +4,8 @@ const Notification = require("../models/notification.model");
 const Department = require("../models/department.model");
 const Position = require("../models/position.model");
 const QuarterlyPlanItem = require("../models/quarterlyPlanItem.model");
+const FocusAxis = require("../models/focusAxis.model");
+const { DEFAULT_FOCUS_AXES } = require("./focusAxis.Controller");
 const { google } = require("googleapis");
 const { Readable } = require("stream");
 const mongoose = require("mongoose");
@@ -114,6 +116,38 @@ function syncCollaboratorsWithSubtasks(assignees = [], collaborators = [], subta
         });
     }
     return newCollaborators;
+}
+
+// Kiểm tra trục kết quả trọng tâm có thuộc 1 trong 6 trục chuẩn không
+async function isFocusAxisValid(val) {
+    if (!val || typeof val !== 'string' || !val.trim()) return false;
+    const clean = val.trim().toLowerCase();
+    
+    // Kiểm tra nhanh trong DEFAULT_FOCUS_AXES
+    const inDefault = DEFAULT_FOCUS_AXES.some(item => {
+        const itemCode = (item.code || '').trim().toLowerCase();
+        const itemName = (item.name || '').trim().toLowerCase();
+        const itemShort = (item.shortName || '').trim().toLowerCase();
+        return clean === itemCode || clean === itemName || clean === itemShort;
+    });
+    if (inDefault) return true;
+
+    // Kiểm tra trong DB (FocusAxis model)
+    try {
+        const dbAxes = await FocusAxis.find({ isActive: true });
+        if (dbAxes && dbAxes.length > 0) {
+            return dbAxes.some(item => {
+                const itemCode = (item.code || '').trim().toLowerCase();
+                const itemName = (item.name || '').trim().toLowerCase();
+                const itemShort = (item.shortName || '').trim().toLowerCase();
+                return clean === itemCode || clean === itemName || clean === itemShort;
+            });
+        }
+    } catch (e) {
+        console.error("Lỗi kiểm tra FocusAxis trong DB:", e);
+    }
+
+    return false;
 }
 
 // Hàm tính số ngày làm việc bị trễ (bỏ qua Thứ Bảy và Chủ Nhật theo Phụ lục 4)
@@ -751,6 +785,13 @@ const updateTask = async (req, res) => {
                     return res.status(400).json({
                         success: false,
                         message: "Vui lòng chọn Trục kết quả trọng tâm khi chuyển sang trạng thái Hoàn thành."
+                    });
+                }
+                const isValidAxis = await isFocusAxisValid(effectiveFocusAxis);
+                if (!isValidAxis) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "Trục kết quả trọng tâm bắt buộc phải là 1 trong 6 trục chuẩn hiện có khi hoàn thành công việc. Không được nhập từ khóa khác."
                     });
                 }
             }
