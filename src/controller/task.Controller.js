@@ -543,13 +543,17 @@ const updateTask = async (req, res) => {
 
         const oldStart = existingTask.startDate ? new Date(existingTask.startDate).getTime() : 0;
         const newStart = updates.startDate ? new Date(updates.startDate).getTime() : oldStart;
-        const startDiff = Math.abs(oldStart - newStart);
+        const oldStartStr = formatDateStr(existingTask.startDate);
+        const newStartStr = formatDateStr(updates.startDate || existingTask.startDate);
+        const isStartModified = Boolean(updates.startDate && oldStartStr && newStartStr && oldStartStr !== newStartStr);
 
         const oldEnd = existingTask.endDate ? new Date(existingTask.endDate).getTime() : 0;
         const newEnd = updates.endDate ? new Date(updates.endDate).getTime() : oldEnd;
-        const endDiff = Math.abs(oldEnd - newEnd);
+        const oldEndStr = formatDateStr(existingTask.endDate);
+        const newEndStr = formatDateStr(updates.endDate || existingTask.endDate);
+        const isEndModified = Boolean(updates.endDate && oldEndStr && newEndStr && oldEndStr !== newEndStr);
 
-        const isTimeModified = (startDiff > 59000) || (endDiff > 59000);
+        const isTimeModified = isStartModified || isEndModified;
 
         if (isTimeModified && !isCreator && !isAssignee && !isAdminOrManager) {
             return res.status(403).json({
@@ -848,23 +852,25 @@ const updateTask = async (req, res) => {
         // Thay đổi thời gian thực hiện
         let timeChanged = false;
         if (isTimeModified) {
-            timeChanged = true;
             const timeParts = [];
-            if (startDiff > 59000 && endDiff > 59000) {
-                timeParts.push(`Từ [${formatDateStr(existingTask.startDate)} - ${formatDateStr(existingTask.endDate)}] sang [${formatDateStr(updates.startDate)} - ${formatDateStr(updates.endDate)}]`);
-            } else if (endDiff > 59000) {
-                timeParts.push(`Hạn hoàn thành từ ${formatDateStr(existingTask.endDate)} sang ${formatDateStr(updates.endDate)}`);
-            } else if (startDiff > 59000) {
-                timeParts.push(`Ngày bắt đầu từ ${formatDateStr(existingTask.startDate)} sang ${formatDateStr(updates.startDate)}`);
+            if (isStartModified && isEndModified) {
+                timeParts.push(`Từ [${oldStartStr} - ${oldEndStr}] sang [${newStartStr} - ${newEndStr}]`);
+            } else if (isEndModified) {
+                timeParts.push(`Hạn hoàn thành từ ${oldEndStr} sang ${newEndStr}`);
+            } else if (isStartModified) {
+                timeParts.push(`Ngày bắt đầu từ ${oldStartStr} sang ${newStartStr}`);
             }
 
-            let timeLog = `Thay đổi thời gian: ${timeParts.join(', ')}`;
-            const timeReason = req.body.timeChangeReason || updates.timeChangeReason;
-            if (timeReason && timeReason.trim()) {
-                timeLog += `. Lý do: "${timeReason.trim()}"`;
-                updates.timeChangeReason = timeReason.trim();
+            if (timeParts.length > 0) {
+                timeChanged = true;
+                let timeLog = `Thay đổi thời gian: ${timeParts.join(', ')}`;
+                const timeReason = req.body.timeChangeReason || updates.timeChangeReason;
+                if (timeReason && timeReason.trim()) {
+                    timeLog += `. Lý do: "${timeReason.trim()}"`;
+                    updates.timeChangeReason = timeReason.trim();
+                }
+                changes.push(timeLog);
             }
-            changes.push(timeLog);
         }
 
         // Thay đổi tệp đính kèm
@@ -1017,21 +1023,24 @@ const updateTask = async (req, res) => {
             else if (statusChanged) action = 'Cập nhật trạng thái & thông tin';
             else if (timeChanged) action = 'Cập nhật thời gian & thông tin';
             else if (addedFiles.length > 0 || removedFiles.length > 0) action = 'Cập nhật tệp & thông tin';
-            else action = 'Cập nhật công việc';
             details = changes.map(c => `• ${c}`).join('\n');
         }
-
-        const historyEntry = {
-            action,
-            user: updater,
-            details,
-            timestamp: new Date()
-        };
 
         // Xóa history khỏi updates nếu client gửi lên
         if (updates.history) delete updates.history;
 
-        const updatedTask = await Task.findByIdAndUpdate(taskId, { $set: updates, $push: { history: historyEntry } }, { new: true });
+        let updatedTask;
+        if (changes.length > 0) {
+            const historyEntry = {
+                action,
+                user: updater,
+                details,
+                timestamp: new Date()
+            };
+            updatedTask = await Task.findByIdAndUpdate(taskId, { $set: updates, $push: { history: historyEntry } }, { new: true });
+        } else {
+            updatedTask = await Task.findByIdAndUpdate(taskId, { $set: updates }, { new: true });
+        }
 
         const populatedTask = await Task.findById(updatedTask._id)
             .populate("assignees", "name email emailNotifications")
@@ -1059,7 +1068,7 @@ const updateTask = async (req, res) => {
             }
 
             const { sendTaskNotificationEmail } = require('../service/NodeMailer.service/email');
-            if (uniqueUsers.length > 0) {
+            if (changes.length > 0 && uniqueUsers.length > 0) {
                 sendTaskNotificationEmail(uniqueUsers, populatedTask, actionType);
             }
 
@@ -1069,7 +1078,7 @@ const updateTask = async (req, res) => {
 
             // Danh sách người nhận (loại trừ chính người vừa thực hiện cập nhật)
             const notifyRecipients = uniqueUsers.filter(u => u._id.toString() !== updater.toString());
-            if (notifyRecipients.length > 0) {
+            if (changes.length > 0 && notifyRecipients.length > 0) {
                 let notifTitle = "Công việc có cập nhật mới";
                 let notifMsg = `${updaterName} đã cập nhật thông tin công việc: "${populatedTask.title}". (${details.replace(/\n/g, ', ')})`;
 
