@@ -509,13 +509,14 @@ const updateTask = async (req, res) => {
         
         updates.files = updatedFiles;
 
+        const updaterId = (req.user?._id || req.user?.id || req.body?.updatedBy || existingTask.createdBy?._id || existingTask.createdBy || '').toString();
         const updater = req.user ? req.user._id : (req.body.updatedBy || existingTask.createdBy);
         const currentUserRole = req.user ? req.user.role : '';
 
         // 1. Kiểm tra quyền thay đổi thời gian: Chỉ người tạo, người chủ trì (assignees) hoặc admin/manager
         const creatorId = (existingTask.createdBy?._id || existingTask.createdBy || '').toString();
-        const isCreator = creatorId && creatorId === (updater?._id || updater || '').toString();
-        const isAssignee = Array.isArray(existingTask.assignees) && existingTask.assignees.some(a => (a._id || a).toString() === (updater?._id || updater || '').toString());
+        const isCreator = Boolean(creatorId && updaterId && creatorId === updaterId);
+        const isAssignee = Array.isArray(existingTask.assignees) && existingTask.assignees.some(a => (a._id || a).toString() === updaterId);
         const isAdminOrManager = ['admin', 'manager', 'cappho'].includes(currentUserRole);
 
         // Kiểm tra validation người thực hiện
@@ -563,7 +564,7 @@ const updateTask = async (req, res) => {
         // Xử lý quyền hạn cập nhật tiến độ công việc từng người (assigneeStatuses):
         // - Tài khoản Manager/Admin hoặc Người tạo công việc: Cho phép hoàn thành/chỉnh sửa tất cả thành viên
         // - Bản thân thành viên: Được thay đổi trạng thái của chính mình
-        // - Cấp trưởng: Được phép thay đổi trạng thái của cấp phó, GV-CV thuộc đơn vị mình
+        // - Cấp trưởng: Được phép thay đổi trạng thái của cấp phó, GV-CV thuộc đơn vị mình hoặc bất kỳ ai trong công việc do mình tạo/chủ trì
         let isUpdaterBGH = currentUserRole === 'bgh';
         if (!isUpdaterBGH && req.user && req.user.department) {
             const updaterDept = await Department.findById(req.user.department).select("departmentCode departmentName").lean();
@@ -627,15 +628,20 @@ const updateTask = async (req, res) => {
 
         // Hàm kiểm tra quyền thay đổi trạng thái của một người thực hiện cụ thể (targetUserId)
         const canUpdateTargetAssignee = async (targetUserIdStr) => {
-            if (targetUserIdStr === updater.toString()) return true;
+            const cleanTarget = String(targetUserIdStr);
+            if (cleanTarget === updaterId) return true;
             if (canOverrideAllMembers) return true;
-            if (isUpdaterCapTruong && req.user?.department) {
-                const targetUserObj = await User.findById(targetUserIdStr).select("role department position").lean();
-                if (targetUserObj && targetUserObj.department) {
-                    const sameDept = targetUserObj.department.toString() === req.user.department.toString();
-                    const isSubordinateRole = ['cappho', 'chuyenvien', 'gv-cv', 'gv-vc', 'user', 'staff'].includes(targetUserObj.role || '');
-                    if (sameDept && isSubordinateRole) {
-                        return true;
+            if (isUpdaterCapTruong) {
+                // Nếu là cấp trưởng và là người tạo hoặc người chủ trì công việc này
+                if (isCreator || isAssignee) return true;
+                if (req.user?.department) {
+                    const targetUserObj = await User.findById(cleanTarget).select("role department position").lean();
+                    if (targetUserObj && targetUserObj.department) {
+                        const sameDept = targetUserObj.department.toString() === req.user.department.toString();
+                        const isSubordinateRole = ['cappho', 'chuyenvien', 'gv-cv', 'gv-vc', 'user', 'staff'].includes(targetUserObj.role || '');
+                        if (sameDept && isSubordinateRole) {
+                            return true;
+                        }
                     }
                 }
             }
