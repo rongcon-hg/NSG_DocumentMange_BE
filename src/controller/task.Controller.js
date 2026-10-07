@@ -1042,6 +1042,9 @@ const updateTask = async (req, res) => {
             updatedTask = await Task.findByIdAndUpdate(taskId, { $set: updates }, { new: true });
         }
 
+        const updaterUser = await User.findById(updater).select("name");
+        const updaterName = updaterUser?.name || "Người phụ trách";
+
         const populatedTask = await Task.findById(updatedTask._id)
             .populate("assignees", "name email emailNotifications")
             .populate("collaborators", "name email emailNotifications")
@@ -1073,9 +1076,6 @@ const updateTask = async (req, res) => {
             }
 
             // Gửi thông báo chuông và Web Push cho các nhân sự trong công việc khi có cập nhật hoặc phân công mới
-            const updaterUser = await User.findById(updater).select("name");
-            const updaterName = updaterUser?.name || "Người phụ trách";
-
             // Danh sách người nhận (loại trừ chính người vừa thực hiện cập nhật)
             const notifyRecipients = uniqueUsers.filter(u => u._id.toString() !== updater.toString());
             if (changes.length > 0 && notifyRecipients.length > 0) {
