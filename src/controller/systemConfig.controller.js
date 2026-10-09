@@ -158,6 +158,11 @@ const uploadSystemImage = async (req, res) => {
     };
 
     config[type] = fileData;
+    const syncBoth = req.body.syncBoth === 'true' || req.body.syncBoth === true;
+    if (syncBoth) {
+      if (type === 'favicon') config.logo = fileData;
+      if (type === 'logo') config.favicon = fileData;
+    }
     await config.save();
 
     return res.status(200).json({
@@ -274,10 +279,53 @@ const resetSystemImage = async (req, res) => {
   }
 };
 
+// Đồng bộ giữa Logo và Favicon (chỉ Admin)
+const syncLogoFavicon = async (req, res) => {
+  try {
+    const { from, to } = req.body;
+    if (!['logo', 'favicon'].includes(from) || !['logo', 'favicon'].includes(to) || from === to) {
+      return res.status(400).json({
+        success: false,
+        message: "Tham số from và to không hợp lệ (hỗ trợ 'logo' và 'favicon')",
+      });
+    }
+
+    let config = await SystemConfig.findOne();
+    if (!config || !config[from] || !config[from].fileId) {
+      return res.status(400).json({
+        success: false,
+        message: `Chưa có ảnh ${from === 'favicon' ? 'Favicon' : 'Logo'} để đồng bộ`,
+      });
+    }
+
+    const sourceData = config[from].toObject ? config[from].toObject() : config[from];
+    config[to] = {
+      fileId: sourceData.fileId,
+      fileName: sourceData.fileName,
+      mimeType: sourceData.mimeType,
+      url: sourceData.url,
+    };
+    await config.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `Đã đồng bộ ảnh ${from === 'favicon' ? 'Favicon' : 'Logo'} sang ${to === 'favicon' ? 'Favicon' : 'Logo'} thành công!`,
+      data: config,
+    });
+  } catch (error) {
+    console.error("Lỗi syncLogoFavicon:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi máy chủ khi đồng bộ ảnh: " + error.message,
+    });
+  }
+};
+
 module.exports = {
   getSystemConfig,
   updateSystemConfig,
   uploadSystemImage,
   getSystemImage,
   resetSystemImage,
+  syncLogoFavicon,
 };

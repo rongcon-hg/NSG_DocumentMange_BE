@@ -24,4 +24,7 @@ router.get("/image/:fileId", systemConfigController.getSystemImage);
 // Đặt lại ảnh về mặc định (chỉ Admin)
 router.post("/reset-image", verifyAdmin, systemConfigController.resetSystemImage);
 
+// Đồng bộ ảnh giữa Logo và Favicon (chỉ Admin)
+router.post("/sync-logo-favicon", verifyAdmin, systemConfigController.syncLogoFavicon);
+
 module.exports = router;
