@@ -219,6 +219,8 @@ const getSystemImage = async (req, res) => {
 
     res.set({
       "Content-Type": mimeType,
+      "Access-Control-Allow-Origin": "*",
+      "Cross-Origin-Resource-Policy": "cross-origin",
       "Cache-Control": "public, max-age=604800, immutable",
     });
     return res.send(buffer);
