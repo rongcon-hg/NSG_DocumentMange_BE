@@ -32,6 +32,7 @@ router.post('/resetPassword', authLimiter, authController.resetPassword);
 router.get('/users', verifyToken, authController.getAllUser);
 router.get('/:userId', verifyToken, authController.getUserInfo);
 router.post('/update/:userId', verifyToken, authController.upadteInfo);
+router.post('/syncRoles', verifyManager, authController.autoSyncAllUserRolesAndPositions);
 router.put('/disableUser/:userId', verifyManager, authController.disableUser);
 router.put('/restore/:userId', verifyManager, authController.restoreUser);
 router.delete('/delete/:userId', verifyManager, authController.deleteUser);

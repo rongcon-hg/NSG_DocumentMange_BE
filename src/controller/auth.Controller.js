@@ -14,6 +14,60 @@ dotenv.config();
 const characters = process.env.CHARACTERS;
 const VALID_ROLES = ["staff", "manager", "cappho", "chuyenvien"];
 
+/**
+ * Tự động xác định vai trò (role) chính xác dựa trên Chức vụ (Position)
+ * - Admin giữ nguyên vai trò admin
+ * - Cấp phó (PTK, PTP, PBT, PGĐ, các chức vụ có chữ 'phó'): luôn có vai trò 'cappho'
+ * - Cấp trưởng (TP, TK, GD, BT, các chức vụ có chữ 'trưởng', 'giám đốc', 'bí thư đoàn'): vai trò 'staff' (hoặc 'manager' nếu là quản lý)
+ * - Ban Giám hiệu (HT, PHT, QHT, hiệu trưởng): giữ 'manager' hoặc 'staff'
+ * - Giảng viên, Chuyên viên, Nhân viên (GV, CV, NV,...): vai trò 'chuyenvien'
+ */
+const determineRoleByPosition = (posDoc, currentRole = "staff") => {
+  if (currentRole === "admin") return "admin";
+  if (!posDoc) return currentRole || "staff";
+
+  const posCode = (posDoc.positionCode || "").toUpperCase();
+  const posName = (posDoc.positionName || "").toLowerCase();
+
+  // 1. Kiểm tra Cấp phó trước (ưu tiên cao nhất để không bị nhầm bởi chữ 'trưởng' trong 'phó trưởng phòng/khoa')
+  const isPho =
+    ["PTK", "PTP", "PBT", "PGD"].includes(posCode) ||
+    posName.includes("phó") ||
+    /phó\s+(trưởng|giám đốc|bí thư|khoa|phòng)/i.test(posName);
+
+  if (isPho) {
+    return "cappho";
+  }
+
+  // 2. Ban Giám hiệu: nếu đang là manager thì giữ manager, còn lại staff
+  const isBgh = ["HT", "PHT", "QHT"].includes(posCode) || posName.includes("hiệu trưởng");
+  if (isBgh) {
+    return currentRole === "manager" ? "manager" : "staff";
+  }
+
+  // 3. Cấp trưởng đơn vị (Trưởng phòng, Trưởng khoa, Giám đốc, Bí thư Đoàn)
+  const isTruong =
+    ["TP", "TK", "GD", "BT"].includes(posCode) ||
+    /^(trưởng\s+(phòng|khoa|ban|trung tâm)|giám đốc|bí thư\s+đoàn)/i.test(posName);
+
+  if (isTruong) {
+    return currentRole === "manager" ? "manager" : "staff";
+  }
+
+  // 4. Các vị trí chuyên môn / nhân viên / giảng viên
+  const isChuyenVienOrGiangVien =
+    ["GV", "CV", "NV"].includes(posCode) ||
+    /^(giảng viên|chuyên viên|nhân viên|viên chức)/i.test(posName);
+
+  if (isChuyenVienOrGiangVien) {
+    return "chuyenvien";
+  }
+
+  // Nếu người dùng đang là manager thì giữ manager, ngược lại giữ nguyên hoặc staff
+  if (currentRole === "manager") return "manager";
+  return currentRole || "staff";
+};
+
 const createUser = async (req,res)=>{
     const {email,password,name,mobile,position,department,description,role} = req.body;
 
@@ -25,7 +79,17 @@ const createUser = async (req,res)=>{
         else if (role == "admin") {
             return res.status(403).json({message:"cannot create admin"})
         }
-        const user = await User.create({ email,password,name,mobile,position,department,description,role});
+
+        // Tự động chuẩn hóa vai trò theo chức vụ nếu có chọn chức vụ
+        let finalRole = role;
+        if (position) {
+          const posDoc = await Position.findById(position);
+          if (posDoc) {
+            finalRole = determineRoleByPosition(posDoc, role);
+          }
+        }
+
+        const user = await User.create({ email,password,name,mobile,position,department,description,role: finalRole});
         const { accessToken} = generateToken(user._id);
         res.status(200).json({
             accessToken: accessToken,
@@ -288,6 +352,13 @@ const upadteInfo = async (req, res) => {
 
       // Cho phép cập nhật phòng ban/chức vụ nếu là admin/manager và có truyền lên
       if (["admin", "manager"].includes(req.user?.role)) {
+        if (updatedData.position !== undefined) {
+          user.position = updatedData.position || null;
+        }
+        if (updatedData.department !== undefined) {
+          user.department = updatedData.department || null;
+        }
+
         if (updatedData.role !== undefined) {
           // Chỉ admin mới được gán quyền admin cho người khác
           if (updatedData.role === "admin" && req.user?.role !== "admin") {
@@ -298,8 +369,22 @@ const upadteInfo = async (req, res) => {
           }
           user.role = updatedData.role;
         }
-        if (updatedData.position !== undefined) user.position = updatedData.position || null;
-        if (updatedData.department !== undefined) user.department = updatedData.department || null;
+
+        // TỰ ĐỘNG CẬP NHẬT / ĐỒNG BỘ VAI TRÒ DỰA VÀO CHỨC VỤ:
+        // Đảm bảo Cấp phó -> cappho, Cấp trưởng -> staff, Giảng viên/chuyên viên -> chuyenvien
+        if (user.role !== "admin") {
+          const effectivePositionId = updatedData.position !== undefined ? updatedData.position : user.position;
+          if (effectivePositionId) {
+            const posDoc = await Position.findById(effectivePositionId);
+            if (posDoc) {
+              const suggestedRole = determineRoleByPosition(posDoc, user.role);
+              // Nếu vai trò hiện tại không tương thích với chức vụ mới, tự động đồng bộ
+              if (suggestedRole && suggestedRole !== user.role) {
+                user.role = suggestedRole;
+              }
+            }
+          }
+        }
       }
   
       await user.save();
@@ -604,6 +689,14 @@ const importUsers = async (req, res) => {
       }
 
       try {
+        let finalRole = role;
+        if (position) {
+          const posDoc = await Position.findById(position);
+          if (posDoc) {
+            finalRole = determineRoleByPosition(posDoc, role);
+          }
+        }
+
         const newUser = await User.create({
           name,
           email,
@@ -611,7 +704,7 @@ const importUsers = async (req, res) => {
           mobile,
           department,
           position,
-          role,
+          role: finalRole,
           description,
         });
         createdUsers.push({ _id: newUser._id, name: newUser.name, email: newUser.email });
@@ -634,6 +727,50 @@ const importUsers = async (req, res) => {
   }
 };
 
+/**
+ * Tự động rà soát và đồng bộ toàn bộ vai trò (role) cho tất cả người dùng hiện có trong hệ thống theo chức vụ (position)
+ * Dành cho Quản trị viên (Admin/Manager)
+ */
+const autoSyncAllUserRolesAndPositions = async (req, res) => {
+  try {
+    const users = await User.find({ role: { $ne: "admin" } }).populate("position");
+    let updatedCount = 0;
+    const details = [];
+
+    for (const u of users) {
+      if (!u.position) continue;
+      const targetRole = determineRoleByPosition(u.position, u.role);
+      if (targetRole && targetRole !== u.role) {
+        const oldRole = u.role;
+        u.role = targetRole;
+        await u.save();
+        updatedCount++;
+        details.push({
+          name: u.name,
+          email: u.email,
+          position: u.position.positionName,
+          oldRole,
+          newRole: targetRole,
+        });
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Đã đồng bộ thành công vai trò theo chức vụ cho ${updatedCount} người dùng!`,
+      updatedCount,
+      details,
+    });
+  } catch (error) {
+    console.error("Lỗi autoSyncAllUserRolesAndPositions:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi khi đồng bộ vai trò theo chức vụ",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
     signin,
     createUser,
@@ -650,4 +787,6 @@ module.exports = {
     uploadAvatar,
     getAvatarImage,
     deleteAvatar,
+    autoSyncAllUserRolesAndPositions,
+    determineRoleByPosition,
 };

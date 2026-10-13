@@ -113,6 +113,21 @@ const updatePosition = async (req, res) => {
         position.positionName = positionName || position.positionName;
         await position.save();
 
+        // Tự động rà soát & cập nhật vai trò cho những người dùng đang giữ chức vụ này
+        try {
+          const { determineRoleByPosition } = require("./auth.Controller");
+          const affectedUsers = await User.find({ position: positionID, role: { $ne: "admin" } });
+          for (const u of affectedUsers) {
+            const targetRole = determineRoleByPosition(position, u.role);
+            if (targetRole && targetRole !== u.role) {
+              u.role = targetRole;
+              await u.save();
+            }
+          }
+        } catch (syncErr) {
+          console.error("Lỗi tự động đồng bộ vai trò khi sửa chức vụ:", syncErr);
+        }
+
         return res.status(200).json({ message: "Position updated successfully" });
     } catch (error) {
         console.error("Error in update Position controller: ", error.message);

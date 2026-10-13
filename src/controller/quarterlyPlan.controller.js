@@ -18,20 +18,37 @@ const getDepartmentLeaders = async (deptIds) => {
   const cleanDeptIds = deptIds.map((d) => (d._id ? d._id.toString() : d.toString())).filter(Boolean);
   if (cleanDeptIds.length === 0) return [];
 
-  // Tìm các Position ID của Cấp trưởng
+  // Tìm các Position ID của Cấp trưởng (TP, TK, GD, BT) và loại trừ các chức vụ Phó (PTK, PTP, PBT,...)
   const leaderPositions = await Position.find({
-    $or: [
-      { positionCode: { $in: ["TP", "TK", "GD", "BT"] } },
-      { positionName: { $regex: /^(trưởng\s+(phòng|khoa|ban|trung tâm)|giám đốc|bí thư\s+đoàn)/i } },
+    $and: [
+      {
+        $or: [
+          { positionCode: { $in: ["TP", "TK", "GD", "BT"] } },
+          { positionName: { $regex: /^(trưởng\s+(phòng|khoa|ban|trung tâm)|giám đốc|bí thư\s+đoàn)/i } },
+        ],
+      },
+      {
+        positionCode: { $nin: ["PTK", "PTP", "PBT", "PGD"] },
+        positionName: { $not: /phó/i },
+      },
     ],
   }).select("_id");
   const leaderPosIds = leaderPositions.map((p) => p._id);
 
-  // Lấy các Cấp trưởng thuộc các phòng ban này
+  // Lấy các Cấp trưởng thuộc các phòng ban này:
+  // Người dùng phải có position là Cấp trưởng HOẶC có role là 'staff'/'manager' (không phải 'cappho', không phải chức vụ phó)
+  const phoPositions = await Position.find({
+    $or: [
+      { positionCode: { $in: ["PTK", "PTP", "PBT", "PGD"] } },
+      { positionName: { $regex: /phó/i } },
+    ],
+  }).select("_id");
+  const phoPosIds = phoPositions.map((p) => p._id);
+
   const leaders = await User.find({
     department: { $in: cleanDeptIds },
-    position: { $in: leaderPosIds },
-    role: { $ne: "cappho" },
+    role: { $nin: ["cappho", "chuyenvien"] },
+    position: { $nin: phoPosIds, $in: leaderPosIds },
   })
     .populate("position", "positionName positionCode")
     .populate("department", "departmentName departmentCode")
