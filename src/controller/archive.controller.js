@@ -107,9 +107,14 @@ const getArchiveFolderById = async (req, res) => {
     const isManagerOrAdmin = ['manager', 'admin'].includes(req.user?.role);
     const isSubmittedOrArchived = ['SUBMITTED', 'ARCHIVED'].includes(folder.status);
     const isPublic = folder.accessScope === 'PUBLIC';
-    const isDeptMatch = folder.accessScope === 'DEPARTMENT' && folder.department?.toString() === req.user?.department?.toString();
-    const isUserAllowed = folder.allowedUsers?.some(u => u.toString() === req.user?._id?.toString());
-    const isDeptAllowed = folder.allowedDepartments?.some(d => d.toString() === req.user?.department?.toString());
+
+    // Xử lý an toàn ID đơn vị của folder (kể cả khi đã populate thành object) và của user
+    const folderDeptId = (folder.department?._id || folder.department)?.toString();
+    const userDeptId = (req.user?.department?._id || req.user?.department)?.toString();
+
+    const isDeptMatch = folder.accessScope === 'DEPARTMENT' && folderDeptId && userDeptId && folderDeptId === userDeptId;
+    const isUserAllowed = folder.allowedUsers?.some(u => (u?._id || u)?.toString() === req.user?._id?.toString());
+    const isDeptAllowed = folder.allowedDepartments?.some(d => (d?._id || d)?.toString() === userDeptId);
 
     if (!isCreator && !(isManagerOrAdmin && isSubmittedOrArchived) && !isPublic && !isDeptMatch && !isUserAllowed && !isDeptAllowed) {
       return res.status(403).json({

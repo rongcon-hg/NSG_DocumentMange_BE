@@ -1599,6 +1599,34 @@ const getKpiStats = async (req, res) => {
                 let effectiveIsOverdue = isOverdue;
                 let effectiveDaysLate = daysLate;
 
+                // Kiểm tra tiến độ/thời gian hoàn thành riêng của từng cá nhân (trong công việc có nhiều người cùng thực hiện)
+                let userCompletedTime = null;
+                let userCustomStatus = null;
+
+                if (!userSubtask && Array.isArray(task.assigneeStatuses) && task.assigneeStatuses.length > 0) {
+                    const myAssigneeStatus = task.assigneeStatuses.find(s => {
+                        const sUid = (s.user?._id || s.user || '').toString();
+                        return sUid === uId.toString();
+                    });
+                    if (myAssigneeStatus) {
+                        userCustomStatus = myAssigneeStatus.status;
+                        if (myAssigneeStatus.completedAt) {
+                            userCompletedTime = myAssigneeStatus.completedAt;
+                        }
+                    }
+                }
+
+                // Nếu cá nhân hoàn thành nhưng chưa có completedAt trong assigneeStatuses, dò trong task.history
+                if (!userSubtask && !userCompletedTime && Array.isArray(task.history)) {
+                    const userDoneHistory = [...task.history].reverse().find(h => {
+                        const hUid = (h.user?._id || h.user || '').toString();
+                        return hUid === uId.toString() && h.details && h.details.includes('Hoàn thành');
+                    });
+                    if (userDoneHistory && userDoneHistory.timestamp) {
+                        userCompletedTime = userDoneHistory.timestamp;
+                    }
+                }
+
                 if (userSubtask) {
                     const subDone = userSubtask.status === 'DONE';
                     const subDeadline = userSubtask.endDate ? new Date(userSubtask.endDate) : endOfDayDeadline;
@@ -1625,6 +1653,33 @@ const getKpiStats = async (req, res) => {
                             effectiveIsOverdue = true;
                             effectiveDaysLate = getWorkingDaysLate(now, subDeadlineTime);
                         } else {
+                            effectiveDaysLate = 0;
+                        }
+                    }
+                } else if (userCustomStatus) {
+                    // Áp dụng trạng thái và thời gian hoàn thành riêng của cá nhân trong công việc nhiều người
+                    const indivDone = userCustomStatus === 'DONE';
+                    effectiveIsDone = indivDone;
+                    if (indivDone) {
+                        const indivComp = userCompletedTime || completedTime || task.updatedAt || deadlineTime;
+                        const indivCompTime = new Date(indivComp).getTime();
+                        if (indivCompTime <= deadlineTime) {
+                            effectiveIsOnTime = true;
+                            effectiveIsLate = false;
+                            effectiveIsOverdue = false;
+                            effectiveDaysLate = 0;
+                        } else {
+                            effectiveIsOnTime = false;
+                            effectiveIsLate = true;
+                            effectiveIsOverdue = false;
+                            effectiveDaysLate = getWorkingDaysLate(indivCompTime, deadlineTime);
+                        }
+                    } else {
+                        if (now.getTime() > deadlineTime) {
+                            effectiveIsOverdue = true;
+                            effectiveDaysLate = getWorkingDaysLate(now, deadlineTime);
+                        } else {
+                            effectiveIsOverdue = false;
                             effectiveDaysLate = 0;
                         }
                     }
@@ -1686,7 +1741,7 @@ const getKpiStats = async (req, res) => {
                         isExceeded = Boolean(task.evaluation.isExceeded);
                     } else if (effectiveIsDone && effectiveDaysLate <= 0 && effectiveQualityRate === 100) {
                         const deadlineCheck = userSubtask?.endDate ? new Date(userSubtask.endDate) : endOfDayDeadline;
-                        const compCheck = userSubtask ? (userSubtask.completedAt ? new Date(userSubtask.completedAt) : null) : (completedTime ? new Date(completedTime) : null);
+                        const compCheck = userSubtask ? (userSubtask.completedAt ? new Date(userSubtask.completedAt) : null) : (userCompletedTime ? new Date(userCompletedTime) : (completedTime ? new Date(completedTime) : null));
                         if (compCheck && (compCheck.getTime() < deadlineCheck.getTime() - 1000 * 60 * 60 * 6)) {
                             isExceeded = true;
                         }
@@ -1731,10 +1786,10 @@ const getKpiStats = async (req, res) => {
                     description: task.description || '',
                     role: roleType,
                     priority: task.priority,
-                    status: task.status,
+                    status: effectiveIsDone ? 'DONE' : (userCustomStatus || task.status),
                     startDate: task.startDate,
                     endDate: task.endDate,
-                    completedAt: task.completedAt || completedTime,
+                    completedAt: effectiveIsDone ? (userCompletedTime || task.completedAt || completedTime) : null,
                     isOnTime: effectiveIsOnTime,
                     isLate: effectiveIsLate,
                     isOverdue: effectiveIsOverdue,

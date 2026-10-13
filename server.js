@@ -179,6 +179,11 @@ const legalBasisRoutes = require('./src/routes/legalBasis.routes');
 app.use('/api/legal-bases', legalBasisRoutes);
 app.use('/legal-bases', legalBasisRoutes);
 
+// Document Templates (Kho văn bản mẫu) routes
+const documentTemplateRoutes = require('./src/routes/documentTemplate.routes');
+app.use('/api/document-templates', documentTemplateRoutes);
+app.use('/document-templates', documentTemplateRoutes);
+
 // Quarterly Work Plan (Kế hoạch quý) routes
 const quarterlyPlanRoutes = require('./src/routes/quarterlyPlan.routes');
 app.use('/api/quarterly-plans', quarterlyPlanRoutes);
