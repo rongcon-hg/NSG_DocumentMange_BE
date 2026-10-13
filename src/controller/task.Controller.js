@@ -581,7 +581,7 @@ const updateTask = async (req, res) => {
             if (updaterPos) {
                 const pName = (updaterPos.positionName || '').toLowerCase();
                 const pCode = (updaterPos.abbreviation || updaterPos.code || '').toUpperCase();
-                if (['HT', 'PHT', 'NHT'].includes(pCode) || pName.includes('hiệu trưởng') || pName.includes('phó hiệu trưởng')) {
+                if (['HT', 'QHT', 'PHT', 'NHT'].includes(pCode) || pName.includes('hiệu trưởng') || pName.includes('phó hiệu trưởng')) {
                     isUpdaterBGH = true;
                 }
             }
@@ -1209,7 +1209,7 @@ const evaluateTask = async (req, res) => {
             if (userPos) {
                 const pName = (userPos.positionName || '').toLowerCase();
                 const pCode = (userPos.abbreviation || userPos.code || '').toUpperCase();
-                if (['HT', 'PHT', 'NHT'].includes(pCode) || pName.includes('hiệu trưởng') || pName.includes('phó hiệu trưởng')) {
+                if (['HT', 'QHT', 'PHT', 'NHT'].includes(pCode) || pName.includes('hiệu trưởng') || pName.includes('phó hiệu trưởng')) {
                     isBGH = true;
                 }
             }
@@ -1395,7 +1395,7 @@ const getKpiStats = async (req, res) => {
             if (userPos) {
                 const pName = (userPos.positionName || '').toLowerCase();
                 const pCode = (userPos.abbreviation || userPos.code || '').toUpperCase();
-                if (['HT', 'PHT', 'NHT'].includes(pCode) || pName.includes('hiệu trưởng') || pName.includes('phó hiệu trưởng')) {
+                if (['HT', 'QHT', 'PHT', 'NHT'].includes(pCode) || pName.includes('hiệu trưởng') || pName.includes('phó hiệu trưởng')) {
                     isBGH = true;
                 }
             }

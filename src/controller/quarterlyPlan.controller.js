@@ -121,10 +121,10 @@ const getPlanMetadata = async (req, res) => {
       .select("_id departmentName departmentCode")
       .sort({ departmentName: 1 });
 
-    // 2. Lấy danh sách người dùng thuộc Ban Giám hiệu (Hiệu trưởng, Phó Hiệu trưởng) - LỌC CHUẨN XÁC
+    // 2. Lấy danh sách người dùng thuộc Ban Giám hiệu (Hiệu trưởng, Quyền Hiệu trưởng, Phó Hiệu trưởng) - LỌC CHUẨN XÁC
     const bghPositions = await Position.find({
       $or: [
-        { positionCode: { $in: ["HT", "PHT"] } },
+        { positionCode: { $in: ["HT", "QHT", "PHT"] } },
         { positionName: { $regex: /hiệu trưởng/i } },
       ],
     }).select("_id");
@@ -945,7 +945,7 @@ const importPlanItems = async (req, res) => {
     // Tra cứu danh sách phòng ban và BGH để map tên sang ObjectId
     const allDepts = await Department.find().select("_id departmentName");
     const bghPositions = await Position.find({
-      $or: [{ positionCode: { $in: ["HT", "PHT"] } }, { positionName: { $regex: /hiệu trưởng/i } }],
+      $or: [{ positionCode: { $in: ["HT", "QHT", "PHT"] } }, { positionName: { $regex: /hiệu trưởng/i } }],
     }).select("_id");
     const allBgh = await User.find({ position: { $in: bghPositions.map((p) => p._id) } }).select("_id name");
 
@@ -980,7 +980,7 @@ const importPlanItems = async (req, res) => {
       const bghIds = [];
       if (raw.bghNames && Array.isArray(raw.bghNames)) {
         for (const name of raw.bghNames) {
-          const cleanName = name.replace(/^(ThS\.|TS\.|Thầy|Cô|Hiệu trưởng|Phó Hiệu trưởng|HT|PHT)[:\s]+/i, "").trim().toLowerCase();
+          const cleanName = name.replace(/^(ThS\.|TS\.|Thầy|Cô|Quyền Hiệu trưởng|Hiệu trưởng|Phó Hiệu trưởng|QHT|HT|PHT)[:\s]+/i, "").trim().toLowerCase();
           const match = allBgh.find(
             (u) => u.name.trim().toLowerCase().includes(cleanName) || cleanName.includes(u.name.trim().toLowerCase())
           );

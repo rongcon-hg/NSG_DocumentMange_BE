@@ -125,14 +125,33 @@ async function uploadToDrive(req, res) {
 
     if (docType === 'received' && signer == null) 
     {
-      const hieuTruongPosition = await mongoose.model('Position').findOne({ positionName: 'Hiệu trưởng' });
-      if (!hieuTruongPosition) {
-          throw new Error("Không tìm thấy chức vụ Hiệu trưởng trong hệ thống");
+      // Tìm chức vụ Hiệu trưởng hoặc Quyền Hiệu trưởng
+      const htPositions = await mongoose.model('Position').find({
+        $or: [
+          { positionCode: { $in: ['HT', 'QHT'] } },
+          { positionName: { $regex: /(hiệu trưởng|quyền hiệu trưởng)/i } },
+        ],
+      });
+      const htPos = htPositions.find(p => p.positionCode === 'HT' || (p.positionName?.includes('Hiệu trưởng') && !p.positionName?.includes('Phó') && !p.positionName?.includes('Quyền')));
+      const qhtPos = htPositions.find(p => p.positionCode === 'QHT' || p.positionName?.includes('Quyền Hiệu trưởng'));
+
+      let signerUser = null;
+      if (htPos) {
+        signerUser = await User.findOne({ position: htPos._id, isActive: { $ne: false } });
       }
-      const signerUser = await User.findOne({ position: hieuTruongPosition._id });
+      // Nếu trong CSDL không ai đang là Hiệu trưởng, Quyền Hiệu trưởng sẽ thay thế
+      if (!signerUser && qhtPos) {
+        signerUser = await User.findOne({ position: qhtPos._id, isActive: { $ne: false } });
+      }
 
       if (!signerUser) {
-          throw new Error("Không tìm thấy user với chức vụ = Hiệu trưởng");
+        // Fallback: tìm bất kỳ user nào có chức danh Hiệu trưởng / Quyền Hiệu trưởng
+        const allHtPosIds = htPositions.map(p => p._id);
+        signerUser = await User.findOne({ position: { $in: allHtPosIds }, isActive: { $ne: false } });
+      }
+
+      if (!signerUser) {
+        throw new Error("Không tìm thấy user với chức vụ Hiệu trưởng hoặc Quyền Hiệu trưởng trong hệ thống");
       }
 
       signer = signerUser._id;

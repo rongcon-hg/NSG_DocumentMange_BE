@@ -19,8 +19,9 @@ const getBghAndManagerUserIds = async () => {
 
     const bghPositions = await Position.find({
       $or: [
-        { abbreviation: { $in: ["HT", "PHT", "NHT"] } },
-        { code: { $in: ["HT", "PHT", "NHT"] } },
+        { positionCode: { $in: ["HT", "QHT", "PHT", "NHT"] } },
+        { abbreviation: { $in: ["HT", "QHT", "PHT", "NHT"] } },
+        { code: { $in: ["HT", "QHT", "PHT", "NHT"] } },
         { positionName: { $regex: /hiệu trưởng/i } },
       ],
     }).select("_id");
@@ -77,7 +78,7 @@ const checkUserRole = async (user) => {
   }
 
   const pName = (posDoc?.positionName || "").toLowerCase();
-  const pCode = (posDoc?.abbreviation || posDoc?.code || "").toUpperCase();
+  const pCode = (posDoc?.positionCode || posDoc?.abbreviation || posDoc?.code || "").toUpperCase();
 
   if (
     pCode === "PHT" ||
@@ -87,8 +88,9 @@ const checkUserRole = async (user) => {
     isPhoHieuTruong = true;
     isBGH = true;
   } else if (
-    pCode === "HT" ||
-    (pName.includes("hiệu trưởng") && !pName.includes("phó") && !pName.includes("nguyên"))
+    ["HT", "QHT"].includes(pCode) ||
+    (pName.includes("hiệu trưởng") && !pName.includes("phó") && !pName.includes("nguyên")) ||
+    pName.includes("quyền hiệu trưởng")
   ) {
     isHieuTruong = true;
     isBGH = true;
@@ -356,8 +358,9 @@ exports.getBghUsers = async (req, res) => {
 
     const bghPositions = await Position.find({
       $or: [
-        { abbreviation: { $in: ["HT", "PHT", "NHT"] } },
-        { code: { $in: ["HT", "PHT", "NHT"] } },
+        { positionCode: { $in: ["HT", "QHT", "PHT", "NHT"] } },
+        { abbreviation: { $in: ["HT", "QHT", "PHT", "NHT"] } },
+        { code: { $in: ["HT", "QHT", "PHT", "NHT"] } },
         { positionName: { $regex: /hiệu trưởng/i } },
       ],
     }).select("_id");
@@ -372,7 +375,7 @@ exports.getBghUsers = async (req, res) => {
       isActive: { $ne: false },
     })
       .select("name email avatar position department role")
-      .populate("position", "positionName abbreviation code")
+      .populate("position", "positionName positionCode abbreviation code")
       .populate("department", "departmentName departmentCode")
       .lean();
 
@@ -381,25 +384,34 @@ exports.getBghUsers = async (req, res) => {
       const dCode = (u.department?.departmentCode || "").toUpperCase();
       const dName = (u.department?.departmentName || "").toLowerCase();
       const pName = (u.position?.positionName || "").toLowerCase();
-      const pCode = (u.position?.abbreviation || u.position?.code || "").toUpperCase();
+      const pCode = (u.position?.positionCode || u.position?.abbreviation || u.position?.code || "").toUpperCase();
 
       return (
         dCode === "BGH" ||
         dName.includes("ban giám hiệu") ||
-        ["HT", "PHT", "NHT"].includes(pCode) ||
+        ["HT", "QHT", "PHT", "NHT"].includes(pCode) ||
         pName.includes("hiệu trưởng") ||
         pName.includes("phó hiệu trưởng")
       );
     });
 
-    // Sắp xếp: Hiệu trưởng lên đầu, sau đó đến Phó hiệu trưởng
+    // Sắp xếp: Hiệu trưởng / Quyền Hiệu trưởng lên đầu, sau đó đến Phó hiệu trưởng
     filteredUsers.sort((a, b) => {
       const aPos = (a.position?.positionName || "").toLowerCase();
       const bPos = (b.position?.positionName || "").toLowerCase();
-      const aIsHT = aPos.includes("hiệu trưởng") && !aPos.includes("phó");
-      const bIsHT = bPos.includes("hiệu trưởng") && !bPos.includes("phó");
+      const aCode = (a.position?.positionCode || a.position?.abbreviation || a.position?.code || "").toUpperCase();
+      const bCode = (b.position?.positionCode || b.position?.abbreviation || b.position?.code || "").toUpperCase();
+
+      const aIsHT = aCode === "HT" || (aPos.includes("hiệu trưởng") && !aPos.includes("phó") && !aPos.includes("quyền") && !aPos.includes("nguyên"));
+      const bIsHT = bCode === "HT" || (bPos.includes("hiệu trưởng") && !bPos.includes("phó") && !bPos.includes("quyền") && !bPos.includes("nguyên"));
       if (aIsHT && !bIsHT) return -1;
       if (!aIsHT && bIsHT) return 1;
+
+      const aIsQHT = aCode === "QHT" || aPos.includes("quyền hiệu trưởng");
+      const bIsQHT = bCode === "QHT" || bPos.includes("quyền hiệu trưởng");
+      if (aIsQHT && !bIsQHT) return -1;
+      if (!aIsQHT && bIsQHT) return 1;
+
       return (a.name || "").localeCompare(b.name || "", "vi");
     });
 

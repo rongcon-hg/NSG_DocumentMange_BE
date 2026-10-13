@@ -26,13 +26,13 @@ const isUserBGH = (user) => {
   return (
     deptCode === "BGH" ||
     deptName.includes("ban giám hiệu") ||
-    ["HT", "PHT", "NHT"].includes(posCode) ||
+    ["HT", "QHT", "PHT", "NHT"].includes(posCode) ||
     posName.includes("hiệu trưởng") ||
     posName.includes("phó hiệu trưởng")
   );
 };
 
-// Helper: Kiểm tra User có phải Hiệu trưởng hay không (hoặc Quản trị viên Admin)
+// Helper: Kiểm tra User có phải Hiệu trưởng hay không (hoặc Quản trị viên Admin, hoặc Quyền Hiệu trưởng)
 const isUserHieuTruong = (user) => {
   if (!user) return false;
   if (user.role === "admin") return true;
@@ -40,7 +40,11 @@ const isUserHieuTruong = (user) => {
   const posCode = (user.position?.positionCode || user.position?.code || user.position?.abbreviation || "").toUpperCase();
   const posName = (user.position?.positionName || "").toLowerCase();
 
-  return posCode === "HT" || (posName.includes("hiệu trưởng") && !posName.includes("phó"));
+  return (
+    ["HT", "QHT"].includes(posCode) ||
+    posName.includes("quyền hiệu trưởng") ||
+    (posName.includes("hiệu trưởng") && !posName.includes("phó") && !posName.includes("nguyên"))
+  );
 };
 
 // Helper: Authorize Google Drive
