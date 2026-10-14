@@ -272,9 +272,9 @@ const createTask = async (req, res) => {
         // Đồng bộ người thực hiện công việc con vào danh sách người phối hợp nếu chưa có
         collaborators = syncCollaboratorsWithSubtasks(assignees, collaborators, subtasks);
 
-        // Các trường theo Phụ lục 3 & Phụ lục 4
-        const taskType = req.body.taskType === 'URGENT' ? 'URGENT' : 'REGULAR';
-        const baseScore = req.body.baseScore !== undefined ? Number(req.body.baseScore) : (taskType === 'URGENT' ? 12 : 10);
+        // Các trường theo Phụ lục 3 & Phụ lục 4 (Công văn 3818-CV/BTCTU: Thống nhất loại Thường xuyên, Điểm chuẩn 10đ)
+        const taskType = 'REGULAR';
+        const baseScore = 10;
         const outputResult = req.body.outputResult ? String(req.body.outputResult).trim() : '';
         const focusAxis = req.body.focusAxis ? String(req.body.focusAxis).trim() : '';
         const difficultyRate = req.body.difficultyRate !== undefined ? Number(req.body.difficultyRate) : 1.0;
@@ -968,18 +968,13 @@ const updateTask = async (req, res) => {
             changes.push('Cập nhật ghi chú công việc');
         }
 
-        // Thay đổi loại công việc & hệ số độ khó (Phụ lục 3 & 4)
+        // Thay đổi loại công việc & hệ số độ khó (Phụ lục 3 & 4 - CV 3818: Thống nhất loại Thường xuyên, Điểm chuẩn 10đ)
         if (updates.taskType !== undefined) {
-            updates.taskType = updates.taskType === 'URGENT' ? 'URGENT' : 'REGULAR';
-            if (updates.baseScore === undefined) {
-                updates.baseScore = updates.taskType === 'URGENT' ? 12 : 10;
-            }
-            if (updates.taskType !== existingTask.taskType) {
-                changes.push(`Đổi loại công việc sang "${updates.taskType === 'URGENT' ? 'Đột xuất (12đ)' : 'Thường xuyên (10đ)'}"`);
-            }
+            updates.taskType = 'REGULAR';
+            updates.baseScore = 10;
         }
         if (updates.baseScore !== undefined) {
-            updates.baseScore = Number(updates.baseScore);
+            updates.baseScore = 10;
         }
         if (updates.outputResult !== undefined) {
             updates.outputResult = String(updates.outputResult).trim();
@@ -1685,10 +1680,10 @@ const getKpiStats = async (req, res) => {
                     }
                 }
 
-                // --- PHỤ LỤC 3 & 4 CÁC TIÊU CHÍ VÀ CÔNG THỨC ---
-                const taskType = task.taskType || 'REGULAR';
-                const taskTypeName = taskType === 'URGENT' ? 'Đột xuất' : 'Thường xuyên';
-                const baseScore = task.baseScore !== undefined ? Number(task.baseScore) : (taskType === 'URGENT' ? 12 : 10); // Cột 3
+                // --- PHỤ LỤC 3 & 4 CÁC TIÊU CHÍ VÀ CÔNG THỨC (Công văn số 3818-CV/BTCTU) ---
+                const taskType = 'REGULAR';
+                const taskTypeName = 'Thường xuyên';
+                const baseScore = 10; // Cột 3: Điểm chuẩn thống nhất 10 điểm cho mọi công việc
                 const outputResult = task.outputResult || '';
                 const difficultyRate = task.difficultyRate !== undefined ? Number(task.difficultyRate) : 1.0; // Cột 4
 
