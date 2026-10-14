@@ -273,10 +273,9 @@ const createTask = async (req, res) => {
         collaborators = syncCollaboratorsWithSubtasks(assignees, collaborators, subtasks);
 
         // Các trường theo Phụ lục 3 & Phụ lục 4:
-        // Hoạt động bắt đầu từ 01/10/2026 áp dụng CV 3818 (Thường xuyên, Điểm chuẩn 10đ)
-        const isFromOct2026 = startDate ? (new Date(startDate) >= new Date('2026-10-01T00:00:00.000Z')) : true;
-        const taskType = isFromOct2026 ? 'REGULAR' : (req.body.taskType === 'URGENT' ? 'URGENT' : 'REGULAR');
-        const baseScore = isFromOct2026 ? 10 : (req.body.baseScore !== undefined ? Number(req.body.baseScore) : (taskType === 'URGENT' ? 12 : 10));
+        // Hoạt động áp dụng CV 3818 (Thống nhất 1 loại công việc Thường xuyên, Điểm chuẩn 10đ)
+        const taskType = 'REGULAR';
+        const baseScore = 10;
         const outputResult = req.body.outputResult ? String(req.body.outputResult).trim() : '';
         const focusAxis = req.body.focusAxis ? String(req.body.focusAxis).trim() : '';
         const difficultyRate = req.body.difficultyRate !== undefined ? Number(req.body.difficultyRate) : 1.0;
@@ -789,10 +788,8 @@ const updateTask = async (req, res) => {
                 const effectiveFocusAxis = updates.focusAxis !== undefined ? updates.focusAxis : existingTask.focusAxis;
 
                 if (!effectiveTaskType) {
-                    return res.status(400).json({
-                        success: false,
-                        message: "Vui lòng chọn Loại công việc (Phụ lục 3 & 4) khi chuyển sang trạng thái Hoàn thành."
-                    });
+                    updates.taskType = 'REGULAR';
+                    updates.baseScore = 10;
                 }
                 if (!effectiveDifficultyRate) {
                     return res.status(400).json({
