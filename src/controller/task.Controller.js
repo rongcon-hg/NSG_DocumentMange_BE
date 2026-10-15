@@ -434,6 +434,7 @@ const getTasks = async (req, res) => {
             }
         }
         const isCapTruong = !isBGH && (currentRole === 'staff' || currentRole === 'captruong');
+        const isCapPho = !isBGH && !isCapTruong && currentRole === 'cappho';
 
         const { scope, month, year, quarter, departmentId } = req.query;
         const requestedUserId = req.query.userId;
@@ -484,8 +485,8 @@ const getTasks = async (req, res) => {
             // BGH xem toàn bộ công việc trường
             filter = {};
         } 
-        // Nếu yêu cầu xem phạm vi đơn vị (scope === 'department' hoặc Cấp trưởng xem đơn vị mình)
-        else if ((scope === 'department' && (isBGH || isCapTruong)) || (scope === 'all' && isCapTruong)) {
+        // Nếu yêu cầu xem phạm vi đơn vị (scope === 'department' hoặc Cấp trưởng / Cấp phó xem đơn vị mình)
+        else if ((scope === 'department' && (isBGH || isCapTruong || isCapPho)) || (scope === 'all' && (isCapTruong || isCapPho))) {
             const targetDeptId = (isBGH && departmentId) ? departmentId : currentUser?.department;
             if (targetDeptId) {
                 const deptUsers = await User.find({ department: targetDeptId, role: { $nin: [null, ""] } }).select("_id").lean();
@@ -502,7 +503,7 @@ const getTasks = async (req, res) => {
         } 
         // Mặc định hoặc xem việc cá nhân: Lọc theo userId
         else {
-            const effectiveUserId = (isBGH || isCapTruong) && requestedUserId && requestedUserId !== 'ALL'
+            const effectiveUserId = (isBGH || isCapTruong || isCapPho) && requestedUserId && requestedUserId !== 'ALL'
                 ? requestedUserId
                 : currentUserId;
 
