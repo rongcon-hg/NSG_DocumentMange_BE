@@ -409,18 +409,127 @@ const createTask = async (req, res) => {
 
 const getTasks = async (req, res) => {
     try {
-        const userId = (req.user && req.user._id) ? req.user._id : req.query.userId;
+        const currentUser = req.user;
+        const currentRole = currentUser?.role;
+
+        // Xác định vai trò quản lý của user hiện tại
+        let isBGH = currentRole === 'admin' || currentRole === 'manager';
+        if (currentUser && currentUser.department) {
+            const userDept = await Department.findById(currentUser.department).select("departmentCode departmentName").lean();
+            if (userDept) {
+                const userDeptCode = userDept.departmentCode;
+                if (userDeptCode === 'BGH' || (userDept.departmentName && userDept.departmentName.toLowerCase().includes('ban giám hiệu'))) {
+                    isBGH = true;
+                }
+            }
+        }
+        if (!isBGH && currentUser?.position) {
+            const userPos = await Position.findById(currentUser.position).select("positionName abbreviation code").lean();
+            if (userPos) {
+                const pName = (userPos.positionName || '').toLowerCase();
+                const pCode = (userPos.abbreviation || userPos.code || '').toUpperCase();
+                if (['HT', 'QHT', 'PHT', 'NHT'].includes(pCode) || pName.includes('hiệu trưởng') || pName.includes('phó hiệu trưởng')) {
+                    isBGH = true;
+                }
+            }
+        }
+        const isCapTruong = !isBGH && (currentRole === 'staff' || currentRole === 'captruong');
+
+        const { scope, month, year, quarter, departmentId } = req.query;
+        const requestedUserId = req.query.userId;
+        const currentUserId = currentUser?._id ? currentUser._id.toString() : requestedUserId;
+
+        // Xử lý bộ lọc thời gian nếu có (month, year, quarter)
+        let dateFilter = null;
+        if (year || month || quarter) {
+            const targetYear = year ? parseInt(year) : new Date().getFullYear();
+            if (quarter) {
+                const q = parseInt(quarter);
+                const startMonth = Math.max(0, Math.min(3, q - 1)) * 3;
+                const endMonth = startMonth + 2;
+                const startDate = new Date(targetYear, startMonth, 1);
+                const endDate = new Date(targetYear, endMonth + 1, 0, 23, 59, 59, 999);
+                dateFilter = {
+                    $or: [
+                        { endDate: { $gte: startDate, $lte: endDate } },
+                        { completedAt: { $gte: startDate, $lte: endDate } }
+                    ]
+                };
+            } else if (month) {
+                const targetMonth = parseInt(month) - 1;
+                const startDate = new Date(targetYear, targetMonth, 1);
+                const endDate = new Date(targetYear, targetMonth + 1, 0, 23, 59, 59, 999);
+                dateFilter = {
+                    $or: [
+                        { endDate: { $gte: startDate, $lte: endDate } },
+                        { completedAt: { $gte: startDate, $lte: endDate } }
+                    ]
+                };
+            } else if (year) {
+                const startDate = new Date(targetYear, 0, 1);
+                const endDate = new Date(targetYear, 11, 31, 23, 59, 59, 999);
+                dateFilter = {
+                    $or: [
+                        { endDate: { $gte: startDate, $lte: endDate } },
+                        { completedAt: { $gte: startDate, $lte: endDate } }
+                    ]
+                };
+            }
+        }
 
         let filter = {};
-        if (userId) {
-            filter = {
-                $or: [
-                    { createdBy: userId },
-                    { assignees: userId },
-                    { collaborators: userId },
-                    { "subtasks.assignee": userId }
-                ]
-            };
+
+        // Nếu yêu cầu xem phạm vi toàn trường (scope === 'all')
+        if (scope === 'all' && isBGH) {
+            // BGH xem toàn bộ công việc trường
+            filter = {};
+        } 
+        // Nếu yêu cầu xem phạm vi đơn vị (scope === 'department' hoặc Cấp trưởng xem đơn vị mình)
+        else if ((scope === 'department' && (isBGH || isCapTruong)) || (scope === 'all' && isCapTruong)) {
+            const targetDeptId = (isBGH && departmentId) ? departmentId : currentUser?.department;
+            if (targetDeptId) {
+                const deptUsers = await User.find({ department: targetDeptId, role: { $nin: [null, ""] } }).select("_id").lean();
+                const deptUserIds = deptUsers.map(u => u._id);
+                filter = {
+                    $or: [
+                        { createdBy: { $in: deptUserIds } },
+                        { assignees: { $in: deptUserIds } },
+                        { collaborators: { $in: deptUserIds } },
+                        { "subtasks.assignee": { $in: deptUserIds } }
+                    ]
+                };
+            }
+        } 
+        // Mặc định hoặc xem việc cá nhân: Lọc theo userId
+        else {
+            const effectiveUserId = (isBGH || isCapTruong) && requestedUserId && requestedUserId !== 'ALL'
+                ? requestedUserId
+                : currentUserId;
+
+            if (effectiveUserId) {
+                filter = {
+                    $or: [
+                        { createdBy: effectiveUserId },
+                        { assignees: effectiveUserId },
+                        { collaborators: effectiveUserId },
+                        { "subtasks.assignee": effectiveUserId }
+                    ]
+                };
+            }
+        }
+
+        // Kết hợp dateFilter nếu có
+        if (dateFilter) {
+            if (Object.keys(filter).length > 0) {
+                filter = {
+                    $and: [
+                        filter,
+                        dateFilter
+                    ]
+                };
+            } else {
+                filter = dateFilter;
+            }
         }
 
         const tasks = await Task.find(filter)
