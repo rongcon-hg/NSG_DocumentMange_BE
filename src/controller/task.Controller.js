@@ -480,12 +480,26 @@ const getTasks = async (req, res) => {
 
         let filter = {};
 
-        // Nếu yêu cầu xem phạm vi toàn trường (scope === 'all')
-        if (scope === 'all' && isBGH) {
-            // BGH xem toàn bộ công việc trường
+        // 1. Nếu xem việc cá nhân (scope === 'personal')
+        if (scope === 'personal') {
+            const effectiveUserId = currentUser?._id ? currentUser._id.toString() : requestedUserId;
+            if (effectiveUserId) {
+                filter = {
+                    $or: [
+                        { createdBy: effectiveUserId },
+                        { assignees: effectiveUserId },
+                        { collaborators: effectiveUserId },
+                        { "subtasks.assignee": effectiveUserId }
+                    ]
+                };
+            }
+        }
+        // 2. Nếu xem toàn trường (scope === 'all' và có quyền BGH / manager / admin)
+        else if (scope === 'all' && isBGH) {
+            // Xem toàn bộ công việc không bị giới hạn
             filter = {};
         } 
-        // Nếu yêu cầu xem phạm vi đơn vị (scope === 'department' hoặc Cấp trưởng / Cấp phó xem đơn vị mình)
+        // 3. Nếu xem toàn đơn vị (scope === 'department' hoặc Cấp trưởng / Cấp phó xem 'all' / 'department')
         else if ((scope === 'department' && (isBGH || isCapTruong || isCapPho)) || (scope === 'all' && (isCapTruong || isCapPho))) {
             const targetDeptId = (isBGH && departmentId) ? departmentId : currentUser?.department;
             if (targetDeptId) {
@@ -501,7 +515,7 @@ const getTasks = async (req, res) => {
                 };
             }
         } 
-        // Mặc định hoặc xem việc cá nhân: Lọc theo userId
+        // 4. Mặc định: lọc theo requestedUserId hoặc currentUserId
         else {
             const effectiveUserId = (isBGH || isCapTruong || isCapPho) && requestedUserId && requestedUserId !== 'ALL'
                 ? requestedUserId
