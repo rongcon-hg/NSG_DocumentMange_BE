@@ -49,6 +49,9 @@ router.put("/:id", verifyToken, recordController.updateRecord);
 // Phê duyệt / Trả lời hồ sơ (Dành cho Người nhận hoặc Manager/Admin)
 router.patch("/:id/review", verifyToken, recordController.reviewRecord);
 
+// Chuyển tiếp / Đổi người tiếp nhận xử lý hồ sơ (Dành cho Manager/Admin)
+router.patch("/:id/forward", verifyToken, verifyManager, recordController.forwardRecord);
+
 // Xóa hồ sơ
 router.delete("/:id", verifyToken, recordController.deleteRecord);
 

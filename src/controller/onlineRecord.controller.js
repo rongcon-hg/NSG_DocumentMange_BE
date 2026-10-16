@@ -638,6 +638,166 @@ const reviewRecord = async (req, res) => {
   }
 };
 
+// Chuyển tiếp / Thay đổi người tiếp nhận xử lý hồ sơ (Dành cho Admin & Manager)
+const forwardRecord = async (req, res) => {
+  try {
+    const currentUserId = req.user?.userId || req.user?._id;
+    const currentUserRole = req.user?.role;
+    const { id } = req.params;
+    const { newRecipients, forwardNote } = req.body;
+
+    // Chỉ Admin và Manager được phép chuyển tiếp đổi người nhận
+    const isManager = currentUserRole === "admin" || currentUserRole === "manager";
+    if (!isManager) {
+      return res.status(403).json({
+        success: false,
+        message: "Chỉ Quản trị viên (Admin) hoặc Quản lý (Manager) mới có quyền chuyển tiếp / đổi người xử lý hồ sơ.",
+      });
+    }
+
+    if (!newRecipients || !Array.isArray(newRecipients) || newRecipients.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Vui lòng chọn ít nhất một người tiếp nhận mới.",
+      });
+    }
+
+    const record = await OnlineRecord.findById(id);
+    if (!record) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy hồ sơ" });
+    }
+
+    const actor = await User.findById(currentUserId).select("name role");
+    const actorName = actor ? actor.name : "Quản trị viên";
+    const actorRole = currentUserRole || "manager";
+
+    // Danh sách người nhận cũ để ghi log lịch sử
+    const oldRecipientNames = (record.recipientNames && record.recipientNames.length > 0)
+      ? record.recipientNames.join(", ")
+      : "Chưa phân công";
+
+    // Lấy thông tin đầy đủ người nhận mới
+    const newRecipientUsers = await User.find({ _id: { $in: newRecipients } }).select("name role email emailNotifications");
+    if (!newRecipientUsers || newRecipientUsers.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Danh sách người tiếp nhận mới không hợp lệ.",
+      });
+    }
+
+    const newRecipientIds = newRecipientUsers.map((u) => u._id);
+    const newRecipientNames = newRecipientUsers.map((u) => u.name);
+
+    // Xây dựng lại danh sách recipientReviews
+    // Giữ lại review của những người vẫn còn nằm trong newRecipients (nếu có)
+    const existingReviews = record.recipientReviews || [];
+    const updatedReviews = newRecipientUsers.map((u) => {
+      const existing = existingReviews.find((r) => String(r.user) === String(u._id));
+      if (existing) {
+        return existing;
+      }
+      return {
+        user: u._id,
+        userName: u.name,
+        userRole: u.role || "recipient",
+        status: "PENDING",
+        reviewOpinion: "",
+      };
+    });
+
+    record.recipients = newRecipientIds;
+    record.recipientNames = newRecipientNames;
+    record.recipientReviews = updatedReviews;
+
+    // Tính toán lại trạng thái nếu hồ sơ chưa xong
+    const hasRejected = updatedReviews.some((r) => r.status === "REJECTED");
+    const allApproved = updatedReviews.length > 0 && updatedReviews.every((r) => r.status === "APPROVED");
+    const hasApprovedOrProcessing = updatedReviews.some(
+      (r) => r.status === "APPROVED" || r.status === "PROCESSING"
+    );
+
+    if (hasRejected) {
+      record.status = "REJECTED";
+    } else if (allApproved) {
+      record.status = "APPROVED";
+    } else if (hasApprovedOrProcessing) {
+      record.status = "PROCESSING";
+    } else {
+      record.status = "PENDING";
+    }
+
+    // Ghi nhận vào lịch sử
+    const historyEntry = {
+      action: "FORWARDED",
+      actor: currentUserId,
+      actorName: actorName,
+      actorRole: actorRole,
+      details: `${actorName} (Quản lý hệ thống) đã chuyển tiếp / đổi người tiếp nhận hồ sơ từ [${oldRecipientNames}] sang [${newRecipientNames.join(", ")}]${
+        forwardNote ? `. Ghi chú: ${forwardNote}` : ""
+      }`,
+      timestamp: new Date(),
+    };
+    if (!record.history) record.history = [];
+    record.history.push(historyEntry);
+
+    await record.save();
+
+    // Gửi thông báo chuông và email cho những người tiếp nhận mới (bất đồng bộ)
+    (async () => {
+      try {
+        // 1. Chuông thông báo cho người tiếp nhận mới
+        const notifs = newRecipientIds.map((rId) => ({
+          recipient: rId,
+          sender: currentUserId,
+          type: "GENERAL",
+          title: "Hồ sơ trực tuyến được chuyển tiếp đến bạn",
+          message: `${actorName} vừa chuyển tiếp hồ sơ "${record.title}" đến bạn để tiếp nhận xử lý.${
+            forwardNote ? ` (Ghi chú: ${forwardNote})` : ""
+          }`,
+          link: "/online-records/list",
+          isRead: false,
+          isPopupShown: false,
+        }));
+        if (notifs.length > 0) {
+          await Notification.insertMany(notifs);
+        }
+
+        // 2. Chuông thông báo cho người nộp hồ sơ biết đã được chuyển tiếp
+        if (record.sender && String(record.sender) !== String(currentUserId)) {
+          await Notification.create({
+            recipient: record.sender,
+            sender: currentUserId,
+            type: "GENERAL",
+            title: "Hồ sơ của bạn đã được chuyển tiếp người xử lý",
+            message: `Hồ sơ "${record.title}" đã được chuyển tiếp sang: ${newRecipientNames.join(", ")} để tiếp nhận xử lý.`,
+            link: "/online-records/list",
+            isRead: false,
+            isPopupShown: false,
+          });
+        }
+
+        // 3. Gửi email thông báo cho người nhận mới
+        await sendOnlineRecordSubmitEmail(
+          newRecipientUsers,
+          record,
+          `${record.fullName} (Chuyển tiếp bởi ${actorName})`
+        );
+      } catch (err) {
+        console.error("Lỗi gửi thông báo forwardRecord:", err);
+      }
+    })();
+
+    res.status(200).json({
+      success: true,
+      message: `Đã chuyển tiếp hồ sơ thành công sang: ${newRecipientNames.join(", ")}`,
+      data: record,
+    });
+  } catch (error) {
+    console.error("Lỗi forwardRecord:", error);
+    res.status(500).json({ success: false, message: "Lỗi chuyển tiếp hồ sơ", error: error.message });
+  }
+};
+
 // Xóa hồ sơ
 const deleteRecord = async (req, res) => {
   try {
@@ -739,6 +899,7 @@ module.exports = {
   createRecord,
   updateRecord,
   reviewRecord,
+  forwardRecord,
   deleteRecord,
   getPendingRecordCount,
 };
