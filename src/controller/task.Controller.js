@@ -480,17 +480,12 @@ const getTasks = async (req, res) => {
 
         let filter = {};
 
-        // 1. Nếu xem việc cá nhân (scope === 'personal')
+        // 1. Nếu xem việc cá nhân (scope === 'personal') -> Chỉ lọc những công việc do user tạo
         if (scope === 'personal') {
             const effectiveUserId = currentUser?._id ? currentUser._id.toString() : requestedUserId;
             if (effectiveUserId) {
                 filter = {
-                    $or: [
-                        { createdBy: effectiveUserId },
-                        { assignees: effectiveUserId },
-                        { collaborators: effectiveUserId },
-                        { "subtasks.assignee": effectiveUserId }
-                    ]
+                    createdBy: effectiveUserId
                 };
             }
         }
