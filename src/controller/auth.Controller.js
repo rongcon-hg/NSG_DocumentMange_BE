@@ -368,17 +368,13 @@ const upadteInfo = async (req, res) => {
             });
           }
           user.role = updatedData.role;
-        }
-
-        // TỰ ĐỘNG CẬP NHẬT / ĐỒNG BỘ VAI TRÒ DỰA VÀO CHỨC VỤ:
-        // Đảm bảo Cấp phó -> cappho, Cấp trưởng -> staff, Giảng viên/chuyên viên -> chuyenvien
-        if (user.role !== "admin") {
+        } else if (user.role !== "admin") {
+          // Chỉ tự động gợi ý / đồng bộ vai trò khi người dùng KHÔNG chỉ định vai trò cụ thể:
           const effectivePositionId = updatedData.position !== undefined ? updatedData.position : user.position;
           if (effectivePositionId) {
             const posDoc = await Position.findById(effectivePositionId);
             if (posDoc) {
               const suggestedRole = determineRoleByPosition(posDoc, user.role);
-              // Nếu vai trò hiện tại không tương thích với chức vụ mới, tự động đồng bộ
               if (suggestedRole && suggestedRole !== user.role) {
                 user.role = suggestedRole;
               }
@@ -386,6 +382,7 @@ const upadteInfo = async (req, res) => {
           }
         }
       }
+
   
       await user.save();
 
