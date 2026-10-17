@@ -192,6 +192,7 @@ app.use('/quarterly-plans', quarterlyPlanRoutes);
 // Paperless Meeting (Phòng họp không giấy tờ) routes
 const meetingRoutes = require('./src/routes/meeting.routes');
 app.use('/api/meetings', meetingRoutes);
+app.use('/meetings', meetingRoutes);
 // Digital Approval & Signature Workflow (Số hóa trình ký & ký số) routes
 const approvalDocumentRoutes = require('./src/routes/approvalDocument.routes');
 app.use('/api/approval-documents', approvalDocumentRoutes);
