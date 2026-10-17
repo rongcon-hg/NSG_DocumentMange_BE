@@ -1,0 +1,405 @@
+const ApprovalDocument = require("../models/approvalDocument.model");
+const User = require("../models/user.model");
+const { google } = require("googleapis");
+const { Readable } = require("stream");
+const { authorize, getOrCreateMonthFolder, sanitizeFileName } = require("./uploadfile.Controller");
+const { PDFDocument } = require("pdf-lib");
+const libre = require("libreoffice-convert");
+const { promisify } = require("util");
+const libreConvert = promisify(libre.convert);
+const QRCode = require("qrcode");
+
+// Helper: Tải file từ Google Drive về Buffer
+const getDriveFileBuffer = async (drive, fileId) => {
+    const response = await drive.files.get({ fileId, alt: "media" }, { responseType: "arraybuffer" });
+    return Buffer.from(response.data);
+};
+
+// 1. Tạo hồ sơ trình ký mới
+const createApprovalDocument = async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const file = req.file;
+        const { title, description, docVariant, urgency, signSteps } = req.body;
+
+        if (!file) {
+            return res.status(400).json({ success: false, message: "Vui lòng đính kèm file văn bản cần trình ký" });
+        }
+        if (!title) {
+            return res.status(400).json({ success: false, message: "Vui lòng nhập trích yếu/tiêu đề hồ sơ" });
+        }
+
+        let parsedSteps = [];
+        if (signSteps) {
+            try {
+                parsedSteps = typeof signSteps === "string" ? JSON.parse(signSteps) : signSteps;
+            } catch (err) {
+                return res.status(400).json({ success: false, message: "Định dạng các bước duyệt không hợp lệ" });
+            }
+        }
+
+        if (!Array.isArray(parsedSteps) || parsedSteps.length === 0) {
+            return res.status(400).json({ success: false, message: "Vui lòng chỉ định ít nhất một người duyệt/ký" });
+        }
+
+        // Định dạng lại các bước duyệt
+        const formattedSteps = parsedSteps.map((step, idx) => ({
+            stepIndex: idx + 1,
+            stepName: step.stepName || `Bước ${idx + 1}`,
+            assignee: step.assignee,
+            actionType: step.actionType || "SIGN",
+            action: "PENDING"
+        }));
+
+        const auth = await authorize();
+        const drive = google.drive({ version: "v3", auth });
+        const folderId = await getOrCreateMonthFolder(drive);
+
+        // Upload file gốc lên Drive
+        const fileMetadata = {
+            name: `${Date.now()}_${sanitizeFileName(file.originalname)}`,
+            parents: [folderId],
+        };
+        const media = {
+            mimeType: file.mimetype,
+            body: Readable.from(file.buffer),
+        };
+        const driveUploadRes = await drive.files.create({
+            requestBody: fileMetadata,
+            media: media,
+            fields: "id, name, mimeType",
+            supportsAllDrives: true
+        });
+
+        // Nếu file là Word (.docx, .doc), chuyển sang PDF để làm currentFile cho việc ký
+        let currentFile = {
+            fileName: driveUploadRes.data.name,
+            fileId: driveUploadRes.data.id,
+            mimeType: driveUploadRes.data.mimeType
+        };
+
+        if (file.mimetype.includes("word") || file.originalname.endsWith(".docx") || file.originalname.endsWith(".doc")) {
+            try {
+                const pdfBuffer = await libreConvert(file.buffer, ".pdf", undefined);
+                const pdfName = `${sanitizeFileName(file.originalname.replace(/\.[^/.]+$/, ""))}_preview.pdf`;
+                const pdfUploadRes = await drive.files.create({
+                    requestBody: { name: pdfName, parents: [folderId] },
+                    media: { mimeType: "application/pdf", body: Readable.from(pdfBuffer) },
+                    fields: "id, name, mimeType",
+                    supportsAllDrives: true
+                });
+                currentFile = {
+                    fileName: pdfUploadRes.data.name,
+                    fileId: pdfUploadRes.data.id,
+                    mimeType: "application/pdf"
+                };
+            } catch (convErr) {
+                console.warn("Could not auto-convert Word to PDF upon creation:", convErr.message);
+            }
+        }
+
+        const user = await User.findById(userId).select("department");
+
+        const newDoc = new ApprovalDocument({
+            title,
+            description: description || "",
+            creator: userId,
+            department: user?.department,
+            docVariant: docVariant || null,
+            urgency: urgency || "NORMAL",
+            originalFile: {
+                fileName: file.originalname,
+                fileId: driveUploadRes.data.id,
+                mimeType: driveUploadRes.data.mimeType,
+                fileSize: file.size
+            },
+            currentFile: currentFile,
+            status: "IN_PROGRESS",
+            currentStepIndex: 1,
+            signSteps: formattedSteps
+        });
+
+        await newDoc.save();
+
+        const populated = await ApprovalDocument.findById(newDoc._id)
+            .populate("creator", "name email avatar")
+            .populate("department", "departmentName departmentCode")
+            .populate("signSteps.assignee", "name email avatar position");
+
+        res.status(201).json({
+            success: true,
+            message: "Tạo hồ sơ trình ký thành công",
+            data: populated
+        });
+
+    } catch (error) {
+        console.error("Error creating approval document:", error);
+        res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });
+    }
+};
+
+// 2. Lấy danh sách hồ sơ trình ký
+// query: type = 'pending_my_action' (Cần tôi duyệt/ký) | 'my_submitted' (Tôi đã gửi) | 'all' (Tất cả nếu là admin/manager)
+const getApprovalDocuments = async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const userRole = req.user.role;
+        const { type = "pending_my_action", status, search, page = 1, limit = 20 } = req.query;
+
+        let query = {};
+
+        if (type === "pending_my_action") {
+            // Đang ở trạng thái IN_PROGRESS và người dùng hiện tại là assignee của currentStepIndex
+            query = {
+                status: "IN_PROGRESS",
+                signSteps: {
+                    $elemMatch: {
+                        assignee: userId,
+                        action: "PENDING"
+                    }
+                }
+            };
+        } else if (type === "my_submitted") {
+            // Do chính người dùng tạo
+            query = { creator: userId };
+        } else if (type === "all") {
+            // Cho phép xem nếu là admin hoặc manager hoặc xem các văn bản mà mình tham gia
+            if (!["admin", "manager"].includes(userRole)) {
+                query = {
+                    $or: [
+                        { creator: userId },
+                        { "signSteps.assignee": userId }
+                    ]
+                };
+            }
+        }
+
+        if (status) {
+            query.status = status;
+        }
+
+        if (search) {
+            query.$or = [
+                { title: { $regex: search, $options: "i" } },
+                { documentCode: { $regex: search, $options: "i" } }
+            ];
+        }
+
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+        const [docs, total] = await Promise.all([
+            ApprovalDocument.find(query)
+                .sort({ updatedAt: -1 })
+                .skip(skip)
+                .limit(parseInt(limit))
+                .populate("creator", "name email avatar")
+                .populate("department", "departmentName departmentCode")
+                .populate("signSteps.assignee", "name email avatar position")
+                .lean(),
+            ApprovalDocument.countDocuments(query)
+        ]);
+
+        res.status(200).json({
+            success: true,
+            data: docs,
+            pagination: {
+                total,
+                page: parseInt(page),
+                limit: parseInt(limit),
+                pages: Math.ceil(total / parseInt(limit))
+            }
+        });
+    } catch (error) {
+        console.error("Error fetching approval documents:", error);
+        res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });
+    }
+};
+
+// 3. Lấy chi tiết một hồ sơ trình ký
+const getApprovalDocumentById = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const doc = await ApprovalDocument.findById(id)
+            .populate("creator", "name email avatar mobile position department")
+            .populate("department", "departmentName departmentCode")
+            .populate("signSteps.assignee", "name email avatar position department signature")
+            .populate("docVariant", "variantName");
+
+        if (!doc) {
+            return res.status(404).json({ success: false, message: "Không tìm thấy hồ sơ trình ký" });
+        }
+
+        res.status(200).json({ success: true, data: doc });
+    } catch (error) {
+        console.error("Error fetching approval document detail:", error);
+        res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });
+    }
+};
+
+// 4. Ký số hoặc Thẩm định hồ sơ (Approve / Sign)
+const signAndApproveStep = async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const { id } = req.params;
+        const { comment = "", signaturePositions = [] } = req.body;
+
+        const doc = await ApprovalDocument.findById(id);
+        if (!doc) {
+            return res.status(404).json({ success: false, message: "Không tìm thấy hồ sơ trình ký" });
+        }
+
+        if (doc.status !== "IN_PROGRESS") {
+            return res.status(400).json({ success: false, message: "Hồ sơ không ở trạng thái chờ ký duyệt" });
+        }
+
+        // Tìm bước hiện tại của user
+        const currentStep = doc.signSteps.find(s => s.stepIndex === doc.currentStepIndex);
+        if (!currentStep || String(currentStep.assignee) !== String(userId)) {
+            return res.status(403).json({ success: false, message: "Bạn không có quyền duyệt ở bước này" });
+        }
+
+        const user = await User.findById(userId);
+        const auth = await authorize();
+        const drive = google.drive({ version: "v3", auth });
+
+        // Nếu bước này yêu cầu ký (actionType === 'SIGN') và có vị trí chữ ký
+        if (currentStep.actionType === "SIGN" && Array.isArray(signaturePositions) && signaturePositions.length > 0) {
+            if (!user.signature || !user.signature.fileId) {
+                return res.status(400).json({ success: false, message: "Bạn chưa cấu hình chữ ký cá nhân" });
+            }
+
+            // Lấy buffer file hiện tại
+            const targetFileId = doc.currentFile?.fileId || doc.originalFile?.fileId;
+            const currentPdfBuffer = await getDriveFileBuffer(drive, targetFileId);
+
+            // Tải ảnh chữ ký
+            const signatureImageBuffer = await getDriveFileBuffer(drive, user.signature.fileId);
+
+            // Xử lý đóng dấu chữ ký vào PDF bằng pdf-lib
+            const pdfDoc = await PDFDocument.load(currentPdfBuffer);
+            const pages = pdfDoc.getPages();
+
+            let image;
+            if (user.signature.mimeType === "image/png") {
+                image = await pdfDoc.embedPng(signatureImageBuffer);
+            } else {
+                try {
+                    image = await pdfDoc.embedPng(signatureImageBuffer);
+                } catch (e) {
+                    image = await pdfDoc.embedJpg(signatureImageBuffer);
+                }
+            }
+
+            for (const sig of signaturePositions) {
+                const targetPage = pages[parseInt(sig.pageNum) - 1];
+                if (targetPage) {
+                    targetPage.drawImage(image, {
+                        x: parseFloat(sig.x),
+                        y: parseFloat(sig.y),
+                        width: parseFloat(sig.width),
+                        height: parseFloat(sig.height)
+                    });
+                }
+            }
+
+            const signedBytes = await pdfDoc.save();
+            const folderId = await getOrCreateMonthFolder(drive);
+
+            // Upload PDF mới lên Drive
+            const newSignedFileName = `signed_step${doc.currentStepIndex}_${sanitizeFileName(doc.title)}.pdf`;
+            const uploadRes = await drive.files.create({
+                requestBody: { name: newSignedFileName, parents: [folderId] },
+                media: { mimeType: "application/pdf", body: Readable.from(Buffer.from(signedBytes)) },
+                fields: "id, name, mimeType",
+                supportsAllDrives: true
+            });
+
+            // Cập nhật currentFile
+            doc.currentFile = {
+                fileName: uploadRes.data.name,
+                fileId: uploadRes.data.id,
+                mimeType: "application/pdf"
+            };
+
+            currentStep.signaturePositions = signaturePositions;
+        }
+
+        // Cập nhật trạng thái bước hiện tại
+        currentStep.action = "APPROVED";
+        currentStep.comment = comment;
+        currentStep.actionAt = new Date();
+
+        // Kiểm tra xem đã hoàn tất tất cả các bước chưa
+        if (doc.currentStepIndex >= doc.signSteps.length) {
+            doc.status = "APPROVED";
+        } else {
+            doc.currentStepIndex += 1;
+        }
+
+        await doc.save();
+
+        const updated = await ApprovalDocument.findById(doc._id)
+            .populate("creator", "name email avatar")
+            .populate("signSteps.assignee", "name email avatar position");
+
+        res.status(200).json({
+            success: true,
+            message: doc.status === "APPROVED" ? "Hồ sơ đã được phê duyệt và ký hoàn tất!" : "Đã duyệt và chuyển tiếp bước tiếp theo",
+            data: updated
+        });
+
+    } catch (error) {
+        console.error("Error approving step:", error);
+        res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });
+    }
+};
+
+// 5. Từ chối hồ sơ (Reject)
+const rejectApprovalDocument = async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const { id } = req.params;
+        const { reason } = req.body;
+
+        if (!reason) {
+            return res.status(400).json({ success: false, message: "Vui lòng nhập lý do từ chối" });
+        }
+
+        const doc = await ApprovalDocument.findById(id);
+        if (!doc) {
+            return res.status(404).json({ success: false, message: "Không tìm thấy hồ sơ trình ký" });
+        }
+
+        const currentStep = doc.signSteps.find(s => s.stepIndex === doc.currentStepIndex);
+        if (!currentStep || String(currentStep.assignee) !== String(userId)) {
+            return res.status(403).json({ success: false, message: "Bạn không có quyền từ chối ở bước này" });
+        }
+
+        currentStep.action = "REJECTED";
+        currentStep.comment = reason;
+        currentStep.actionAt = new Date();
+
+        doc.status = "REJECTED";
+        doc.rejectionReason = reason;
+        doc.rejectedBy = userId;
+
+        await doc.save();
+
+        res.status(200).json({
+            success: true,
+            message: "Đã từ chối hồ sơ trình ký",
+            data: doc
+        });
+
+    } catch (error) {
+        console.error("Error rejecting approval document:", error);
+        res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });
+    }
+};
+
+module.exports = {
+    createApprovalDocument,
+    getApprovalDocuments,
+    getApprovalDocumentById,
+    signAndApproveStep,
+    rejectApprovalDocument
+};
