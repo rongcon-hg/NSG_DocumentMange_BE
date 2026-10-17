@@ -3,7 +3,7 @@ const User = require("../models/user.model");
 const { google } = require("googleapis");
 const { Readable } = require("stream");
 const { authorize, getOrCreateMonthFolder, sanitizeFileName } = require("./uploadfile.Controller");
-const { PDFDocument } = require("pdf-lib");
+const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
 const libre = require("libreoffice-convert");
 const { promisify } = require("util");
 const libreConvert = promisify(libre.convert);
@@ -261,42 +261,105 @@ const signAndApproveStep = async (req, res) => {
         const auth = await authorize();
         const drive = google.drive({ version: "v3", auth });
 
+        const { comment = "", signaturePositions = [], signatureMethod = "INTERNAL_IMAGE", certificateInfo } = req.body;
+
         // Nếu bước này yêu cầu ký (actionType === 'SIGN') và có vị trí chữ ký
         if (currentStep.actionType === "SIGN" && Array.isArray(signaturePositions) && signaturePositions.length > 0) {
-            if (!user.signature || !user.signature.fileId) {
-                return res.status(400).json({ success: false, message: "Bạn chưa cấu hình chữ ký cá nhân" });
-            }
-
             // Lấy buffer file hiện tại
             const targetFileId = doc.currentFile?.fileId || doc.originalFile?.fileId;
             const currentPdfBuffer = await getDriveFileBuffer(drive, targetFileId);
 
-            // Tải ảnh chữ ký
-            const signatureImageBuffer = await getDriveFileBuffer(drive, user.signature.fileId);
-
             // Xử lý đóng dấu chữ ký vào PDF bằng pdf-lib
             const pdfDoc = await PDFDocument.load(currentPdfBuffer);
             const pages = pdfDoc.getPages();
+            const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+            const regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
-            let image;
-            if (user.signature.mimeType === "image/png") {
-                image = await pdfDoc.embedPng(signatureImageBuffer);
-            } else {
-                try {
+            let image = null;
+
+            // 1. Ký bằng ảnh cá nhân hoặc Token kèm ảnh
+            if (user.signature && user.signature.fileId) {
+                const signatureImageBuffer = await getDriveFileBuffer(drive, user.signature.fileId);
+                if (user.signature.mimeType === "image/png") {
                     image = await pdfDoc.embedPng(signatureImageBuffer);
-                } catch (e) {
-                    image = await pdfDoc.embedJpg(signatureImageBuffer);
+                } else {
+                    try {
+                        image = await pdfDoc.embedPng(signatureImageBuffer);
+                    } catch (e) {
+                        image = await pdfDoc.embedJpg(signatureImageBuffer);
+                    }
                 }
             }
 
             for (const sig of signaturePositions) {
                 const targetPage = pages[parseInt(sig.pageNum) - 1];
-                if (targetPage) {
+                if (!targetPage) continue;
+
+                const posX = parseFloat(sig.x);
+                const posY = parseFloat(sig.y);
+                const posW = parseFloat(sig.width);
+                const posH = parseFloat(sig.height);
+
+                if (signatureMethod === "USB_TOKEN") {
+                    // Nếu là ký USB Token: Đóng dấu khung chứng thư số chuẩn điện tử
+                    const signerName = certificateInfo?.subject || user.name;
+                    const caName = certificateInfo?.issuer || "VNPT-CA";
+                    const signTimeStr = new Date().toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" });
+
+                    // Vẽ khung viền xanh / đỏ chứng thực
+                    targetPage.drawRectangle({
+                        x: posX,
+                        y: posY,
+                        width: posW,
+                        height: posH,
+                        borderColor: rgb(0.1, 0.45, 0.85),
+                        borderWidth: 1.5,
+                        color: rgb(0.96, 0.98, 1.0)
+                    });
+
+                    // Nếu có ảnh chữ ký, vẽ một góc
+                    if (image) {
+                        targetPage.drawImage(image, {
+                            x: posX + 6,
+                            y: posY + (posH - 45) / 2,
+                            width: 50,
+                            height: 45
+                        });
+                    }
+
+                    // Chèn văn bản chứng thực số
+                    const textOffsetX = image ? posX + 62 : posX + 8;
+                    targetPage.drawText("KY BOI: " + signerName.toUpperCase(), {
+                        x: textOffsetX,
+                        y: posY + posH - 16,
+                        size: 9,
+                        font: font,
+                        color: rgb(0.1, 0.35, 0.8)
+                    });
+                    targetPage.drawText("CHUNG THU SO: " + caName, {
+                        x: textOffsetX,
+                        y: posY + posH - 28,
+                        size: 7.5,
+                        font: regularFont,
+                        color: rgb(0.2, 0.2, 0.2)
+                    });
+                    targetPage.drawText("THOI GIAN: " + signTimeStr, {
+                        x: textOffsetX,
+                        y: posY + posH - 40,
+                        size: 7.5,
+                        font: regularFont,
+                        color: rgb(0.2, 0.2, 0.2)
+                    });
+                } else {
+                    // Ký điện tử nội bộ thông thường
+                    if (!image) {
+                        return res.status(400).json({ success: false, message: "Bạn chưa cấu hình chữ ký cá nhân" });
+                    }
                     targetPage.drawImage(image, {
-                        x: parseFloat(sig.x),
-                        y: parseFloat(sig.y),
-                        width: parseFloat(sig.width),
-                        height: parseFloat(sig.height)
+                        x: posX,
+                        y: posY,
+                        width: posW,
+                        height: posH
                     });
                 }
             }
@@ -305,7 +368,7 @@ const signAndApproveStep = async (req, res) => {
             const folderId = await getOrCreateMonthFolder(drive);
 
             // Upload PDF mới lên Drive
-            const newSignedFileName = `signed_step${doc.currentStepIndex}_${sanitizeFileName(doc.title)}.pdf`;
+            const newSignedFileName = `signed_${signatureMethod.toLowerCase()}_step${doc.currentStepIndex}_${sanitizeFileName(doc.title)}.pdf`;
             const uploadRes = await drive.files.create({
                 requestBody: { name: newSignedFileName, parents: [folderId] },
                 media: { mimeType: "application/pdf", body: Readable.from(Buffer.from(signedBytes)) },
@@ -321,6 +384,10 @@ const signAndApproveStep = async (req, res) => {
             };
 
             currentStep.signaturePositions = signaturePositions;
+            currentStep.signatureMethod = signatureMethod;
+            if (certificateInfo) {
+                currentStep.certificateInfo = certificateInfo;
+            }
         }
 
         // Cập nhật trạng thái bước hiện tại

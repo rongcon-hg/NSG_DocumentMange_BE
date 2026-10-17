@@ -42,7 +42,19 @@ const signStepSchema = new mongoose.Schema({
             width: { type: Number, required: true },
             height: { type: Number, required: true }
         }
-    ]
+    ],
+    signatureMethod: {
+        type: String,
+        enum: ["INTERNAL_IMAGE", "USB_TOKEN", "SMART_CA"],
+        default: "INTERNAL_IMAGE"
+    },
+    certificateInfo: {
+        subject: { type: String }, // Tên tổ chức / cá nhân trong Token
+        issuer: { type: String },  // VNPT-CA / Viettel-CA / BKAV-CA...
+        serialNumber: { type: String },
+        validFrom: { type: Date },
+        validTo: { type: Date }
+    }
 }, { _id: true, timestamps: true });
 
 const approvalDocumentSchema = new mongoose.Schema({
