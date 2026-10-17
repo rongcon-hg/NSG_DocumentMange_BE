@@ -240,7 +240,7 @@ const signAndApproveStep = async (req, res) => {
     try {
         const userId = req.user._id;
         const { id } = req.params;
-        const { comment = "", signaturePositions = [] } = req.body;
+        const { comment = "", signaturePositions = [], signatureMethod = "INTERNAL_IMAGE", certificateInfo } = req.body;
 
         const doc = await ApprovalDocument.findById(id);
         if (!doc) {
@@ -260,8 +260,6 @@ const signAndApproveStep = async (req, res) => {
         const user = await User.findById(userId);
         const auth = await authorize();
         const drive = google.drive({ version: "v3", auth });
-
-        const { comment = "", signaturePositions = [], signatureMethod = "INTERNAL_IMAGE", certificateInfo } = req.body;
 
         // Nếu bước này yêu cầu ký (actionType === 'SIGN') và có vị trí chữ ký
         if (currentStep.actionType === "SIGN" && Array.isArray(signaturePositions) && signaturePositions.length > 0) {
