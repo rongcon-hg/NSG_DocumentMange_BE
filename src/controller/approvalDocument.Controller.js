@@ -461,10 +461,136 @@ const rejectApprovalDocument = async (req, res) => {
     }
 };
 
+// 6. Lấy stream PDF xem trước (Tự động convert nếu file gốc là Word chưa convert sang PDF)
+const getPreviewPdfStream = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const doc = await ApprovalDocument.findById(id);
+        if (!doc) {
+            return res.status(404).json({ success: false, message: "Không tìm thấy hồ sơ trình ký" });
+        }
+
+        const auth = await authorize();
+        const drive = google.drive({ version: "v3", auth });
+
+        // Nếu currentFile là PDF hợp lệ, stream về
+        if (doc.currentFile?.fileId && doc.currentFile.mimeType === "application/pdf") {
+            const pdfBuffer = await getDriveFileBuffer(drive, doc.currentFile.fileId);
+            res.setHeader("Content-Type", "application/pdf");
+            res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(doc.currentFile.fileName || "preview.pdf")}"`);
+            return res.send(pdfBuffer);
+        }
+
+        // Nếu file gốc là PDF
+        if (doc.originalFile?.mimeType === "application/pdf" || doc.originalFile?.fileName?.toLowerCase().endsWith(".pdf")) {
+            const pdfBuffer = await getDriveFileBuffer(drive, doc.originalFile.fileId);
+            res.setHeader("Content-Type", "application/pdf");
+            res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(doc.originalFile.fileName || "preview.pdf")}"`);
+            return res.send(pdfBuffer);
+        }
+
+        // Trường hợp file gốc là Word (.doc, .docx) nhưng chưa được convert sang PDF
+        const wordBuffer = await getDriveFileBuffer(drive, doc.originalFile.fileId);
+        let pdfBuffer;
+        try {
+            pdfBuffer = await libreConvert(wordBuffer, ".pdf", undefined);
+        } catch (convErr) {
+            console.error("Lỗi convert Word sang PDF:", convErr.message);
+            return res.status(500).json({
+                success: false,
+                message: "Không thể chuyển đổi file văn bản Word sang PDF để xem trước. " + convErr.message
+            });
+        }
+
+        // Lưu PDF này vào Drive và cập nhật doc.currentFile để các lần sau không cần convert lại
+        try {
+            const folderId = await getOrCreateMonthFolder(drive);
+            const pdfName = `${sanitizeFileName(doc.originalFile.fileName.replace(/\.[^/.]+$/, ""))}_preview.pdf`;
+            const pdfUploadRes = await drive.files.create({
+                requestBody: { name: pdfName, parents: [folderId] },
+                media: { mimeType: "application/pdf", body: Readable.from(pdfBuffer) },
+                fields: "id, name, mimeType",
+                supportsAllDrives: true
+            });
+
+            doc.currentFile = {
+                fileName: pdfUploadRes.data.name,
+                fileId: pdfUploadRes.data.id,
+                mimeType: "application/pdf"
+            };
+            await doc.save();
+        } catch (saveErr) {
+            console.warn("Không thể lưu cache PDF lên Drive:", saveErr.message);
+        }
+
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(doc.currentFile?.fileName || "preview.pdf")}"`);
+        return res.send(pdfBuffer);
+
+    } catch (error) {
+        console.error("Error streaming preview PDF:", error);
+        res.status(500).json({ success: false, message: "Lỗi tải bản xem trước PDF", error: error.message });
+    }
+};
+
+// 7. Xóa hồ sơ trình ký (Chỉ Admin hoặc người tạo nếu hồ sơ chưa qua bước 1)
+const deleteApprovalDocument = async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const userRole = req.user.role;
+        const { id } = req.params;
+
+        const doc = await ApprovalDocument.findById(id);
+        if (!doc) {
+            return res.status(404).json({ success: false, message: "Không tìm thấy hồ sơ trình ký" });
+        }
+
+        // Quyền xóa: Admin được xóa mọi hồ sơ; Người tạo chỉ được xóa nếu chưa ai duyệt (currentStepIndex === 1 và chưa APPROVED)
+        const isAdmin = userRole === "admin" || userRole === "manager";
+        const isOwner = String(doc.creator) === String(userId);
+
+        if (!isAdmin) {
+            if (!isOwner) {
+                return res.status(403).json({ success: false, message: "Bạn không có quyền xóa hồ sơ này" });
+            }
+            if (doc.status === "APPROVED") {
+                return res.status(400).json({ success: false, message: "Hồ sơ đã được phê duyệt hoàn tất, không thể xóa" });
+            }
+        }
+
+        // Xóa file trên Google Drive (nếu có)
+        try {
+            const auth = await authorize();
+            const drive = google.drive({ version: "v3", auth });
+            if (doc.originalFile?.fileId) {
+                await drive.files.delete({ fileId: doc.originalFile.fileId, supportsAllDrives: true }).catch(() => {});
+            }
+            if (doc.currentFile?.fileId && doc.currentFile.fileId !== doc.originalFile?.fileId) {
+                await drive.files.delete({ fileId: doc.currentFile.fileId, supportsAllDrives: true }).catch(() => {});
+            }
+        } catch (e) {
+            console.warn("Không thể xóa file drive liên kết:", e.message);
+        }
+
+        await ApprovalDocument.findByIdAndDelete(id);
+
+        res.status(200).json({
+            success: true,
+            message: "Đã xóa hồ sơ trình ký thành công"
+        });
+    } catch (error) {
+        console.error("Error deleting approval document:", error);
+        res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });
+    }
+};
+
 module.exports = {
     createApprovalDocument,
     getApprovalDocuments,
     getApprovalDocumentById,
     signAndApproveStep,
-    rejectApprovalDocument
+    rejectApprovalDocument,
+    getPreviewPdfStream,
+    deleteApprovalDocument
 };
+

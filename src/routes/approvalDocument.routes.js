@@ -19,4 +19,11 @@ router.post("/:id/sign", verifyToken, approvalDocController.signAndApproveStep);
 // Từ chối hồ sơ
 router.post("/:id/reject", verifyToken, approvalDocController.rejectApprovalDocument);
 
+// Xem trước stream PDF (hỗ trợ tự động convert doc/docx sang PDF nếu chưa convert)
+router.get("/:id/preview-pdf", verifyToken, approvalDocController.getPreviewPdfStream);
+
+// Xóa hồ sơ trình ký (Chỉ Admin hoặc người tạo khi đang ở bước 1)
+router.delete("/:id", verifyToken, approvalDocController.deleteApprovalDocument);
+
 module.exports = router;
+
