@@ -114,6 +114,10 @@ const userSchema = new mongoose.Schema({
 }
 );
 
+userSchema.index({ position: 1 });
+userSchema.index({ department: 1 });
+userSchema.index({ role: 1 });
+
 
 
 userSchema.pre("save", async function (next) {
