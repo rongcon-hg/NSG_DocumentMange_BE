@@ -488,7 +488,8 @@ const getDocumentById = async (req, res) => {
             .populate("saveAt", "saveAt")
             .populate("receivedAt", "receivedAt")
             .populate("parentDocument", "docCode docNum year shortDescription")
-            .populate("relatedDocuments", "docCode docNum year shortDescription");
+            .populate("relatedDocuments", "docCode docNum year shortDescription")
+            .populate("history.actor", "name email");
 
 
         if (!document) {
@@ -1058,12 +1059,13 @@ async function updateDocument(req, res) {
       // Cập nhật danh sách file
       existingDocument.files = updatedFiles;
 
+      // Chuẩn bị mảng lịch sử nếu chưa có
+      if (!existingDocument.history) {
+        existingDocument.history = [];
+      }
+
       // Xử lý ghi nhận lịch sử (ví dụ khi Chuyển tiếp)
       if (req.body.historyAction && req.body.historyActor) {
-        if (!existingDocument.history) {
-          existingDocument.history = [];
-        }
-        
         let historyNote = "";
         let forwardedTo = [];
         if (req.body.historyAction === "Forwarded" && req.body.forwardedUsers) {
@@ -1073,12 +1075,79 @@ async function updateDocument(req, res) {
           } catch (e) {}
         }
         
+        const actorUser = req.user && String(req.user._id) === String(req.body.historyActor) ? req.user : null;
         existingDocument.history.push({
           action: req.body.historyAction,
           actor: req.body.historyActor,
+          actorName: actorUser?.name || req.body.historyActorName || "Người dùng",
+          actorRole: actorUser?.role || "",
           forwardedTo: forwardedTo,
           date: new Date(),
-          note: req.body.historyNote || historyNote
+          note: req.body.historyNote || historyNote,
+          details: req.body.historyDetails || (req.body.historyAction === "Forwarded" ? "Chuyển tiếp văn bản" : "Thao tác trên văn bản")
+        });
+      } else {
+        // Ghi nhận lịch sử cập nhật/điều chỉnh thông tin văn bản
+        const actor = req.user?._id || (req.body.updatedBy ? new mongoose.Types.ObjectId(req.body.updatedBy) : null);
+        const actorName = req.user?.name || req.body.updaterName || "Người dùng";
+        const actorRole = req.user?.role || "";
+
+        // Xác định các trường thay đổi
+        const changedLabels = [];
+        const FIELD_LABELS = {
+          docNum: "Số văn bản",
+          docCode: "Ký hiệu văn bản",
+          shortDescription: "Trích yếu",
+          docVariant: "Loại văn bản",
+          urgency: "Độ khẩn",
+          deadlineDay: "Hạn xử lý",
+          createAt: "Ngày văn bản",
+          receivedAt: "Ngày nhận",
+          numOfPages: "Số trang",
+          year: "Năm văn bản",
+          principalIdea: "Bút phê",
+          note: "Ghi chú",
+          unit: "Cơ quan ban hành",
+          signer: "Người ký",
+          position: "Chức vụ người ký",
+          departments: "Đơn vị nhận",
+          executors: "Người/đơn vị xử lý",
+          assignedToUsers: "Người chủ trì/nhận việc",
+          saveAt: "Nơi lưu trữ"
+        };
+
+        for (const field of fieldsToUpdate) {
+          if (req.body[field] !== undefined) {
+            const label = FIELD_LABELS[field] || field;
+            if (!changedLabels.includes(label)) {
+              changedLabels.push(label);
+            }
+          }
+        }
+
+        const addedFilesCount = req.files ? req.files.length : 0;
+        if (addedFilesCount > 0) {
+          changedLabels.push(`Đính kèm thêm ${addedFilesCount} tệp mới`);
+        }
+        if (req.body.existingFiles) {
+          changedLabels.push("Cập nhật danh sách tệp đính kèm");
+        }
+
+        const noteOrDetails = req.body.updateReason || req.body.historyNote || (
+          changedLabels.length > 0 
+            ? `Điều chỉnh: ${changedLabels.join(", ")}` 
+            : "Điều chỉnh thông tin văn bản"
+        );
+
+        existingDocument.history.push({
+          action: "Updated",
+          actor: actor || existingDocument.sentBy,
+          actorName: actorName,
+          actorRole: actorRole,
+          date: new Date(),
+          details: noteOrDetails,
+          note: req.body.historyNote || "",
+          changedFields: changedLabels
         });
       }
 

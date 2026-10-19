@@ -165,11 +165,15 @@ const documentSchema = new mongoose.Schema(
     },
     history: [
       {
-        action: { type: String, enum: ["Issued", "Forwarded"] },
+        action: { type: String, enum: ["Issued", "Forwarded", "Updated"] },
         actor: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        actorName: { type: String },
+        actorRole: { type: String },
         forwardedTo: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
         date: { type: Date, default: Date.now },
-        note: { type: String }
+        note: { type: String },
+        details: { type: String },
+        changedFields: [{ type: String }]
       }
     ],
     verificationCode: {
