@@ -10,6 +10,10 @@ const unitSchema = new mongoose.Schema({
     unitName: {
         type:String,
         required: [true, "Unit Name is required"],
+    },
+    isActive: {
+        type: Boolean,
+        default: true
     }
 },
 {

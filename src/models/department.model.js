@@ -10,6 +10,10 @@ const departmentSchema = new mongoose.Schema({
     departmentName: {
         type:String,
         required: [true, "Unit Name is required"],
+    },
+    isActive: {
+        type: Boolean,
+        default: true
     }
 },
 {

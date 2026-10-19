@@ -21,10 +21,13 @@ const createDepartment = async (req, res) => {
 
 const getAllDepartment = async (req, res) => { // Fixed signature
     try {
-        const { includeDissolved } = req.query;
+        const { includeDissolved, onlyActive } = req.query;
         const matchStage = {};
         if (includeDissolved !== "true") {
             matchStage.departmentName = { $not: { $regex: "giải thể", $options: "i" } };
+        }
+        if (onlyActive === "true") {
+            matchStage.isActive = { $ne: false };
         }
 
         const alldepartment = await Department.aggregate([
@@ -40,6 +43,7 @@ const getAllDepartment = async (req, res) => { // Fixed signature
             {
                 $addFields: {
                     userCount: { $size: "$users" },
+                    isActive: { $ifNull: ["$isActive", true] },
                 },
             },
             {
@@ -78,7 +82,7 @@ const deleteDepartment= async (req, res) =>{
     }
 }
 const updateDepartment = async (req, res) => {
-    const { departmentID, departmentCode, departmentName } = req.body;
+    const { departmentID, departmentCode, departmentName, isActive } = req.body;
 
     try {
         const department = await Department.findById(departmentID);
@@ -105,14 +109,37 @@ const updateDepartment = async (req, res) => {
         // Update the department details
         department.departmentCode = departmentCode || department.departmentCode;
         department.departmentName = departmentName || department.departmentName;
+        if (typeof isActive === "boolean") {
+            department.isActive = isActive;
+        }
         await department.save();
 
-        return res.status(200).json({ message: "Department updated successfully" });
+        return res.status(200).json({ message: "Department updated successfully", department });
     } catch (error) {
         console.error("Error in update Department controller: ", error.message);
         res.status(500).json({ message: "Server Error!", error: error.message });
     }
 };
+
+const toggleDepartmentStatus = async (req, res) => {
+    const { departmentID, isActive } = req.body;
+    try {
+        const department = await Department.findById(departmentID);
+        if (!department) {
+            return res.status(404).json({ message: "Department not found" });
+        }
+        department.isActive = typeof isActive === "boolean" ? isActive : !department.isActive;
+        await department.save();
+        return res.status(200).json({
+            message: `Đã ${department.isActive ? "kích hoạt" : "vô hiệu hóa"} phòng ban thành công`,
+            department
+        });
+    } catch (error) {
+        console.error("Error in toggleDepartmentStatus controller: ", error.message);
+        res.status(500).json({ message: "Server Error!", error: error.message });
+    }
+};
+
 const getUsersByDepartment = async (req, res) => {
     try {
         const { departmentId } = req.params; // Lấy departmentId từ URL
@@ -135,5 +162,6 @@ module.exports = {
     getAllDepartment,
     deleteDepartment,
     updateDepartment,
+    toggleDepartmentStatus,
     getUsersByDepartment
 };

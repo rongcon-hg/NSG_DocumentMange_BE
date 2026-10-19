@@ -17,7 +17,12 @@ const createUnit = async (req, res) => {
 }
 const getAllUnit = async (req, res) => {
     try {
-        const Units = await Unit.find()
+        const { onlyActive } = req.query;
+        const query = {};
+        if (onlyActive === "true") {
+            query.isActive = { $ne: false };
+        }
+        const Units = await Unit.find(query)
         .sort({ createdAt: -1 });
 
         res.status(200).json({ Units });
@@ -41,7 +46,7 @@ const deleteUnit = async (req, res) => {
 }
 const updateUnit = async (req, res) => {
     try {
-        const { unitID, unitCode, unitName } = req.body;
+        const { unitID, unitCode, unitName, isActive } = req.body;
         const existingUnit = await Unit.findById(unitID);
         if (!existingUnit) {
             return res.status(404).json({ message: "Unit not found" });
@@ -65,11 +70,33 @@ const updateUnit = async (req, res) => {
 
         existingUnit.unitCode = unitCode || existingUnit.unitCode;
         existingUnit.unitName = unitName || existingUnit.unitName;
+        if (typeof isActive === "boolean") {
+            existingUnit.isActive = isActive;
+        }
         await existingUnit.save();
 
-        return res.status(200).json({ message: "Unit updated successfully" });
+        return res.status(200).json({ message: "Unit updated successfully", unit: existingUnit });
     } catch (error) {
         console.log("Error in update Unit controller: ", error.message);
+        res.status(500).json({ message: "Server Error!", error: error.message });
+    }
+};
+
+const toggleUnitStatus = async (req, res) => {
+    try {
+        const { unitID, isActive } = req.body;
+        const existingUnit = await Unit.findById(unitID);
+        if (!existingUnit) {
+            return res.status(404).json({ message: "Unit not found" });
+        }
+        existingUnit.isActive = typeof isActive === "boolean" ? isActive : !existingUnit.isActive;
+        await existingUnit.save();
+        return res.status(200).json({
+            message: `Đã ${existingUnit.isActive ? "kích hoạt" : "vô hiệu hóa"} cơ quan ban hành thành công`,
+            unit: existingUnit
+        });
+    } catch (error) {
+        console.log("Error in toggleUnitStatus controller: ", error.message);
         res.status(500).json({ message: "Server Error!", error: error.message });
     }
 };
@@ -78,5 +105,6 @@ module.exports = {
     createUnit,
     getAllUnit,
     deleteUnit,
-    updateUnit
+    updateUnit,
+    toggleUnitStatus
 }                                  

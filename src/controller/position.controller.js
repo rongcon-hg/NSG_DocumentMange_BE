@@ -22,7 +22,7 @@ const createPosition = async (req, res) => {
 
 const getAllPosition = async (req, res) => {
     try {
-        const { positionCode, positionName } = req.query;
+        const { positionCode, positionName, onlyActive } = req.query;
 
         const matchStage = {};
         if (positionCode) {
@@ -30,6 +30,9 @@ const getAllPosition = async (req, res) => {
         }
         if (positionName) {
         matchStage.positionName = positionName;
+        }
+        if (onlyActive === "true") {
+        matchStage.isActive = { $ne: false };
         }
 
         const allPosition = await Position.aggregate([
@@ -47,6 +50,7 @@ const getAllPosition = async (req, res) => {
             {
                 $addFields: {
                 userCount: { $size: "$users" },
+                isActive: { $ifNull: ["$isActive", true] },
                 },
             },
             {
@@ -111,6 +115,9 @@ const updatePosition = async (req, res) => {
 
         position.positionCode = positionCode || position.positionCode;
         position.positionName = positionName || position.positionName;
+        if (typeof isActive === "boolean") {
+            position.isActive = isActive;
+        }
         await position.save();
 
         // Tự động rà soát & cập nhật vai trò cho những người dùng đang giữ chức vụ này
@@ -128,17 +135,36 @@ const updatePosition = async (req, res) => {
           console.error("Lỗi tự động đồng bộ vai trò khi sửa chức vụ:", syncErr);
         }
 
-        return res.status(200).json({ message: "Position updated successfully" });
+        return res.status(200).json({ message: "Position updated successfully", position });
     } catch (error) {
         console.error("Error in update Position controller: ", error.message);
         res.status(500).json({ message: "Server Error!", error: error.message });
     }
 };
 
+const togglePositionStatus = async (req, res) => {
+    const { positionID, isActive } = req.body;
+    try {
+        const position = await Position.findById(positionID);
+        if (!position) {
+            return res.status(404).json({ message: "Position not found" });
+        }
+        position.isActive = typeof isActive === "boolean" ? isActive : !position.isActive;
+        await position.save();
+        return res.status(200).json({
+            message: `Đã ${position.isActive ? "kích hoạt" : "vô hiệu hóa"} chức vụ thành công`,
+            position
+        });
+    } catch (error) {
+        console.error("Error in togglePositionStatus controller: ", error.message);
+        res.status(500).json({ message: "Server Error!", error: error.message });
+    }
+};
 
 module.exports = {
     createPosition,
     getAllPosition,
     deletePosition,
-    updatePosition
+    updatePosition,
+    togglePositionStatus
 };

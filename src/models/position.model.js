@@ -10,6 +10,10 @@ const positionSchema = new mongoose.Schema({
     positionName: {
         type:String,
         required: [true, "Position Name is required"],
+    },
+    isActive: {
+        type: Boolean,
+        default: true
     }
 },
 {
