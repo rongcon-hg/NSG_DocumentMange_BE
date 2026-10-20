@@ -9,6 +9,14 @@ function formatFileName(str) {
   if (!str) return "";
   str = String(str);
 
+  // Khôi phục mã hóa UTF-8 nếu chuỗi bị chuyển mã sai sang latin1 (thường gặp khi upload qua multipart/form-data)
+  try {
+    const fixed = Buffer.from(str, "latin1").toString("utf8");
+    if (fixed && !fixed.includes("\ufffd")) {
+      str = fixed;
+    }
+  } catch (e) {}
+
   // Xóa dấu tiếng việt
   str = str.replace(/à|á|ạ|ả|ã|â|ầ|ấ|ậ|ẩ|ẫ|ă|ằ|ắ|ặ|ẳ|ẵ/g, "a");
   str = str.replace(/è|é|ẹ|ẻ|ẽ|ê|ề|ế|ệ|ể|ễ/g, "e");

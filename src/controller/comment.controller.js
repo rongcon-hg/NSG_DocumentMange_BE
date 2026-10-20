@@ -94,7 +94,7 @@ const createComment = async (req, res) => {
 
           attachments.push({
             fileId: driveRes.data.id,
-            fileName: file.originalname,
+            fileName: sanitizedName,
             fileUrl: `https://drive.google.com/file/d/${driveRes.data.id}/view`,
             mimeType: file.mimetype,
             size: `${(file.size / 1024).toFixed(1)} KB`,
