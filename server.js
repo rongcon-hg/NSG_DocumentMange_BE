@@ -198,6 +198,11 @@ const approvalDocumentRoutes = require('./src/routes/approvalDocument.routes');
 app.use('/api/approval-documents', approvalDocumentRoutes);
 app.use('/approval-documents', approvalDocumentRoutes);
 
+// Approval Workflows Configuration routes
+const approvalWorkflowRoutes = require('./src/routes/approvalWorkflow.routes');
+app.use('/api/approval-workflows', approvalWorkflowRoutes);
+app.use('/approval-workflows', approvalWorkflowRoutes);
+
 // Cron endpoint for Vercel
 const cronRoutes = require('./src/routes/cronRoutes');
 app.use('/api/cron', cronRoutes);

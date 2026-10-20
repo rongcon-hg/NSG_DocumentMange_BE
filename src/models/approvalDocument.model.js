@@ -23,7 +23,7 @@ const signStepSchema = new mongoose.Schema({
     },
     actionType: {
         type: String,
-        enum: ["SIGN", "REVIEW"], // SIGN: Ký và duyệt, REVIEW: Thẩm định / Cho ý kiến
+        enum: ["SIGN", "REVIEW", "ISSUE"], // SIGN: Ký duyệt, REVIEW: Thẩm định / Ký nháy, ISSUE: Vào số & Ban hành
         default: "SIGN"
     },
     comment: {

@@ -19,6 +19,9 @@ router.post("/:id/sign", verifyToken, approvalDocController.signAndApproveStep);
 // Từ chối hồ sơ
 router.post("/:id/reject", verifyToken, approvalDocController.rejectApprovalDocument);
 
+// Vào số ban hành hồ sơ
+router.post("/:id/issue", verifyToken, approvalDocController.issueApprovalDocument);
+
 // Xem trước stream PDF (hỗ trợ tự động convert doc/docx sang PDF nếu chưa convert)
 router.get("/:id/preview-pdf", verifyToken, approvalDocController.getPreviewPdfStream);
 

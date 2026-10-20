@@ -584,6 +584,67 @@ const deleteApprovalDocument = async (req, res) => {
     }
 };
 
+
+// 6. Manager vào số và phát hành hồ sơ ban hành
+const issueApprovalDocument = async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const userRole = req.user.role;
+        const { id } = req.params;
+        const { issuedNumber, note } = req.body;
+
+        if (!issuedNumber) {
+            return res.status(400).json({ success: false, message: "Vui lòng nhập số văn bản ban hành" });
+        }
+
+        const doc = await ApprovalDocument.findById(id);
+        if (!doc) {
+            return res.status(404).json({ success: false, message: "Không tìm thấy hồ sơ trình ký" });
+        }
+
+        const currentStep = doc.signSteps.find(s => s.stepIndex === doc.currentStepIndex);
+        const isManagerOrAdmin = userRole === "admin" || userRole === "manager";
+        const isAssignee = currentStep && String(currentStep.assignee) === String(userId);
+
+        if (!isManagerOrAdmin && !isAssignee) {
+            return res.status(403).json({ success: false, message: "Chỉ Manager/Quản trị viên hoặc người được phân công mới có quyền vào số ban hành hồ sơ" });
+        }
+
+        if (currentStep) {
+            currentStep.action = "APPROVED";
+            currentStep.comment = note || `Đã vào số ban hành: ${issuedNumber}`;
+            currentStep.actionAt = new Date();
+        }
+
+        doc.issuedNumber = issuedNumber;
+        doc.issuedAt = new Date();
+        doc.status = "APPROVED"; // Hoặc APPROVED hoàn tất
+
+        // Kiểm tra xem đã qua hết các bước chưa
+        if (doc.currentStepIndex >= doc.signSteps.length) {
+            doc.status = "APPROVED";
+        } else {
+            doc.currentStepIndex += 1;
+        }
+
+        await doc.save();
+
+        const updated = await ApprovalDocument.findById(doc._id)
+            .populate("creator", "name email avatar")
+            .populate("signSteps.assignee", "name email avatar position");
+
+        res.status(200).json({
+            success: true,
+            message: "Đã vào số và ban hành hồ sơ thành công!",
+            data: updated
+        });
+
+    } catch (error) {
+        console.error("Error issuing approval document:", error);
+        res.status(500).json({ success: false, message: "Lỗi máy chủ", error: error.message });
+    }
+};
+
 module.exports = {
     createApprovalDocument,
     getApprovalDocuments,
