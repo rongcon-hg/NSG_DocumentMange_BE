@@ -652,6 +652,7 @@ module.exports = {
     signAndApproveStep,
     rejectApprovalDocument,
     getPreviewPdfStream,
-    deleteApprovalDocument
+    deleteApprovalDocument,
+    issueApprovalDocument
 };
 
