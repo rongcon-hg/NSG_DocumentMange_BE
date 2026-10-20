@@ -899,6 +899,140 @@ async function updateDocument(req, res) {
         "createAt",
         "receivedAt",
       ];
+
+      // Nhãn mô tả các trường
+      const FIELD_LABELS = {
+        docNum: "Số văn bản",
+        docCode: "Ký hiệu văn bản",
+        shortDescription: "Trích yếu",
+        docVariant: "Loại văn bản",
+        urgency: "Độ khẩn",
+        deadlineDay: "Hạn xử lý",
+        createAt: "Ngày văn bản",
+        receivedAt: "Ngày nhận",
+        numOfPages: "Số trang",
+        year: "Năm văn bản",
+        principalIdea: "Bút phê",
+        note: "Ghi chú",
+        unit: "Cơ quan ban hành",
+        signer: "Người ký",
+        position: "Chức vụ người ký",
+        departments: "Đơn vị nhận",
+        executors: "Người/đơn vị xử lý",
+        assignedToUsers: "Người chủ trì/nhận việc",
+        saveAt: "Nơi lưu trữ"
+      };
+
+      // Xác định chính xác các trường thực sự thay đổi giá trị
+      const changedLabels = [];
+
+      for (const field of fieldsToUpdate) {
+        if (req.body[field] === undefined) continue;
+
+        let isChanged = false;
+        const oldVal = existingDocument[field];
+        const newVal = req.body[field];
+
+        if (field === "executors") {
+          let parsedNewExecutors = newVal;
+          if (typeof parsedNewExecutors === "string") {
+            try { parsedNewExecutors = JSON.parse(parsedNewExecutors); } catch (e) { parsedNewExecutors = []; }
+          }
+          if (Array.isArray(parsedNewExecutors)) {
+            const oldList = (Array.isArray(oldVal) ? oldVal : [])
+              .map(e => `${e.executorType || ""}|${e.executorId?._id || e.executorId || ""}`)
+              .sort();
+            const newList = parsedNewExecutors
+              .map(e => `${e.executorType || ""}|${e.executorId?._id || e.executorId || ""}`)
+              .sort();
+            if (oldList.length !== newList.length || oldList.some((val, idx) => val !== newList[idx])) {
+              isChanged = true;
+            }
+          }
+        } else if (field === "assignedToUsers") {
+          let parsedNewUsers = newVal;
+          if (typeof parsedNewUsers === "string") {
+            try { parsedNewUsers = JSON.parse(parsedNewUsers); } catch (e) { parsedNewUsers = []; }
+          }
+          if (Array.isArray(parsedNewUsers)) {
+            // So sánh danh sách người chủ trì (onTime !== null hoặc các user được chọn)
+            const oldHostList = (Array.isArray(oldVal) ? oldVal : [])
+              .filter(u => u.onTime !== null)
+              .map(u => String(u.userId?._id || u.userId || ""))
+              .sort();
+            const newHostList = parsedNewUsers
+              .map(u => String(u.userId?._id || u.userId || ""))
+              .sort();
+            if (oldHostList.length !== newHostList.length || oldHostList.some((val, idx) => val !== newHostList[idx])) {
+              isChanged = true;
+            }
+          }
+        } else if (field === "departments") {
+          let parsedNewDepts = newVal;
+          if (typeof parsedNewDepts === "string") {
+            try { parsedNewDepts = JSON.parse(parsedNewDepts); } catch (e) { parsedNewDepts = [parsedNewDepts]; }
+          }
+          if (!Array.isArray(parsedNewDepts)) parsedNewDepts = [parsedNewDepts];
+          const oldDeptList = (Array.isArray(oldVal) ? oldVal : [])
+            .map(d => String(d?._id || d || ""))
+            .sort();
+          const newDeptList = parsedNewDepts
+            .map(d => String(d?._id || d || ""))
+            .sort();
+          if (oldDeptList.length !== newDeptList.length || oldDeptList.some((val, idx) => val !== newDeptList[idx])) {
+            isChanged = true;
+          }
+        } else if (field === "deadlineDay") {
+          const oldDateStr = oldVal ? new Date(oldVal).toISOString().slice(0, 10) : "";
+          const newDateStr = (newVal && newVal !== "") ? new Date(newVal).toISOString().slice(0, 10) : "";
+          if (oldDateStr !== newDateStr) {
+            isChanged = true;
+          }
+        } else if (field === "createAt") {
+          const oldDateStr = oldVal ? new Date(oldVal).toISOString().slice(0, 10) : "";
+          const newDateStr = (newVal && newVal !== "") ? new Date(newVal).toISOString().slice(0, 10) : "";
+          if (oldDateStr !== newDateStr) {
+            isChanged = true;
+          }
+        } else if (field === "receivedAt") {
+          const oldDateStr = oldVal ? new Date(oldVal).toISOString().slice(0, 10) : "";
+          const newDateStr = (newVal && newVal !== "") ? new Date(newVal).toISOString().slice(0, 10) : "";
+          if (oldDateStr !== newDateStr) {
+            isChanged = true;
+          }
+        } else if (field === "docNum" || field === "numOfPages") {
+          const oldNum = Number(oldVal ?? 0);
+          const newNum = Number(newVal ?? 0);
+          if (oldNum !== newNum) {
+            isChanged = true;
+          }
+        } else if (["docVariant", "unit", "signer", "position", "sentBy"].includes(field)) {
+          if (field === "unit" && existingDocument.docType !== "received") {
+            // Văn bản đi không có unit
+            isChanged = false;
+          } else {
+            const oldId = String(oldVal?._id || oldVal || "");
+            const newId = String(newVal?._id || newVal || "");
+            if (oldId !== newId) {
+              isChanged = true;
+            }
+          }
+        } else {
+          // Chuỗi thông thường: docCode, shortDescription, note, urgency, saveAt, docType, year, principalIdea
+          const oldStr = String(oldVal ?? "").trim();
+          const newStr = String(newVal ?? "").trim();
+          if (oldStr !== newStr) {
+            isChanged = true;
+          }
+        }
+
+        if (isChanged) {
+          const label = FIELD_LABELS[field] || field;
+          if (!changedLabels.includes(label)) {
+            changedLabels.push(label);
+          }
+        }
+      }
   
       for (const field of fieldsToUpdate) {
         if (req.body[field] !== undefined) {
@@ -998,6 +1132,22 @@ async function updateDocument(req, res) {
           }
         }
   
+      // Kiểm tra file có thay đổi không
+      let filesChanged = false;
+      const oldFiles = existingDocument.files || [];
+      if (req.body.existingFiles) {
+        try {
+          const parsedExisting = JSON.parse(req.body.existingFiles);
+          if (Array.isArray(parsedExisting)) {
+            const oldFileIds = oldFiles.map(f => String(f.fileId)).sort();
+            const newFileIds = parsedExisting.map(f => String(f.fileId)).sort();
+            if (oldFileIds.length !== newFileIds.length || oldFileIds.some((id, idx) => id !== newFileIds[idx])) {
+              filesChanged = true;
+            }
+          }
+        } catch (e) {}
+      }
+
       // Handle file updates
       let updatedFiles = existingDocument.files || [];
   
@@ -1092,44 +1242,11 @@ async function updateDocument(req, res) {
         const actorName = req.user?.name || req.body.updaterName || "Người dùng";
         const actorRole = req.user?.role || "";
 
-        // Xác định các trường thay đổi
-        const changedLabels = [];
-        const FIELD_LABELS = {
-          docNum: "Số văn bản",
-          docCode: "Ký hiệu văn bản",
-          shortDescription: "Trích yếu",
-          docVariant: "Loại văn bản",
-          urgency: "Độ khẩn",
-          deadlineDay: "Hạn xử lý",
-          createAt: "Ngày văn bản",
-          receivedAt: "Ngày nhận",
-          numOfPages: "Số trang",
-          year: "Năm văn bản",
-          principalIdea: "Bút phê",
-          note: "Ghi chú",
-          unit: "Cơ quan ban hành",
-          signer: "Người ký",
-          position: "Chức vụ người ký",
-          departments: "Đơn vị nhận",
-          executors: "Người/đơn vị xử lý",
-          assignedToUsers: "Người chủ trì/nhận việc",
-          saveAt: "Nơi lưu trữ"
-        };
-
-        for (const field of fieldsToUpdate) {
-          if (req.body[field] !== undefined) {
-            const label = FIELD_LABELS[field] || field;
-            if (!changedLabels.includes(label)) {
-              changedLabels.push(label);
-            }
-          }
-        }
-
         const addedFilesCount = req.files ? req.files.length : 0;
         if (addedFilesCount > 0) {
           changedLabels.push(`Đính kèm thêm ${addedFilesCount} tệp mới`);
         }
-        if (req.body.existingFiles) {
+        if (filesChanged) {
           changedLabels.push("Cập nhật danh sách tệp đính kèm");
         }
 
@@ -1139,16 +1256,18 @@ async function updateDocument(req, res) {
             : "Điều chỉnh thông tin văn bản"
         );
 
-        existingDocument.history.push({
-          action: "Updated",
-          actor: actor || existingDocument.sentBy,
-          actorName: actorName,
-          actorRole: actorRole,
-          date: new Date(),
-          details: noteOrDetails,
-          note: req.body.historyNote || "",
-          changedFields: changedLabels
-        });
+        if (changedLabels.length > 0 || req.body.updateReason || req.body.historyNote) {
+          existingDocument.history.push({
+            action: "Updated",
+            actor: actor || existingDocument.sentBy,
+            actorName: actorName,
+            actorRole: actorRole,
+            date: new Date(),
+            details: noteOrDetails,
+            note: req.body.historyNote || "",
+            changedFields: changedLabels
+          });
+        }
       }
 
       await existingDocument.save();
