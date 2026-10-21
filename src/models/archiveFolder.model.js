@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 
 const archiveFileItemSchema = new mongoose.Schema({
   title: { type: String, required: true },
-  itemType: { type: String, enum: ['Document', 'Task', 'Attachment', 'Report'], default: 'Document' },
+  itemType: { type: String, default: 'Văn bản' },
   refId: { type: mongoose.Schema.Types.ObjectId, refPath: 'items.itemType' },
   documentNumber: { type: String, default: '' },
   date: { type: Date, default: Date.now },
