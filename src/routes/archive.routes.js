@@ -10,6 +10,8 @@ router.get('/:id', archiveController.getArchiveFolderById);
 router.post('/', archiveController.createArchiveFolder);
 router.put('/:id', archiveController.updateArchiveFolder);
 router.post('/:id/items', archiveController.addItemToFolder);
+router.put('/:id/items/:itemId', archiveController.updateItemInFolder);
+router.delete('/:id/items/:itemId', archiveController.removeItemFromFolder);
 router.put('/:id/status', archiveController.updateFolderStatus);
 router.delete('/:id', archiveController.deleteArchiveFolder);
 

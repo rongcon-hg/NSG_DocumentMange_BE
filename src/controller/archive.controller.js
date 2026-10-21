@@ -321,6 +321,70 @@ const updateFolderStatus = async (req, res) => {
 };
 
 /**
+ * Cập nhật thông tin 1 tài liệu thành phần trong hồ sơ
+ */
+const updateItemInFolder = async (req, res) => {
+  try {
+    const { id, itemId } = req.params;
+    const { title, itemType, documentNumber, pageCount, note, fileUrl } = req.body;
+
+    const folder = await ArchiveFolder.findById(id);
+    if (!folder) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy hồ sơ lưu trữ' });
+    }
+
+    const item = folder.items.id(itemId);
+    if (!item) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy tài liệu trong hồ sơ' });
+    }
+
+    if (title) item.title = title.trim();
+    if (itemType) item.itemType = itemType;
+    if (documentNumber !== undefined) item.documentNumber = documentNumber;
+    if (pageCount !== undefined) item.pageCount = pageCount;
+    if (note !== undefined) item.note = note;
+    if (fileUrl !== undefined) item.fileUrl = fileUrl;
+
+    await folder.save();
+
+    return res.json({
+      success: true,
+      message: 'Đã cập nhật tài liệu trong hồ sơ',
+      data: folder,
+    });
+  } catch (error) {
+    console.error('Lỗi updateItemInFolder:', error);
+    return res.status(500).json({ success: false, message: 'Lỗi khi cập nhật tài liệu trong hồ sơ' });
+  }
+};
+
+/**
+ * Xóa 1 tài liệu thành phần khỏi hồ sơ lưu trữ
+ */
+const removeItemFromFolder = async (req, res) => {
+  try {
+    const { id, itemId } = req.params;
+
+    const folder = await ArchiveFolder.findById(id);
+    if (!folder) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy hồ sơ lưu trữ' });
+    }
+
+    folder.items = folder.items.filter(item => item._id.toString() !== itemId.toString());
+    await folder.save();
+
+    return res.json({
+      success: true,
+      message: 'Đã xóa tài liệu khỏi danh mục hồ sơ',
+      data: folder,
+    });
+  } catch (error) {
+    console.error('Lỗi removeItemFromFolder:', error);
+    return res.status(500).json({ success: false, message: 'Lỗi khi xóa tài liệu khỏi hồ sơ' });
+  }
+};
+
+/**
  * Xóa hồ sơ (chỉ khi hồ sơ còn ở trạng thái OPEN hoặc DISCARDED)
  */
 const deleteArchiveFolder = async (req, res) => {
@@ -354,6 +418,8 @@ module.exports = {
   createArchiveFolder,
   updateArchiveFolder,
   addItemToFolder,
+  updateItemInFolder,
+  removeItemFromFolder,
   updateFolderStatus,
   deleteArchiveFolder,
 };
