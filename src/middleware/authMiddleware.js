@@ -67,6 +67,18 @@ const middlewareController = {
       }
     }
   )
+  },
+  // Cho phép Admin, Manager, Cấp trưởng, Cấp phó thiết lập cấu hình tuyến ký duyệt
+  verifyWorkflowManager:(req, res, next) => {
+    middlewareController.verifyToken(req, res, () => {
+      const role = (req.user?.role || "").toLowerCase();
+      const allowedRoles = ["admin", "manager", "captruong", "cappho", "staff"];
+      if (req.user && allowedRoles.includes(role)) {
+        next();
+      } else {
+        return res.status(403).json({ message: "Access denied - Bạn không có quyền thiết lập tuyến ký duyệt" });
+      }
+    });
   }
 };
 module.exports = middlewareController;

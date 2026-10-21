@@ -90,6 +90,13 @@ const userSchema = new mongoose.Schema({
         fileName: { type: String },
         mimeType: { type: String },
     },
+    digitalCertificate: {
+        subject: { type: String, default: "" },
+        issuer: { type: String, default: "" },
+        serialNumber: { type: String, default: "" },
+        validTo: { type: String, default: "" },
+        pin: { type: String, default: "" }, // Mã PIN thiết lập để đối soát khi ký
+    },
     emailNotifications: {
         docNew: { type: Boolean, default: true },
         docReview: { type: Boolean, default: true },

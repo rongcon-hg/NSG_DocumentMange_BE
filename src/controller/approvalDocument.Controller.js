@@ -299,55 +299,53 @@ const signAndApproveStep = async (req, res) => {
                 const posH = parseFloat(sig.height);
 
                 if (signatureMethod === "USB_TOKEN") {
-                    // Nếu là ký USB Token: Đóng dấu khung chứng thư số chuẩn điện tử
-                    const signerName = certificateInfo?.subject || user.name;
-                    const caName = certificateInfo?.issuer || "VNPT-CA";
-                    const signTimeStr = new Date().toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" });
-
-                    // Vẽ khung viền xanh / đỏ chứng thực
-                    targetPage.drawRectangle({
-                        x: posX,
-                        y: posY,
-                        width: posW,
-                        height: posH,
-                        borderColor: rgb(0.1, 0.45, 0.85),
-                        borderWidth: 1.5,
-                        color: rgb(0.96, 0.98, 1.0)
-                    });
-
-                    // Nếu có ảnh chữ ký, vẽ một góc
                     if (image) {
+                        // Nếu có ảnh chữ ký: Chỉ hiển thị ảnh chữ ký của người ký
                         targetPage.drawImage(image, {
-                            x: posX + 6,
-                            y: posY + (posH - 45) / 2,
-                            width: 50,
-                            height: 45
+                            x: posX,
+                            y: posY,
+                            width: posW,
+                            height: posH
+                        });
+                    } else {
+                        // Nếu không có ảnh chữ ký: Vẽ khung thông tin chứng thư số
+                        const signerName = certificateInfo?.subject || user.digitalCertificate?.subject || "TRƯỜNG CAO ĐẲNG BÁCH KHOA NAM SÀI GÒN";
+                        const caName = certificateInfo?.issuer || user.digitalCertificate?.issuer || "Viettel-CA SHA2";
+                        const signTimeStr = new Date().toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" });
+
+                        targetPage.drawRectangle({
+                            x: posX,
+                            y: posY,
+                            width: posW,
+                            height: posH,
+                            borderColor: rgb(0.1, 0.45, 0.85),
+                            borderWidth: 1.5,
+                            color: rgb(0.96, 0.98, 1.0)
+                        });
+
+                        const textOffsetX = posX + 8;
+                        targetPage.drawText("KY BOI: " + signerName.toUpperCase(), {
+                            x: textOffsetX,
+                            y: posY + posH - 16,
+                            size: 8.5,
+                            font: font,
+                            color: rgb(0.1, 0.35, 0.8)
+                        });
+                        targetPage.drawText("CHUNG THU SO: " + caName, {
+                            x: textOffsetX,
+                            y: posY + posH - 28,
+                            size: 7.5,
+                            font: regularFont,
+                            color: rgb(0.2, 0.2, 0.2)
+                        });
+                        targetPage.drawText("THOI GIAN: " + signTimeStr, {
+                            x: textOffsetX,
+                            y: posY + posH - 40,
+                            size: 7.5,
+                            font: regularFont,
+                            color: rgb(0.2, 0.2, 0.2)
                         });
                     }
-
-                    // Chèn văn bản chứng thực số
-                    const textOffsetX = image ? posX + 62 : posX + 8;
-                    targetPage.drawText("KY BOI: " + signerName.toUpperCase(), {
-                        x: textOffsetX,
-                        y: posY + posH - 16,
-                        size: 9,
-                        font: font,
-                        color: rgb(0.1, 0.35, 0.8)
-                    });
-                    targetPage.drawText("CHUNG THU SO: " + caName, {
-                        x: textOffsetX,
-                        y: posY + posH - 28,
-                        size: 7.5,
-                        font: regularFont,
-                        color: rgb(0.2, 0.2, 0.2)
-                    });
-                    targetPage.drawText("THOI GIAN: " + signTimeStr, {
-                        x: textOffsetX,
-                        y: posY + posH - 40,
-                        size: 7.5,
-                        font: regularFont,
-                        color: rgb(0.2, 0.2, 0.2)
-                    });
                 } else {
                     // Ký điện tử nội bộ thông thường
                     if (!image) {

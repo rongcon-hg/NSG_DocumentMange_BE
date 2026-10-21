@@ -134,9 +134,6 @@ const deleteWorkflow = async (req, res) => {
         if (!wf) {
             return res.status(404).json({ success: false, message: "Không tìm thấy tuyến ký duyệt" });
         }
-        if (wf.isDefault) {
-            return res.status(400).json({ success: false, message: "Không thể xóa quy trình mặc định" });
-        }
         await ApprovalWorkflowConfig.findByIdAndDelete(id);
         res.status(200).json({ success: true, message: "Đã xóa tuyến ký duyệt" });
     } catch (error) {
