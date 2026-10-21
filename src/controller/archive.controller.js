@@ -326,7 +326,7 @@ const updateFolderStatus = async (req, res) => {
 const updateItemInFolder = async (req, res) => {
   try {
     const { id, itemId } = req.params;
-    const { title, itemType, documentNumber, pageCount, note, fileUrl } = req.body;
+    const { title, itemType, documentNumber, date, pageCount, note, fileUrl } = req.body;
 
     const folder = await ArchiveFolder.findById(id);
     if (!folder) {
@@ -341,6 +341,7 @@ const updateItemInFolder = async (req, res) => {
     if (title) item.title = title.trim();
     if (itemType) item.itemType = itemType;
     if (documentNumber !== undefined) item.documentNumber = documentNumber;
+    if (date !== undefined) item.date = date ? new Date(date) : item.date;
     if (pageCount !== undefined) item.pageCount = pageCount;
     if (note !== undefined) item.note = note;
     if (fileUrl !== undefined) item.fileUrl = fileUrl;
@@ -370,7 +371,24 @@ const removeItemFromFolder = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Không tìm thấy hồ sơ lưu trữ' });
     }
 
-    folder.items = folder.items.filter(item => item._id.toString() !== itemId.toString());
+    // Dùng subdocument remove hoặc filter an toàn
+    if (folder.items && folder.items.id) {
+      const item = folder.items.id(itemId);
+      if (item) {
+        if (typeof item.deleteOne === 'function') {
+          item.deleteOne();
+        } else if (typeof item.remove === 'function') {
+          item.remove();
+        } else {
+          folder.items = folder.items.filter(it => it._id && it._id.toString() !== itemId.toString());
+        }
+      } else {
+        folder.items = folder.items.filter(it => it._id && it._id.toString() !== itemId.toString());
+      }
+    } else {
+      folder.items = folder.items.filter(it => it._id && it._id.toString() !== itemId.toString());
+    }
+
     await folder.save();
 
     return res.json({
@@ -380,7 +398,7 @@ const removeItemFromFolder = async (req, res) => {
     });
   } catch (error) {
     console.error('Lỗi removeItemFromFolder:', error);
-    return res.status(500).json({ success: false, message: 'Lỗi khi xóa tài liệu khỏi hồ sơ' });
+    return res.status(500).json({ success: false, message: error.message || 'Lỗi khi xóa tài liệu khỏi hồ sơ' });
   }
 };
 
