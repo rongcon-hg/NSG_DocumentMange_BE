@@ -8,7 +8,7 @@ const mongoose = require('mongoose');
  */
 const getArchiveFolders = async (req, res) => {
   try {
-    const { page = 1, limit = 20, academicYear, department, status, search } = req.query;
+    const { page = 1, limit = 100, academicYear, department, status, search, startDate, endDate } = req.query;
     const query = {};
 
     if (academicYear) query.academicYear = academicYear;
@@ -19,6 +19,18 @@ const getArchiveFolders = async (req, res) => {
         { title: { $regex: search, $options: 'i' } },
         { folderCode: { $regex: search, $options: 'i' } },
       ];
+    }
+
+    if (startDate || endDate) {
+      query.createdAt = {};
+      if (startDate) {
+        query.createdAt.$gte = new Date(startDate);
+      }
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        query.createdAt.$lte = end;
+      }
     }
 
     // Phân quyền theo quy chuẩn và phạm vi truy cập (accessScope):
