@@ -1,6 +1,7 @@
 const ArchiveFolder = require('../models/archiveFolder.model');
 const Document = require('../models/document.model');
 const Task = require('../models/task.model');
+const Department = require('../models/department.model');
 const mongoose = require('mongoose');
 
 /**
@@ -442,6 +443,126 @@ const deleteArchiveFolder = async (req, res) => {
   }
 };
 
+/**
+ * Nhập danh mục hồ sơ hàng loạt từ Excel
+ */
+const batchImportArchiveFolders = async (req, res) => {
+  try {
+    const { folders } = req.body;
+    if (!folders || !Array.isArray(folders) || folders.length === 0) {
+      return res.status(400).json({ success: false, message: 'Dữ liệu hồ sơ import không hợp lệ hoặc rỗng' });
+    }
+
+    // Load tất cả phòng ban để map ID
+    const departments = await Department.find({}).lean();
+    const deptMap = new Map();
+    departments.forEach((dept) => {
+      if (dept.departmentName) {
+        deptMap.set(dept.departmentName.trim().toLowerCase(), dept._id);
+      }
+      if (dept.name) {
+        deptMap.set(dept.name.trim().toLowerCase(), dept._id);
+      }
+      if (dept.departmentCode) {
+        deptMap.set(dept.departmentCode.trim().toLowerCase(), dept._id);
+      }
+      if (dept.code) {
+        deptMap.set(dept.code.trim().toLowerCase(), dept._id);
+      }
+    });
+
+    const results = {
+      total: folders.length,
+      successCount: 0,
+      failedCount: 0,
+      errors: [],
+      created: [],
+    };
+
+    const validRetentionPeriods = ['Vĩnh viễn', '70 năm', '50 năm', '20 năm', '10 năm', '5 năm'];
+
+    for (let i = 0; i < folders.length; i++) {
+      const item = folders[i];
+      const rowNum = i + 1;
+      const folderCode = (item.folderCode || '').trim();
+      const title = (item.title || '').trim();
+
+      if (!folderCode) {
+        results.failedCount++;
+        results.errors.push(`Dòng ${rowNum}: Thiếu mã hồ sơ`);
+        continue;
+      }
+
+      if (!title) {
+        results.failedCount++;
+        results.errors.push(`Dòng ${rowNum} (${folderCode}): Thiếu tiêu đề hồ sơ`);
+        continue;
+      }
+
+      // Kiểm tra trùng lặp mã hồ sơ
+      const existing = await ArchiveFolder.findOne({ folderCode });
+      if (existing) {
+        results.failedCount++;
+        results.errors.push(`Dòng ${rowNum} (${folderCode}): Mã hồ sơ đã tồn tại trong hệ thống`);
+        continue;
+      }
+
+      // Xử lý đơn vị
+      let deptId = null;
+      if (item.department) {
+        const rawDept = String(item.department).trim().toLowerCase();
+        deptId = deptMap.get(rawDept) || null;
+      }
+      if (!deptId) {
+        deptId = req.user?.department || null;
+      }
+
+      // Xử lý thời hạn bảo quản
+      let retentionPeriod = (item.retentionPeriod || '10 năm').trim();
+      if (!validRetentionPeriods.includes(retentionPeriod)) {
+        // Cố gắng chuẩn hóa
+        const matched = validRetentionPeriods.find(p => p.toLowerCase().includes(retentionPeriod.toLowerCase()));
+        retentionPeriod = matched || '10 năm';
+      }
+
+      // Xử lý phạm vi truy cập
+      let accessScope = 'DEPARTMENT';
+      const rawScope = String(item.accessScope || '').trim().toUpperCase();
+      if (rawScope.includes('PUBLIC') || rawScope.includes('TOÀN') || rawScope.includes('CÔNG KHAI')) {
+        accessScope = 'PUBLIC';
+      } else if (rawScope.includes('RESTRICTED') || rawScope.includes('CHỈ ĐỊNH') || rawScope.includes('GIỚI HẠN')) {
+        accessScope = 'RESTRICTED';
+      }
+
+      const newFolder = new ArchiveFolder({
+        folderCode,
+        title,
+        academicYear: item.academicYear || '2025-2026',
+        retentionPeriod,
+        department: deptId,
+        creator: req.user?._id,
+        status: 'OPEN',
+        accessScope,
+        description: item.description || '',
+        items: [],
+      });
+
+      await newFolder.save();
+      results.successCount++;
+      results.created.push(newFolder);
+    }
+
+    return res.json({
+      success: true,
+      message: `Đã import thành công ${results.successCount}/${results.total} hồ sơ`,
+      data: results,
+    });
+  } catch (error) {
+    console.error('Lỗi batchImportArchiveFolders:', error);
+    return res.status(500).json({ success: false, message: error.message || 'Lỗi xử lý import hồ sơ lưu trữ' });
+  }
+};
+
 module.exports = {
   getArchiveFolders,
   getArchiveFolderById,
@@ -452,4 +573,5 @@ module.exports = {
   removeItemFromFolder,
   updateFolderStatus,
   deleteArchiveFolder,
+  batchImportArchiveFolders,
 };
