@@ -319,34 +319,39 @@ const updateArchiveFolder = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Hồ sơ đã nhập kho lưu trữ cơ quan, chỉ Quản trị viên/Văn thư mới được điều chỉnh.' });
     }
 
-    if (title) folder.title = title.trim();
-    if (academicYear) folder.academicYear = academicYear;
-    if (retentionPeriod) folder.retentionPeriod = retentionPeriod;
-    if (description !== undefined) folder.description = description;
-    if (accessScope) folder.accessScope = accessScope;
+    const updateFields = {};
+    if (title) updateFields.title = title.trim();
+    if (academicYear) updateFields.academicYear = academicYear;
+    if (retentionPeriod) updateFields.retentionPeriod = retentionPeriod;
+    if (description !== undefined) updateFields.description = description;
+    if (accessScope) updateFields.accessScope = accessScope;
+
     if (allowedDepartments !== undefined) {
-      folder.allowedDepartments = Array.isArray(allowedDepartments)
-        ? allowedDepartments.filter(d => mongoose.Types.ObjectId.isValid(d))
+      updateFields.allowedDepartments = Array.isArray(allowedDepartments)
+        ? allowedDepartments.filter(d => d && mongoose.Types.ObjectId.isValid(d))
         : [];
     }
     if (allowedUsers !== undefined) {
-      folder.allowedUsers = Array.isArray(allowedUsers)
-        ? allowedUsers.filter(u => mongoose.Types.ObjectId.isValid(u))
+      updateFields.allowedUsers = Array.isArray(allowedUsers)
+        ? allowedUsers.filter(u => u && mongoose.Types.ObjectId.isValid(u))
         : [];
     }
+
     if (status && isAdminOrManager) {
-      folder.status = status;
+      updateFields.status = status;
       if (status === 'ARCHIVED') {
-        folder.archivedAt = folder.archivedAt || new Date();
-        folder.closedAt = folder.closedAt || new Date();
+        updateFields.archivedAt = folder.archivedAt || new Date();
+        updateFields.closedAt = folder.closedAt || new Date();
       } else if (status === 'SUBMITTED') {
-        folder.closedAt = folder.closedAt || new Date();
+        updateFields.closedAt = folder.closedAt || new Date();
       }
     }
 
-    await folder.save();
-
-    const updated = await ArchiveFolder.findById(id)
+    const updated = await ArchiveFolder.findByIdAndUpdate(
+      id,
+      { $set: updateFields },
+      { new: true, runValidators: true }
+    )
       .populate('creator', 'name email role position')
       .populate('department', 'departmentName')
       .populate('allowedDepartments', 'departmentName');
