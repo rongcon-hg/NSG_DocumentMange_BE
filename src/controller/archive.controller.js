@@ -163,17 +163,30 @@ const createArchiveFolder = async (req, res) => {
       return res.status(400).json({ success: false, message: `Mã hồ sơ "${folderCode}" đã tồn tại trên hệ thống!` });
     }
 
+    let deptId = department || req.user?.department;
+    if (deptId && !mongoose.Types.ObjectId.isValid(deptId)) {
+      deptId = null;
+    }
+
+    const cleanAllowedDepts = Array.isArray(allowedDepartments)
+      ? allowedDepartments.filter(d => d && mongoose.Types.ObjectId.isValid(d))
+      : [];
+
+    const cleanAllowedUsers = Array.isArray(allowedUsers)
+      ? allowedUsers.filter(u => u && mongoose.Types.ObjectId.isValid(u))
+      : [];
+
     const newFolder = await ArchiveFolder.create({
       folderCode: folderCode.trim(),
       title: title.trim(),
       academicYear: academicYear || `${new Date().getFullYear()}-${new Date().getFullYear() + 1}`,
       retentionPeriod: retentionPeriod || '10 năm',
-      department: department || req.user?.department,
+      department: deptId,
       creator: userId,
       description: description || '',
       accessScope: accessScope || 'DEPARTMENT',
-      allowedDepartments: Array.isArray(allowedDepartments) ? allowedDepartments : [],
-      allowedUsers: Array.isArray(allowedUsers) ? allowedUsers : [],
+      allowedDepartments: cleanAllowedDepts,
+      allowedUsers: cleanAllowedUsers,
       status: 'OPEN',
     });
 
