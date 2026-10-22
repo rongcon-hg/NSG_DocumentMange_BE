@@ -354,7 +354,7 @@ const updateArchiveFolder = async (req, res) => {
     });
   } catch (error) {
     console.error('Lỗi updateArchiveFolder:', error);
-    return res.status(500).json({ success: false, message: 'Lỗi khi cập nhật hồ sơ lưu trữ' });
+    return res.status(500).json({ success: false, message: error.message || 'Lỗi khi cập nhật hồ sơ lưu trữ' });
   }
 };
 
