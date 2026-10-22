@@ -325,10 +325,14 @@ const updateArchiveFolder = async (req, res) => {
     if (description !== undefined) folder.description = description;
     if (accessScope) folder.accessScope = accessScope;
     if (allowedDepartments !== undefined) {
-      folder.allowedDepartments = Array.isArray(allowedDepartments) ? allowedDepartments : [];
+      folder.allowedDepartments = Array.isArray(allowedDepartments)
+        ? allowedDepartments.filter(d => mongoose.Types.ObjectId.isValid(d))
+        : [];
     }
     if (allowedUsers !== undefined) {
-      folder.allowedUsers = Array.isArray(allowedUsers) ? allowedUsers : [];
+      folder.allowedUsers = Array.isArray(allowedUsers)
+        ? allowedUsers.filter(u => mongoose.Types.ObjectId.isValid(u))
+        : [];
     }
     if (status && isAdminOrManager) {
       folder.status = status;
