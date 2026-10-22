@@ -60,8 +60,11 @@ const getArchiveFolders = async (req, res) => {
     }
 
     if (userRole === "manager" || userRole === "admin") {
-      // Manager/Admin thấy hồ sơ của chính mình + tất cả hồ sơ đã nộp lưu (SUBMITTED) hoặc đã duyệt kho (ARCHIVED) + các hồ sơ được cấp quyền
-      accessConditions.push({ status: { $in: ["SUBMITTED", "ARCHIVED"] } });
+      // Manager/Admin thấy hồ sơ của chính mình + tất cả hồ sơ đã nộp lưu/kho của cơ quan (ngoại trừ hồ sơ cá nhân PERSONAL của người khác)
+      accessConditions.push({ 
+        status: { $in: ["SUBMITTED", "ARCHIVED"] },
+        accessScope: { $ne: 'PERSONAL' }
+      });
     }
 
     if (query.$or) {
@@ -589,7 +592,9 @@ const batchImportArchiveFolders = async (req, res) => {
       // Xử lý phạm vi truy cập
       let accessScope = 'DEPARTMENT';
       const rawScope = String(item.accessScope || '').trim().toUpperCase();
-      if (rawScope.includes('PUBLIC') || rawScope.includes('TOÀN') || rawScope.includes('CÔNG KHAI')) {
+      if (rawScope.includes('PERSONAL') || rawScope.includes('CÁ NHÂN') || rawScope.includes('RIÊNG')) {
+        accessScope = 'PERSONAL';
+      } else if (rawScope.includes('PUBLIC') || rawScope.includes('TOÀN') || rawScope.includes('CÔNG KHAI')) {
         accessScope = 'PUBLIC';
       } else if (rawScope.includes('RESTRICTED') || rawScope.includes('CHỈ ĐỊNH') || rawScope.includes('GIỚI HẠN')) {
         accessScope = 'RESTRICTED';

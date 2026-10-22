@@ -53,9 +53,9 @@ const archiveFolderSchema = new mongoose.Schema({
   description: { type: String, default: '' },
   accessScope: {
     type: String,
-    enum: ['PUBLIC', 'DEPARTMENT', 'RESTRICTED'],
+    enum: ['PUBLIC', 'DEPARTMENT', 'RESTRICTED', 'PERSONAL'],
     default: 'DEPARTMENT',
-  }, // PUBLIC: Toàn trường xem được, DEPARTMENT: Chỉ đơn vị nộp lưu, RESTRICTED: Chỉ người được chỉ định & BGH
+  }, // PUBLIC: Toàn trường, DEPARTMENT: Đơn vị nội bộ, RESTRICTED: Chỉ định, PERSONAL: Hồ sơ cá nhân
   allowedDepartments: [
     {
       type: mongoose.Schema.Types.ObjectId,
