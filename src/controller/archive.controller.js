@@ -229,6 +229,67 @@ const addItemToFolder = async (req, res) => {
 };
 
 /**
+ * Thêm hàng loạt tài liệu thành phần vào hồ sơ từ file Excel
+ */
+const batchImportItemsToFolder = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { items } = req.body;
+
+    const folder = await ArchiveFolder.findById(id);
+    if (!folder) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy hồ sơ lưu trữ' });
+    }
+
+    if (folder.status === 'ARCHIVED' && req.user?.role !== 'admin') {
+      return res.status(400).json({ success: false, message: 'Hồ sơ đã nhập kho, không thể bổ sung tài liệu.' });
+    }
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ success: false, message: 'Dữ liệu tài liệu rỗng hoặc không hợp lệ' });
+    }
+
+    let addedCount = 0;
+    for (const it of items) {
+      const title = (it.title || '').trim();
+      if (!title) continue;
+
+      let dateVal = new Date();
+      if (it.date) {
+        const parsed = new Date(it.date);
+        if (!isNaN(parsed.getTime())) {
+          dateVal = parsed;
+        }
+      }
+
+      folder.items.push({
+        title,
+        documentNumber: (it.documentNumber || '').trim(),
+        date: dateVal,
+        itemType: (it.itemType || 'Document').trim(),
+        pageCount: Number(it.pageCount) > 0 ? Number(it.pageCount) : 1,
+        author: (it.author || '').trim(),
+        fileUrl: (it.fileUrl || '').trim(),
+        fileId: (it.fileId || '').trim(),
+        note: (it.note || '').trim(),
+      });
+      addedCount++;
+    }
+
+    await folder.save();
+
+    return res.json({
+      success: true,
+      message: `Đã import thành công ${addedCount} tài liệu vào hồ sơ`,
+      data: folder,
+    });
+  } catch (error) {
+    console.error('Lỗi batchImportItemsToFolder:', error);
+    return res.status(500).json({ success: false, message: error.message || 'Lỗi khi import tài liệu thành phần' });
+  }
+};
+
+/**
  * Cập nhật thông tin hồ sơ (tiêu đề, thời hạn, phạm vi truy cập, đơn vị được xem...)
  */
 const updateArchiveFolder = async (req, res) => {
@@ -574,4 +635,5 @@ module.exports = {
   updateFolderStatus,
   deleteArchiveFolder,
   batchImportArchiveFolders,
+  batchImportItemsToFolder,
 };
