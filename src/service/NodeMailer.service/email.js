@@ -11,6 +11,8 @@ const {
     ONLINE_RECORD_STATUS_EMAIL_TEMPLATE,
     QUARTERLY_PLAN_REMINDER_EMAIL_TEMPLATE,
     MEETING_REMINDER_EMAIL_TEMPLATE,
+    WORK_SCHEDULE_REGISTRATION_EMAIL_TEMPLATE,
+    WORK_SCHEDULE_STATUS_EMAIL_TEMPLATE,
 } = require("./emailTemplate");
 const nodemailer = require("nodemailer");
 const dotenv = require("dotenv");
@@ -1294,6 +1296,132 @@ const sendMeetingReminderEmail = async (recipientEmails, meeting, reminderType =
     }
 };
 
+/**
+ * Gửi email thông báo cho BGH khi có người dùng đăng ký lịch công tác mới
+ */
+const sendWorkScheduleRegistrationEmail = async (schedule, approverUser, creatorUser) => {
+    try {
+        if (!approverUser || !approverUser.email) return false;
+
+        const { transporter, sender, brandName } = await getTransporterAndSender();
+
+        const startDateStr = formatVietnamDate(schedule.startDate);
+        const endDateStr = formatVietnamDate(schedule.endDate);
+        const dateStr = startDateStr === endDateStr ? startDateStr : `${startDateStr} - ${endDateStr}`;
+        const timeDisplay = schedule.startTime && schedule.endTime
+            ? `${schedule.startTime} - ${schedule.endTime}, ${dateStr}`
+            : schedule.startTime
+            ? `Từ ${schedule.startTime}, ${dateStr}`
+            : dateStr;
+
+        const notesHtml = schedule.notes
+            ? `<p style="margin: 6px 0;"><strong>Ghi chú:</strong> <span style="color: #64748b; font-style: italic;">${schedule.notes}</span></p>`
+            : "";
+
+        const creatorDept = creatorUser?.department?.departmentName || creatorUser?.departmentName || "Trường CĐ Nam Sài Gòn";
+        const createdAtStr = formatVietnamDateTime(schedule.createdAt || Date.now());
+
+        let htmlContent = WORK_SCHEDULE_REGISTRATION_EMAIL_TEMPLATE
+            .replace(/{approverName}/g, approverUser.name || "Thầy/Cô Ban Giám Hiệu")
+            .replace(/{timeDisplay}/g, timeDisplay)
+            .replace(/{content}/g, schedule.content || "Chưa có nội dung")
+            .replace(/{host}/g, schedule.host || "Ban Giám Hiệu")
+            .replace(/{participants}/g, schedule.participants || "Không có thông tin")
+            .replace(/{location}/g, schedule.location || "Chưa xác định")
+            .replace(/{notesHtml}/g, notesHtml)
+            .replace(/{creatorName}/g, creatorUser?.name || "Người dùng")
+            .replace(/{creatorDepartment}/g, creatorDept)
+            .replace(/{createdAtStr}/g, createdAtStr);
+
+        const subject = `[${brandName} - Đăng ký lịch công tác] ${schedule.content ? schedule.content.substring(0, 60) : 'Lịch mới'} - ${dateStr}`;
+
+        const mailOptions = {
+            from: sender,
+            to: approverUser.email,
+            subject: subject,
+            html: applySystemBranding(htmlContent, brandName),
+        };
+
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`[Email] Đã gửi thông báo đăng ký lịch công tác tới ${approverUser.email}:`, info?.messageId);
+        return true;
+    } catch (error) {
+        console.error("Error in sendWorkScheduleRegistrationEmail:", error);
+        return false;
+    }
+};
+
+/**
+ * Gửi email thông báo cho người đăng ký lịch công tác khi BGH phê duyệt hoặc từ chối
+ */
+const sendWorkScheduleStatusEmail = async (schedule, creatorUser, approverUser, status, rejectionReason = "") => {
+    try {
+        if (!creatorUser || !creatorUser.email) return false;
+
+        const { transporter, sender, brandName } = await getTransporterAndSender();
+
+        const isApproved = status === "APPROVED";
+        const headerTitle = isApproved ? "Lịch Công Tác Đã Được Phê Duyệt" : "Lịch Công Tác Chưa Được Phê Duyệt";
+        const headerColorStart = isApproved ? "#10b981" : "#ef4444";
+        const headerColorEnd = isApproved ? "#047857" : "#b91c1c";
+        const headerBorderColor = isApproved ? "#059669" : "#dc2626";
+
+        const statusBadgeHtml = isApproved
+            ? `<span style="background-color: #d1fae5; color: #065f46; font-weight: bold; padding: 3px 10px; border-radius: 4px; border: 1px solid #a7f3d0; font-size: 13px;">✓ Đã phê duyệt</span>`
+            : `<span style="background-color: #fee2e2; color: #991b1b; font-weight: bold; padding: 3px 10px; border-radius: 4px; border: 1px solid #fecaca; font-size: 13px;">✕ Chưa được duyệt (Từ chối)</span>`;
+
+        const rejectionReasonHtml = (!isApproved && rejectionReason)
+            ? `<div style="margin: 12px 0; padding: 12px; background-color: #fff1f2; border: 1px solid #fecdd3; border-radius: 6px;">
+                 <p style="margin: 0; color: #be123c; font-weight: bold; font-size: 13px;">Lý do từ chối / Ý kiến chỉ đạo:</p>
+                 <p style="margin: 6px 0 0 0; color: #9f1239; font-size: 13px;">${rejectionReason}</p>
+               </div>`
+            : "";
+
+        const startDateStr = formatVietnamDate(schedule.startDate);
+        const endDateStr = formatVietnamDate(schedule.endDate);
+        const dateStr = startDateStr === endDateStr ? startDateStr : `${startDateStr} - ${endDateStr}`;
+        const timeDisplay = schedule.startTime && schedule.endTime
+            ? `${schedule.startTime} - ${schedule.endTime}, ${dateStr}`
+            : schedule.startTime
+            ? `Từ ${schedule.startTime}, ${dateStr}`
+            : dateStr;
+
+        const processedAtStr = formatVietnamDateTime(schedule.approvedAt || Date.now());
+
+        let htmlContent = WORK_SCHEDULE_STATUS_EMAIL_TEMPLATE
+            .replace(/{headerTitle}/g, headerTitle)
+            .replace(/{headerColorStart}/g, headerColorStart)
+            .replace(/{headerColorEnd}/g, headerColorEnd)
+            .replace(/{headerBorderColor}/g, headerBorderColor)
+            .replace(/{creatorName}/g, creatorUser.name || "Thầy/Cô")
+            .replace(/{statusBadgeHtml}/g, statusBadgeHtml)
+            .replace(/{timeDisplay}/g, timeDisplay)
+            .replace(/{content}/g, schedule.content || "Chưa có nội dung")
+            .replace(/{host}/g, schedule.host || "Ban Giám Hiệu")
+            .replace(/{location}/g, schedule.location || "Chưa xác định")
+            .replace(/{rejectionReasonHtml}/g, rejectionReasonHtml)
+            .replace(/{approverName}/g, approverUser?.name || "Ban Giám Hiệu")
+            .replace(/{processedAtStr}/g, processedAtStr);
+
+        const statusPrefix = isApproved ? "Đã phê duyệt" : "Từ chối duyệt";
+        const subject = `[${brandName} - ${statusPrefix}] Lịch công tác: ${schedule.content ? schedule.content.substring(0, 50) : ''} (${dateStr})`;
+
+        const mailOptions = {
+            from: sender,
+            to: creatorUser.email,
+            subject: subject,
+            html: applySystemBranding(htmlContent, brandName),
+        };
+
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`[Email] Đã gửi thông báo kết quả duyệt lịch tới ${creatorUser.email}:`, info?.messageId);
+        return true;
+    } catch (error) {
+        console.error("Error in sendWorkScheduleStatusEmail:", error);
+        return false;
+    }
+};
+
 module.exports = {
     sentTempPassword,
     sendRestoreOtpEmail,
@@ -1309,4 +1437,6 @@ module.exports = {
     sendOnlineRecordStatusEmail,
     sendQuarterlyPlanReminderEmail,
     sendMeetingReminderEmail,
+    sendWorkScheduleRegistrationEmail,
+    sendWorkScheduleStatusEmail,
 };

@@ -507,6 +507,97 @@ const QUARTERLY_PLAN_REMINDER_EMAIL_TEMPLATE = `
 </html>
 `;
 
+const WORK_SCHEDULE_REGISTRATION_EMAIL_TEMPLATE = `
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Đăng Ký Lịch Công Tác Mới Chờ Phê Duyệt</title>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 650px; margin: 0 auto; padding: 20px;">
+  <div style="background: linear-gradient(to right, #0284c7, #0369a1); padding: 22px; text-align: center; border-radius: 8px 8px 0 0;">
+    <h1 style="color: #fff; margin: 0; font-size: 20px; text-transform: uppercase; letter-spacing: 0.5px;">Lịch Công Tác Chờ Ban Giám Hiệu Phê Duyệt</h1>
+  </div>
+  <div style="background-color: #f8fafc; padding: 24px; border-radius: 0 0 8px 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid #e2e8f0; border-top: none;">
+    <p>Kính gửi: <strong>{approverName}</strong>,</p>
+    <p>{systemName} xin thông báo có một đề xuất đăng ký lịch công tác mới gửi đến Thầy/Cô phê duyệt:</p>
+    
+    <div style="background: #fff; padding: 18px; border-left: 4px solid #0284c7; margin: 20px 0; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+      <p style="margin: 6px 0;"><strong>Thời gian:</strong> <span style="font-weight: bold; color: #b91c1c; font-size: 15px;">{timeDisplay}</span></p>
+      <p style="margin: 6px 0;"><strong>Nội dung công tác:</strong> <span style="font-weight: 600; color: #0f172a;">{content}</span></p>
+      <p style="margin: 6px 0;"><strong>Chủ trì:</strong> <span style="color: #475569; font-weight: 600;">{host}</span></p>
+      <p style="margin: 6px 0;"><strong>Thành phần tham dự:</strong> {participants}</p>
+      <p style="margin: 6px 0;"><strong>Địa điểm:</strong> <span style="color: #1e293b; font-weight: 600;">{location}</span></p>
+      {notesHtml}
+      
+      <div style="margin-top: 14px; padding-top: 12px; border-top: 1px dashed #cbd5e1; font-size: 13px;">
+        <p style="margin: 4px 0;"><strong>Người đăng ký:</strong> <span style="color: #0369a1; font-weight: bold;">{creatorName}</span> ({creatorDepartment})</p>
+        <p style="margin: 4px 0;"><strong>Thời điểm gửi:</strong> {createdAtStr}</p>
+      </div>
+    </div>
+
+    <div style="text-align: center; margin: 25px 0;">
+      <a href="https://qlvb.namsaigon.edu.vn/work-schedule?tab=pending" target="_blank" style="background-color: #0284c7; color: #ffffff; padding: 12px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block; box-shadow: 0 2px 4px rgba(0,0,0,0.15); font-size: 14px;">
+        Truy Cập Phê Duyệt Lịch Công Tác
+      </a>
+    </div>
+
+    <p style="font-size: 13px; color: #64748b;">Kính đề nghị Thầy/Cô đăng nhập hệ thống để xem xét, phê duyệt hoặc có ý kiến chỉ đạo đối với lịch công tác trên.</p>
+    <p style="margin-top: 20px;">Trân trọng,<br><strong>{systemName}</strong></p>
+  </div>
+  <div style="text-align: center; margin-top: 15px; color: #888; font-size: 11px;">
+    <p>Đây là thông báo tự động từ {systemName}, vui lòng không trả lời trực tiếp email này.</p>
+  </div>
+</body>
+</html>
+`;
+
+const WORK_SCHEDULE_STATUS_EMAIL_TEMPLATE = `
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Kết Quả Phê Duyệt Lịch Công Tác</title>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 650px; margin: 0 auto; padding: 20px;">
+  <div style="background: linear-gradient(to right, {headerColorStart}, {headerColorEnd}); padding: 22px; text-align: center; border-radius: 8px 8px 0 0;">
+    <h1 style="color: #fff; margin: 0; font-size: 20px; text-transform: uppercase; letter-spacing: 0.5px;">{headerTitle}</h1>
+  </div>
+  <div style="background-color: #f8fafc; padding: 24px; border-radius: 0 0 8px 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid #e2e8f0; border-top: none;">
+    <p>Kính gửi: <strong>{creatorName}</strong>,</p>
+    <p>{systemName} xin thông báo về trạng thái phê duyệt lịch công tác do Thầy/Cô đăng ký:</p>
+    
+    <div style="background: #fff; padding: 18px; border-left: 4px solid {headerBorderColor}; margin: 20px 0; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+      <p style="margin: 6px 0;"><strong>Trạng thái:</strong> {statusBadgeHtml}</p>
+      <p style="margin: 6px 0;"><strong>Thời gian:</strong> <span style="font-weight: bold; color: #b91c1c; font-size: 15px;">{timeDisplay}</span></p>
+      <p style="margin: 6px 0;"><strong>Nội dung công tác:</strong> <span style="font-weight: 600; color: #0f172a;">{content}</span></p>
+      <p style="margin: 6px 0;"><strong>Chủ trì:</strong> <span style="color: #475569; font-weight: 600;">{host}</span></p>
+      <p style="margin: 6px 0;"><strong>Địa điểm:</strong> <span style="color: #1e293b; font-weight: 600;">{location}</span></p>
+      
+      {rejectionReasonHtml}
+
+      <div style="margin-top: 14px; padding-top: 12px; border-top: 1px dashed #cbd5e1; font-size: 13px;">
+        <p style="margin: 4px 0;"><strong>Người xử lý:</strong> <span style="color: #0f172a; font-weight: bold;">{approverName}</span></p>
+        <p style="margin: 4px 0;"><strong>Thời gian phản hồi:</strong> {processedAtStr}</p>
+      </div>
+    </div>
+
+    <div style="text-align: center; margin: 25px 0;">
+      <a href="https://qlvb.namsaigon.edu.vn/work-schedule?tab=my_registered" target="_blank" style="background-color: {headerBorderColor}; color: #ffffff; padding: 12px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block; box-shadow: 0 2px 4px rgba(0,0,0,0.15); font-size: 14px;">
+        Xem Lịch Công Tác Của Tôi
+      </a>
+    </div>
+
+    <p style="font-size: 13px; color: #64748b;">Vui lòng đăng nhập hệ thống để theo dõi thông tin chi tiết hoặc cập nhật lại lịch (nếu bị từ chối/cần điều chỉnh).</p>
+    <p style="margin-top: 20px;">Trân trọng,<br><strong>{systemName}</strong></p>
+  </div>
+  <div style="text-align: center; margin-top: 15px; color: #888; font-size: 11px;">
+    <p>Đây là thông báo tự động từ {systemName}, vui lòng không trả lời trực tiếp email này.</p>
+  </div>
+</body>
+</html>
+`;
+
 const MEETING_REMINDER_EMAIL_TEMPLATE = `
 <!DOCTYPE html>
 <html lang="vi">
@@ -569,6 +660,8 @@ module.exports = {
   ONLINE_RECORD_STATUS_EMAIL_TEMPLATE,
   QUARTERLY_PLAN_REMINDER_EMAIL_TEMPLATE,
   MEETING_REMINDER_EMAIL_TEMPLATE,
+  WORK_SCHEDULE_REGISTRATION_EMAIL_TEMPLATE,
+  WORK_SCHEDULE_STATUS_EMAIL_TEMPLATE,
 };
 
 

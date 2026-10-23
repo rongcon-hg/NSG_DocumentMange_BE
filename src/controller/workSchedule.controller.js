@@ -3,6 +3,10 @@ const User = require("../models/user.model");
 const Department = require("../models/department.model");
 const Position = require("../models/position.model");
 const Notification = require("../models/notification.model");
+const {
+  sendWorkScheduleRegistrationEmail,
+  sendWorkScheduleStatusEmail,
+} = require("../service/NodeMailer.service/email");
 
 /**
  * Helper: Lấy danh sách ID người dùng thuộc Ban Giám Hiệu và Manager/Admin
@@ -509,7 +513,7 @@ exports.createWorkSchedule = async (req, res) => {
     await newSchedule.save();
 
 
-    // Nếu là Đăng ký lịch (chờ duyệt): Chỉ gửi thông báo đến đúng người BGH được chọn duyệt (hoặc Admin/Manager nếu không chọn cụ thể)
+    // Nếu là Đăng ký lịch (chờ duyệt): Gửi thông báo trên web và qua Email đến đúng người BGH được chọn duyệt
     if (!isDirectAdd) {
       try {
         let recipientIds = [];
@@ -542,6 +546,17 @@ exports.createWorkSchedule = async (req, res) => {
             });
           });
         await Promise.allSettled(notifyPromises);
+
+        // Gửi Email thông báo đến người duyệt
+        if (targetApprover) {
+          User.findById(targetApprover).select("name email").then((approverUser) => {
+            if (approverUser && approverUser.email) {
+              sendWorkScheduleRegistrationEmail(newSchedule, approverUser, currentUser).catch((e) =>
+                console.warn("Lỗi gửi email đăng ký lịch:", e.message)
+              );
+            }
+          }).catch((e) => console.warn("Lỗi lấy thông tin approver gửi mail:", e.message));
+        }
       } catch (notifyErr) {
         console.warn("Không thể gửi thông báo duyệt lịch:", notifyErr.message);
       }
@@ -700,6 +715,17 @@ exports.updateWorkSchedule = async (req, res) => {
             });
           });
         await Promise.allSettled(notifyPromises);
+
+        // Gửi email thông báo cập nhật lại lịch cho người duyệt
+        if (schedule.targetApprover) {
+          User.findById(schedule.targetApprover).select("name email").then((approverUser) => {
+            if (approverUser && approverUser.email) {
+              sendWorkScheduleRegistrationEmail(schedule, approverUser, currentUser).catch((e) =>
+                console.warn("Lỗi gửi email cập nhật lại lịch:", e.message)
+              );
+            }
+          }).catch((e) => console.warn("Lỗi lấy thông tin approver gửi mail:", e.message));
+        }
       } catch (notifyErr) {
         console.warn("Không thể gửi thông báo duyệt lại:", notifyErr.message);
       }
@@ -851,7 +877,7 @@ exports.approveWorkSchedule = async (req, res) => {
 
     await schedule.save();
 
-    // Gửi thông báo đến người đăng ký
+    // Gửi thông báo và Email đến người đăng ký
     if (schedule.createdBy && schedule.createdBy.toString() !== currentUser._id.toString()) {
       try {
         await Notification.create({
@@ -867,6 +893,15 @@ exports.approveWorkSchedule = async (req, res) => {
           isRead: false,
           isPopupShown: false,
         });
+
+        // Gửi email thông báo đã phê duyệt đến người đăng ký
+        User.findById(schedule.createdBy).select("name email").then((creatorUser) => {
+          if (creatorUser && creatorUser.email) {
+            sendWorkScheduleStatusEmail(schedule, creatorUser, currentUser, "APPROVED").catch((e) =>
+              console.warn("Lỗi gửi email phê duyệt lịch:", e.message)
+            );
+          }
+        }).catch((e) => console.warn("Lỗi tìm creator để gửi email phê duyệt:", e.message));
       } catch (err) {
         console.warn("Lỗi gửi thông báo phê duyệt:", err.message);
       }
@@ -941,7 +976,7 @@ exports.rejectWorkSchedule = async (req, res) => {
 
     await schedule.save();
 
-    // Gửi thông báo đến người đăng ký
+    // Gửi thông báo và Email đến người đăng ký
     if (schedule.createdBy && schedule.createdBy.toString() !== currentUser._id.toString()) {
       try {
         await Notification.create({
@@ -957,6 +992,15 @@ exports.rejectWorkSchedule = async (req, res) => {
           isRead: false,
           isPopupShown: false,
         });
+
+        // Gửi email thông báo từ chối đến người đăng ký
+        User.findById(schedule.createdBy).select("name email").then((creatorUser) => {
+          if (creatorUser && creatorUser.email) {
+            sendWorkScheduleStatusEmail(schedule, creatorUser, currentUser, "REJECTED", reason.trim()).catch((e) =>
+              console.warn("Lỗi gửi email từ chối lịch:", e.message)
+            );
+          }
+        }).catch((e) => console.warn("Lỗi tìm creator để gửi email từ chối:", e.message));
       } catch (err) {
         console.warn("Lỗi gửi thông báo từ chối:", err.message);
       }
