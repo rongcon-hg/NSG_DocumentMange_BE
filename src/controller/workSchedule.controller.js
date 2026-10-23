@@ -134,6 +134,9 @@ const checkUserRole = async (user) => {
     isGvCv,
     // Hiệu trưởng, Admin và Manager được Ban hành lịch trực tiếp (canDirectAdd)
     canDirectAdd: isHieuTruong || isAdmin || isManager,
+    // Quyền chỉnh sửa/xóa đối với Lịch hiện tại & Sắp tới (đã duyệt/công bố):
+    // Chỉ có admin, manager và Hiệu trưởng, Quyền Hiệu trưởng mới được sửa/xóa; các BGH khác (PHT) không được sửa/xóa
+    canEditApproved: isAdmin || isManager || isHieuTruong,
     // Phó Hiệu trưởng, Cấp trưởng, Cấp phó (và Admin) có quyền Đăng ký lịch. Manager không đăng ký lịch
     canRegister: isPhoHieuTruong || isCapTruong || isCapPho || isAdmin,
     // Quyền duyệt: Admin và BGH (Manager không duyệt lịch)
@@ -188,7 +191,7 @@ exports.getWorkSchedules = async (req, res) => {
           meta: { today: startOfToday.toISOString(), total: 0 },
         });
       }
-      // Đối với tài khoản admin: hiển thị tất cả các lịch của Phó Hiệu trưởng và Cấp trưởng đăng ký
+      // Đối với tài khoản admin: hiển thị tất cả các lịch chờ duyệt / đã duyệt
       if (roleInfo.isAdmin) {
         if (status && status !== "ALL") {
           filter.status = status;
@@ -196,7 +199,9 @@ exports.getWorkSchedules = async (req, res) => {
           filter.status = { $in: ["PENDING", "APPROVED", "REJECTED"] };
         }
       } else {
-        // Đối với BGH:
+        // Đối với BGH: Chỉ hiển thị danh sách đăng ký mà người đăng ký đã chọn Gửi duyệt cho chính BGH đó (targetApprover === currentUser._id)
+        filter.targetApprover = currentUser._id;
+
         if (status && status !== "ALL") {
           filter.status = status;
         } else if (status === "ALL") {
@@ -325,8 +330,13 @@ exports.getPendingCount = async (req, res) => {
     const roleInfo = await checkUserRole(currentUser);
 
     let count = 0;
-    if (roleInfo.isBGH || roleInfo.isAdmin) {
+    if (roleInfo.isAdmin) {
       count = await WorkSchedule.countDocuments({ status: "PENDING" });
+    } else if (roleInfo.isBGH) {
+      count = await WorkSchedule.countDocuments({
+        status: "PENDING",
+        targetApprover: currentUser._id,
+      });
     }
 
     return res.status(200).json({
@@ -499,16 +509,22 @@ exports.createWorkSchedule = async (req, res) => {
     await newSchedule.save();
 
 
-    // Nếu là Cấp trưởng đăng ký: Gửi thông báo đến BGH và Manager
+    // Nếu là Đăng ký lịch (chờ duyệt): Chỉ gửi thông báo đến đúng người BGH được chọn duyệt (hoặc Admin/Manager nếu không chọn cụ thể)
     if (!isDirectAdd) {
       try {
-        const bghAndMgrIds = await getBghAndManagerUserIds();
-        const allRecipientIds = [...new Set([...bghAndMgrIds, targetApprover].filter(Boolean))];
+        let recipientIds = [];
+        if (targetApprover) {
+          // Gửi trực tiếp cho BGH được chọn duyệt
+          recipientIds = [targetApprover.toString()];
+        } else {
+          // Trường hợp không chọn người duyệt cụ thể (dự phòng): gửi cho BGH và Manager
+          recipientIds = await getBghAndManagerUserIds();
+        }
 
-        const notifyPromises = allRecipientIds
+        const notifyPromises = recipientIds
           .filter((id) => id !== currentUser._id.toString())
           .map((recipientId) => {
-            const isSpecific = targetApprover && recipientId === targetApprover.toString();
+            const isSpecific = Boolean(targetApprover);
             return Notification.create({
               recipient: recipientId,
               sender: currentUser._id,
@@ -572,18 +588,46 @@ exports.updateWorkSchedule = async (req, res) => {
       });
     }
 
-    // Kiểm tra quyền sửa: Admin, Manager và Ban Giám Hiệu được quyền sửa cả lịch đã duyệt và chờ duyệt
-    const isManagerOrBGH = roleInfo.isBGH || roleInfo.isManager || roleInfo.isAdmin;
+    // Nếu lịch đang chờ duyệt và có chỉ định targetApprover cụ thể và người dùng không phải admin/manager/người tạo thì chỉ targetApprover mới được sửa/duyệt
+    if (
+      schedule.status === "PENDING" &&
+      schedule.targetApprover &&
+      schedule.targetApprover.toString() !== currentUser._id.toString() &&
+      schedule.createdBy.toString() !== currentUser._id.toString() &&
+      !roleInfo.isAdmin &&
+      !roleInfo.isManager
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: "Lịch này đã được chỉ định gửi duyệt cho thành viên BGH khác.",
+      });
+    }
+
+    // Kiểm tra quyền sửa:
+    // - Đối với lịch đã duyệt (status === 'APPROVED'): CHỈ CÓ admin, manager và Hiệu trưởng / Q.Hiệu trưởng mới được sửa.
+    //   Các BGH khác (ví dụ: Phó Hiệu trưởng) không được sửa lịch đã duyệt.
+    // - Đối với lịch chưa duyệt (PENDING, REJECTED):
+    //   + Admin, Manager, và người được phân công duyệt (targetApprover) hoặc BGH có quyền duyệt
+    //   + Người tạo (createdBy)
     const isOwner = schedule.createdBy.toString() === currentUser._id.toString();
-    const canEdit =
-      isManagerOrBGH ||
-      (isOwner && schedule.status !== "APPROVED");
+    let canEdit = false;
+
+    if (schedule.status === "APPROVED") {
+      canEdit = Boolean(roleInfo.canEditApproved);
+    } else {
+      // Lịch chờ duyệt hoặc bị từ chối
+      const isTargetApprover = schedule.targetApprover && schedule.targetApprover.toString() === currentUser._id.toString();
+      const isApprover = roleInfo.isAdmin || roleInfo.isManager || isTargetApprover || (!schedule.targetApprover && roleInfo.isBGH);
+      canEdit = isApprover || isOwner;
+    }
 
     if (!canEdit) {
       return res.status(403).json({
         success: false,
         message:
-          "Bạn không có quyền chỉnh sửa lịch này. Lịch đã được duyệt chỉ Ban Giám Hiệu và Quản trị viên mới có thể điều chỉnh.",
+          schedule.status === "APPROVED"
+            ? "Bạn không có quyền chỉnh sửa lịch này. Lịch đã duyệt chỉ Hiệu trưởng, Quyền Hiệu trưởng, Quản trị viên và Quản lý mới có quyền điều chỉnh."
+            : "Bạn không có quyền chỉnh sửa lịch công tác này.",
       });
     }
 
@@ -625,15 +669,20 @@ exports.updateWorkSchedule = async (req, res) => {
 
     await schedule.save();
 
-    // Nếu gửi duyệt lại: Bắn thông báo cho BGH & Manager
+    // Nếu gửi duyệt lại: Bắn thông báo cho người duyệt được chỉ định
     if (isResubmitted) {
       try {
-        const bghAndMgrIds = await getBghAndManagerUserIds();
-        const allRecipientIds = [...new Set([...bghAndMgrIds, schedule.targetApprover].filter(Boolean))];
-        const notifyPromises = allRecipientIds
+        let recipientIds = [];
+        if (schedule.targetApprover) {
+          recipientIds = [schedule.targetApprover.toString()];
+        } else {
+          recipientIds = await getBghAndManagerUserIds();
+        }
+
+        const notifyPromises = recipientIds
           .filter((id) => id !== currentUser._id.toString())
           .map((recipientId) => {
-            const isSpecific = schedule.targetApprover && recipientId === schedule.targetApprover.toString();
+            const isSpecific = Boolean(schedule.targetApprover);
             return Notification.create({
               recipient: recipientId,
               sender: currentUser._id,
@@ -697,18 +746,45 @@ exports.deleteWorkSchedule = async (req, res) => {
       });
     }
 
-    // Kiểm tra quyền xóa: Admin, Manager và Ban Giám Hiệu được quyền xóa cả lịch đã duyệt và chờ duyệt
-    const isManagerOrBGH = roleInfo.isBGH || roleInfo.isManager || roleInfo.isAdmin;
+    // Nếu lịch đang chờ duyệt và có chỉ định targetApprover cụ thể và người dùng không phải admin/manager/người tạo thì chỉ targetApprover mới được sửa/duyệt
+    if (
+      schedule.status === "PENDING" &&
+      schedule.targetApprover &&
+      schedule.targetApprover.toString() !== currentUser._id.toString() &&
+      schedule.createdBy.toString() !== currentUser._id.toString() &&
+      !roleInfo.isAdmin &&
+      !roleInfo.isManager
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: "Lịch này đã được chỉ định gửi duyệt cho thành viên BGH khác.",
+      });
+    }
+
+    // Kiểm tra quyền xóa:
+    // - Đối với lịch đã duyệt (status === 'APPROVED'): CHỈ CÓ admin, manager và Hiệu trưởng / Q.Hiệu trưởng mới được xóa.
+    //   Các BGH khác (ví dụ: Phó Hiệu trưởng) không được xóa lịch đã duyệt.
+    // - Đối với lịch chưa duyệt (PENDING, REJECTED):
+    //   + Admin, Manager, và người được phân công duyệt (targetApprover) hoặc BGH có quyền duyệt
+    //   + Người tạo (createdBy)
     const isOwner = schedule.createdBy.toString() === currentUser._id.toString();
-    const canDelete =
-      isManagerOrBGH ||
-      (isOwner && schedule.status !== "APPROVED");
+    let canDelete = false;
+
+    if (schedule.status === "APPROVED") {
+      canDelete = Boolean(roleInfo.canEditApproved);
+    } else {
+      const isTargetApprover = schedule.targetApprover && schedule.targetApprover.toString() === currentUser._id.toString();
+      const isApprover = roleInfo.isAdmin || roleInfo.isManager || isTargetApprover || (!schedule.targetApprover && roleInfo.isBGH);
+      canDelete = isApprover || isOwner;
+    }
 
     if (!canDelete) {
       return res.status(403).json({
         success: false,
         message:
-          "Bạn không có quyền xóa lịch này. Lịch đã được duyệt chỉ Ban Giám Hiệu và Quản trị viên mới có thể xóa.",
+          schedule.status === "APPROVED"
+            ? "Bạn không có quyền xóa lịch này. Lịch đã duyệt chỉ Hiệu trưởng, Quyền Hiệu trưởng, Quản trị viên và Quản lý mới có quyền xóa."
+            : "Bạn không có quyền xóa lịch công tác này.",
       });
     }
 
@@ -750,6 +826,21 @@ exports.approveWorkSchedule = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: "Không tìm thấy lịch công tác.",
+      });
+    }
+
+    // Nếu lịch đang chờ duyệt và có chỉ định targetApprover cụ thể và người dùng không phải admin/manager/người tạo thì chỉ targetApprover mới được sửa/duyệt
+    if (
+      schedule.status === "PENDING" &&
+      schedule.targetApprover &&
+      schedule.targetApprover.toString() !== currentUser._id.toString() &&
+      schedule.createdBy.toString() !== currentUser._id.toString() &&
+      !roleInfo.isAdmin &&
+      !roleInfo.isManager
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: "Lịch này đã được chỉ định gửi duyệt cho thành viên BGH khác.",
       });
     }
 
@@ -825,6 +916,21 @@ exports.rejectWorkSchedule = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: "Không tìm thấy lịch công tác.",
+      });
+    }
+
+    // Nếu lịch đang chờ duyệt và có chỉ định targetApprover cụ thể và người dùng không phải admin/manager/người tạo thì chỉ targetApprover mới được sửa/duyệt
+    if (
+      schedule.status === "PENDING" &&
+      schedule.targetApprover &&
+      schedule.targetApprover.toString() !== currentUser._id.toString() &&
+      schedule.createdBy.toString() !== currentUser._id.toString() &&
+      !roleInfo.isAdmin &&
+      !roleInfo.isManager
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: "Lịch này đã được chỉ định gửi duyệt cho thành viên BGH khác.",
       });
     }
 
