@@ -265,24 +265,34 @@ exports.getWorkSchedules = async (req, res) => {
       }
     }
 
-    // 5. Xác định thứ tự sắp xếp
-    // Với tab 'upcoming': sắp xếp startDate tăng dần, startTime tăng dần (ngày hiện tại sẽ lên trên cùng)
-    // Với tab 'past': sắp xếp startDate giảm dần, startTime giảm dần
-    // Với tab 'my_registered' hoặc 'pending': sắp xếp mới nhất lên trước
+    // 5. Xác định thứ tự sắp xếp:
+    // - Với tab 'upcoming': sắp xếp startDate tăng dần, startTime tăng dần (ngày hiện tại sẽ lên trên cùng)
+    // - Với tab 'past': sắp xếp startDate giảm dần, startTime giảm dần
+    // - Với tab 'my_registered' hoặc 'pending': sắp xếp ngày diễn ra mới nhất lên đầu (startDate giảm dần), nếu cùng ngày thì startTime giảm dần, createdAt giảm dần
     let sortOption = { startDate: 1, startTime: 1 };
     if (tab === "past") {
       sortOption = { startDate: -1, startTime: -1 };
     } else if (tab === "my_registered" || tab === "pending") {
-      sortOption = { createdAt: -1, startDate: -1 };
+      sortOption = { startDate: -1, startTime: -1, createdAt: -1 };
     }
 
-    const schedules = await WorkSchedule.find(filter)
+    // Giới hạn tối đa 50 lịch công tác mới nhất để tối ưu hiệu năng và hiển thị
+    // Người dùng muốn tra cứu thêm nhiều hơn sẽ thông qua bộ lọc từ khóa hoặc khoảng ngày
+    const query = WorkSchedule.find(filter)
       .populate("createdBy", "name email avatar role position")
       .populate("department", "departmentName departmentCode")
       .populate("approvedBy", "name email role")
       .populate("targetApprover", "name email avatar")
-      .sort(sortOption)
-      .lean();
+      .sort(sortOption);
+
+    // Áp dụng giới hạn tối đa 50 lịch khi không truyền khoảng ngày cụ thể (hoặc mặc định)
+    if (!startDate && !endDate) {
+      query.limit(50);
+    } else {
+      query.limit(100);
+    }
+
+    const schedules = await query.lean();
 
     // Đối với những lịch do Manager ban hành trực tiếp (hoặc import):
     // Không hiển thị thông tin "Đã duyệt bởi..." (chỉ lịch do Cấp trưởng đăng ký gửi BGH duyệt thì mới có Đã duyệt bởi BGH)
