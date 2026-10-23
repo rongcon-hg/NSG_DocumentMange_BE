@@ -2,8 +2,17 @@ const express = require("express");
 const router = express.Router();
 const { verifyToken } = require("../middleware/authMiddleware");
 const workScheduleController = require("../controller/workSchedule.controller");
+const recurringController = require("../controller/recurringWorkSchedule.controller");
 
 const upload = require("../middleware/multer");
+
+// --- MẪU LỊCH CÔNG TÁC LẶP LẠI ĐỊNH KỲ (Admin, Manager, Hiệu trưởng, Q.Hiệu trưởng) ---
+router.get("/recurring", verifyToken, recurringController.getRecurringWorkSchedules);
+router.post("/recurring", verifyToken, recurringController.createRecurringWorkSchedule);
+router.put("/recurring/:id", verifyToken, recurringController.updateRecurringWorkSchedule);
+router.delete("/recurring/:id", verifyToken, recurringController.deleteRecurringWorkSchedule);
+router.patch("/recurring/:id/toggle", verifyToken, recurringController.toggleRecurringWorkSchedule);
+router.post("/recurring/:id/run-now", verifyToken, recurringController.runRecurringWorkScheduleNow);
 
 // Lấy danh sách lịch công tác (Tất cả người dùng đều có thể xem theo phân quyền)
 router.get("/", verifyToken, workScheduleController.getWorkSchedules);

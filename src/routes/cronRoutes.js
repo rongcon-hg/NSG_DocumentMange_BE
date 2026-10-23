@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { executeTaskReminders, executeAutoBackup } = require('../service/TaskCron.service');
 const { executeRecurringTasksGeneration } = require('../service/recurringTask.service');
+const { executeRecurringWorkSchedulesGeneration } = require('../service/recurringWorkSchedule.service');
 const { executeQuarterlyPlanReminders } = require('../service/quarterlyPlanCron.service');
 const { autoUpdateEffectiveStatuses } = require('../controller/legalBasis.controller');
 const { executeMeetingReminders } = require('../service/meetingReminder.service');
@@ -42,6 +43,7 @@ router.get('/reminders', verifyCronSecret, async (req, res) => {
     await executeMeetingReminders();
     await executeAutoBackup();
     await executeRecurringTasksGeneration();
+    await executeRecurringWorkSchedulesGeneration();
     return res.status(200).json({ success: true, message: 'Cron jobs executed successfully' });
   } catch (error) {
     console.error('Error executing cron reminder:', error);
