@@ -202,12 +202,12 @@ const createArchiveFolder = async (req, res) => {
 };
 
 /**
- * Thêm tài liệu hoặc công việc vào hồ sơ lưu trữ
+ * Thêm tài liệu hoặc công việc vào hồ sơ lưu trữ (hỗ trợ 1 hoặc nhiều tài liệu/tệp)
  */
 const addItemToFolder = async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, itemType, refId, documentNumber, date, author, fileId, fileUrl, pageCount, note } = req.body;
+    const { items, title, itemType, refId, documentNumber, date, author, fileId, fileUrl, pageCount, note } = req.body;
 
     const folder = await ArchiveFolder.findById(id);
     if (!folder) {
@@ -218,24 +218,44 @@ const addItemToFolder = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Hồ sơ đã được lưu trữ vĩnh viễn vào kho, không thể bổ sung thêm tài liệu.' });
     }
 
-    folder.items.push({
-      title: title || 'Tài liệu không tên',
-      itemType: itemType || 'Document',
-      refId: refId || null,
-      documentNumber: documentNumber || '',
-      date: date || new Date(),
-      author: author || '',
-      fileId: fileId || '',
-      fileUrl: fileUrl || '',
-      pageCount: pageCount || 1,
-      note: note || '',
-    });
+    // Nếu gửi lên mảng nhiều tài liệu (batch add)
+    if (items && Array.isArray(items) && items.length > 0) {
+      for (const it of items) {
+        folder.items.push({
+          title: it.title || 'Tài liệu không tên',
+          itemType: it.itemType || itemType || 'Văn bản',
+          refId: it.refId || null,
+          documentNumber: it.documentNumber || documentNumber || '',
+          date: it.date ? new Date(it.date) : (date ? new Date(date) : new Date()),
+          author: it.author || author || '',
+          fileId: it.fileId || '',
+          fileUrl: it.fileUrl || '',
+          pageCount: Number(it.pageCount) > 0 ? Number(it.pageCount) : 1,
+          note: it.note || note || '',
+        });
+      }
+    } else {
+      folder.items.push({
+        title: title || 'Tài liệu không tên',
+        itemType: itemType || 'Document',
+        refId: refId || null,
+        documentNumber: documentNumber || '',
+        date: date || new Date(),
+        author: author || '',
+        fileId: fileId || '',
+        fileUrl: fileUrl || '',
+        pageCount: pageCount || 1,
+        note: note || '',
+      });
+    }
 
     await folder.save();
 
     return res.json({
       success: true,
-      message: 'Đã bổ sung tài liệu vào hồ sơ lưu trữ',
+      message: items && Array.isArray(items) && items.length > 1 
+        ? `Đã bổ sung ${items.length} tài liệu vào hồ sơ lưu trữ` 
+        : 'Đã bổ sung tài liệu vào hồ sơ lưu trữ',
       data: folder,
     });
   } catch (error) {
