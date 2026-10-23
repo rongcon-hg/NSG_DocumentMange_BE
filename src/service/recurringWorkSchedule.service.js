@@ -151,18 +151,30 @@ const generateSingleScheduleFromRecurring = async (
 };
 
 /**
- * Quét toàn bộ mẫu lịch công tác định kỳ đến hạn để sinh lịch tự động
- * Gọi hàng ngày bởi cron job hoặc thủ công
+ * Quét toàn bộ mẫu lịch công tác định kỳ để sinh lịch tự động trước thời điểm diễn ra.
+ * Yêu cầu đặc biệt:
+ * "đối với những lịch hẹn lặp lại định kỳ thì sẽ hiển thị thông tin lịch vào ngày thứ 6 trước ngày hẹn lịch
+ * để cho người dùng biết trước lịch. Ví dụ có lịch lặp lại vào thứ 2 hàng tuần (26/10) thì lịch đó của tuần liền kề
+ * sẽ được hiển thị trên lịch công tác trước vào ngày thứ 6 của tuần này. Đảm bảo có lịch trước khi tuần diễn ra sự kiện đó bắt đầu."
+ * 
+ * Do đó, ngưỡng quét (lead time window):
+ * Quét trước tối thiểu 7 - 10 ngày (đặc biệt đến hết Chủ Nhật của tuần tới).
+ * Bất cứ sự kiện định kỳ nào rơi vào khoảng từ nay đến hết tuần tới (hoặc đến nextSundayOfWeekAhead)
+ * đều sẽ được tự động sinh ngay vào thứ 6 (hoặc các ngày trước đó) để người dùng xem trước kế hoạch công tác.
  */
 const executeRecurringWorkSchedulesGeneration = async () => {
   try {
-    const today = new Date();
-    today.setHours(23, 59, 59, 999);
+    const now = new Date();
+    // Ngưỡng quét nhìn trước (Look-ahead window): Quét trước 10 ngày để đảm bảo vào Thứ 6 (hoặc bất kỳ ngày nào trước đó)
+    // thì toàn bộ lịch của tuần kế tiếp (Thứ 2 đến Chủ nhật) đã được sinh và hiển thị đầy đủ
+    const horizonDate = new Date(now);
+    horizonDate.setDate(horizonDate.getDate() + 10);
+    horizonDate.setHours(23, 59, 59, 999);
 
     const activeTemplates = await RecurringWorkSchedule.find({
       isActive: true,
       $or: [
-        { nextRunDate: { $lte: today } },
+        { nextRunDate: { $lte: horizonDate } },
         { nextRunDate: null },
       ],
     });
@@ -171,14 +183,22 @@ const executeRecurringWorkSchedulesGeneration = async () => {
       return { success: true, count: 0 };
     }
 
-    console.log(`[RecurringSchedule Cron] Tìm thấy ${activeTemplates.length} mẫu lịch định kỳ cần quét sinh lịch.`);
+    console.log(`[RecurringSchedule Cron] Tìm thấy ${activeTemplates.length} mẫu lịch định kỳ cần quét (ngưỡng nhìn trước đến ${horizonDate.toLocaleDateString("vi-VN")}).`);
 
     let generatedCount = 0;
     for (const template of activeTemplates) {
       try {
-        const targetDate = template.nextRunDate || new Date();
-        await generateSingleScheduleFromRecurring(template, targetDate);
-        generatedCount++;
+        let currentTargetDate = template.nextRunDate || new Date();
+        
+        // Vòng lặp sinh lịch cho đến khi nextRunDate vượt quá ngưỡng nhìn trước (horizonDate)
+        // Điều này đảm bảo nếu có nhiều sự kiện trong tuần tới (hoặc tuần kế tiếp) đều được sinh trước đầy đủ
+        let loopLimit = 0;
+        while (currentTargetDate && currentTargetDate <= horizonDate && loopLimit < 5) {
+          loopLimit++;
+          await generateSingleScheduleFromRecurring(template, currentTargetDate);
+          generatedCount++;
+          currentTargetDate = template.nextRunDate;
+        }
       } catch (e) {
         console.error(`Lỗi sinh lịch cho mẫu ${template._id}:`, e.message);
       }

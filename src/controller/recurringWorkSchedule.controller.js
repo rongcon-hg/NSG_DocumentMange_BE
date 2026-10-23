@@ -146,6 +146,11 @@ exports.createRecurringWorkSchedule = async (req, res) => {
 
     await newTemplate.save();
 
+    // Tự động quét sinh lịch cho tuần/thời gian kế tiếp ngay khi tạo mẫu mới (nếu sự kiện sắp diễn ra trong 10 ngày tới)
+    executeRecurringWorkSchedulesGeneration().catch((err) =>
+      console.warn("Lỗi auto generate schedule sau khi tạo mẫu:", err.message)
+    );
+
     const populated = await RecurringWorkSchedule.findById(newTemplate._id)
       .populate("createdBy", "name email")
       .populate("department", "departmentName departmentCode");
