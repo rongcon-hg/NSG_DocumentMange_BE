@@ -1422,6 +1422,239 @@ const sendWorkScheduleStatusEmail = async (schedule, creatorUser, approverUser, 
     }
 };
 
+/**
+ * Gửi email thông báo đơn đăng ký xe công tác mới tới BGH
+ */
+const sendVehicleBookingNotificationEmail = async (booking, creatorUser, approverUser) => {
+    try {
+        if (!approverUser || !approverUser.email) return false;
+        const { transporter, sender, brandName } = await getTransporterAndSender();
+
+        const depTimeStr = formatVietnameseDateTime(booking.departureTime);
+        const retTimeStr = formatVietnameseDateTime(booking.estimatedReturnTime);
+        const vehicleTypeStr = booking.vehicleType === "SCHOOL_VEHICLE" ? "Xe trường" : "Xe công nghệ";
+
+        const subject = `[${brandName}] Yêu cầu đăng ký xe công tác: ${booking.purpose}`;
+        const htmlContent = `
+        <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 650px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
+            <div style="background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); padding: 20px; text-align: center; color: white;">
+                <h2 style="margin: 0; font-size: 20px;">ĐƠN ĐĂNG KÝ XE CÔNG TÁC MỚI</h2>
+                <p style="margin: 5px 0 0; opacity: 0.9; font-size: 13px;">Mã phiếu: <strong>${booking.bookingCode || 'Chờ cấp mã'}</strong></p>
+            </div>
+            <div style="padding: 24px; background-color: #ffffff;">
+                <p>Kính gửi <strong>${approverUser.fullName || approverUser.userName}</strong>,</p>
+                <p>Hệ thống vừa tiếp nhận yêu cầu đăng ký phương tiện đi công tác từ <strong>${creatorUser.fullName || creatorUser.userName}</strong> thuộc <strong>${booking.departmentName || 'Đơn vị'}</strong>. Chi tiết như sau:</p>
+                
+                <table style="width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px;">
+                    <tr>
+                        <td style="padding: 8px; border-bottom: 1px solid #f1f5f9; font-weight: bold; width: 35%; color: #64748b;">Mục đích công tác:</td>
+                        <td style="padding: 8px; border-bottom: 1px solid #f1f5f9;"><strong>${booking.purpose}</strong></td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #64748b;">Lộ trình di chuyển:</td>
+                        <td style="padding: 8px; border-bottom: 1px solid #f1f5f9;">${booking.route}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #64748b;">Thời gian xuất phát:</td>
+                        <td style="padding: 8px; border-bottom: 1px solid #f1f5f9; color: #0284c7; font-weight: bold;">${depTimeStr}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #64748b;">Thời gian về dự kiến:</td>
+                        <td style="padding: 8px; border-bottom: 1px solid #f1f5f9;">${retTimeStr}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #64748b;">Loại phương tiện:</td>
+                        <td style="padding: 8px; border-bottom: 1px solid #f1f5f9;">${vehicleTypeStr} (Yêu cầu ${booking.requiredSeats || 7} chỗ)</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #64748b;">Người liên hệ:</td>
+                        <td style="padding: 8px; border-bottom: 1px solid #f1f5f9;">${creatorUser.fullName || creatorUser.userName} - SĐT: ${booking.contactPhone}</td>
+                    </tr>
+                </table>
+
+                <div style="text-align: center; margin-top: 25px;">
+                    <a href="https://qlvb.namsaigon.edu.vn/vehicles" style="background-color: #0284c7; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Xem và Phê duyệt trên hệ thống</a>
+                </div>
+            </div>
+            <div style="background-color: #f8fafc; padding: 12px; text-align: center; font-size: 12px; color: #94a3b8; border-top: 1px solid #e2e8f0;">
+                Email được gửi tự động từ Hệ thống Quản lý Văn bản và Điều hành - Trường Cao đẳng Bách khoa Nam Sài Gòn.
+            </div>
+        </div>
+        `;
+
+        const mailOptions = {
+            from: sender,
+            to: approverUser.email,
+            subject: subject,
+            html: applySystemBranding(htmlContent, brandName),
+        };
+
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`[Email] Đã gửi thông báo đăng ký xe tới BGH ${approverUser.email}:`, info?.messageId);
+        return true;
+    } catch (error) {
+        console.error("Error in sendVehicleBookingNotificationEmail:", error);
+        return false;
+    }
+};
+
+/**
+ * Gửi email kết quả duyệt đơn đăng ký xe cho người đăng ký
+ */
+const sendVehicleBookingStatusEmail = async (booking, creatorUser, approverUser, status, rejectionReason = "") => {
+    try {
+        if (!creatorUser || !creatorUser.email) return false;
+        const { transporter, sender, brandName } = await getTransporterAndSender();
+
+        const isApproved = status === "APPROVED";
+        const headerTitle = isApproved ? "ĐƠN ĐĂNG KÝ XE ĐÃ ĐƯỢC PHÊ DUYỆT" : "ĐƠN ĐĂNG KÝ XE KHÔNG ĐƯỢC DUYỆT";
+        const headerBg = isApproved ? "linear-gradient(135deg, #10b981 0%, #047857 100%)" : "linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)";
+
+        const subject = `[${brandName}] Kết quả phê duyệt đăng ký xe: ${booking.purpose} - ${isApproved ? 'ĐÃ DUYỆT' : 'TỪ CHỐI'}`;
+        const htmlContent = `
+        <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 650px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
+            <div style="background: ${headerBg}; padding: 20px; text-align: center; color: white;">
+                <h2 style="margin: 0; font-size: 20px;">${headerTitle}</h2>
+                <p style="margin: 5px 0 0; opacity: 0.9; font-size: 13px;">Mã phiếu: <strong>${booking.bookingCode}</strong></p>
+            </div>
+            <div style="padding: 24px; background-color: #ffffff;">
+                <p>Chào <strong>${creatorUser.fullName || creatorUser.userName}</strong>,</p>
+                <p>Đơn đăng ký xe công tác của bạn đã được <strong>${approverUser ? (approverUser.fullName || approverUser.userName) : 'Ban Giám Hiệu'}</strong> xem xét với kết quả như sau:</p>
+                
+                <div style="background-color: ${isApproved ? '#f0fdf4' : '#fef2f2'}; border-left: 4px solid ${isApproved ? '#10b981' : '#ef4444'}; padding: 12px 16px; margin: 16px 0; border-radius: 4px;">
+                    <p style="margin: 0; font-weight: bold; color: ${isApproved ? '#15803d' : '#b91c1c'};">
+                        Trạng thái: ${isApproved ? 'ĐÃ PHÊ DUYỆT (Chờ đơn vị quản lý xe xếp tài xế & phương tiện)' : 'TỪ CHỐI DUYỆT'}
+                    </p>
+                    ${!isApproved && rejectionReason ? `<p style="margin: 6px 0 0; font-size: 13px; color: #7f1d1d;">Lý do: <em>${rejectionReason}</em></p>` : ''}
+                </div>
+
+                <table style="width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px;">
+                    <tr>
+                        <td style="padding: 8px; border-bottom: 1px solid #f1f5f9; font-weight: bold; width: 35%; color: #64748b;">Nội dung:</td>
+                        <td style="padding: 8px; border-bottom: 1px solid #f1f5f9;">${booking.purpose}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #64748b;">Lộ trình:</td>
+                        <td style="padding: 8px; border-bottom: 1px solid #f1f5f9;">${booking.route}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #64748b;">Thời gian đi:</td>
+                        <td style="padding: 8px; border-bottom: 1px solid #f1f5f9;">${formatVietnameseDateTime(booking.departureTime)}</td>
+                    </tr>
+                </table>
+
+                <div style="text-align: center; margin-top: 20px;">
+                    <a href="https://qlvb.namsaigon.edu.vn/vehicles" style="background-color: #0f172a; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Kiểm tra tiến độ điều xe</a>
+                </div>
+            </div>
+            <div style="background-color: #f8fafc; padding: 12px; text-align: center; font-size: 12px; color: #94a3b8; border-top: 1px solid #e2e8f0;">
+                Email được gửi tự động từ Hệ thống Quản lý Văn bản và Điều hành - Trường Cao đẳng Bách khoa Nam Sài Gòn.
+            </div>
+        </div>
+        `;
+
+        const mailOptions = {
+            from: sender,
+            to: creatorUser.email,
+            subject: subject,
+            html: applySystemBranding(htmlContent, brandName),
+        };
+
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`[Email] Đã gửi thông báo kết quả duyệt xe tới ${creatorUser.email}:`, info?.messageId);
+        return true;
+    } catch (error) {
+        console.error("Error in sendVehicleBookingStatusEmail:", error);
+        return false;
+    }
+};
+
+/**
+ * Gửi email thông báo đã phân bổ xe & tài xế cho người đăng ký
+ */
+const sendVehicleDispatchedEmail = async (booking) => {
+    try {
+        if (!booking.requester || !booking.requester.email) return false;
+        const { transporter, sender, brandName } = await getTransporterAndSender();
+
+        const isSchoolVehicle = booking.vehicleType === "SCHOOL_VEHICLE";
+        const subject = `[${brandName}] Thông tin điều phối xe công tác: Mã ${booking.bookingCode}`;
+
+        let dispatchInfoHtml = "";
+        if (isSchoolVehicle) {
+            dispatchInfoHtml = `
+            <div style="background-color: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; padding: 16px; margin: 16px 0;">
+                <h3 style="margin-top: 0; color: #1e40af; font-size: 15px;">🚗 THÔNG TIN XE & TÀI XẾ PHỤ TRÁCH:</h3>
+                <p style="margin: 4px 0;">Phương tiện: <strong>${booking.assignedVehicle?.name || 'Xe trường'}</strong> - Biển số: <strong style="color: #b91c1c;">${booking.assignedVehicle?.licensePlate || ''}</strong></p>
+                <p style="margin: 4px 0;">Tài xế: <strong>${booking.assignedDriver?.fullName || 'Đang cập nhật'}</strong></p>
+                <p style="margin: 4px 0;">Số điện thoại tài xế: <strong style="color: #047857; font-size: 16px;">${booking.assignedDriver?.phone || ''}</strong></p>
+                ${booking.dispatchNotes ? `<p style="margin: 8px 0 0; font-size: 13px; color: #475569;"><em>Ghi chú điều xe: ${booking.dispatchNotes}</em></p>` : ''}
+            </div>
+            `;
+        } else {
+            dispatchInfoHtml = `
+            <div style="background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 16px; margin: 16px 0;">
+                <h3 style="margin-top: 0; color: #166534; font-size: 15px;">🚕 PHƯƠNG TIỆN CÔNG NGHỆ:</h3>
+                <p style="margin: 4px 0;">Đơn vị quản lý đã xác nhận duyệt phương thức <strong>Xe công nghệ</strong>.</p>
+                ${booking.rideHailingDetails?.serviceProvider ? `<p style="margin: 4px 0;">Ứng dụng/Dịch vụ: <strong>${booking.rideHailingDetails.serviceProvider}</strong></p>` : ''}
+                ${booking.rideHailingDetails?.bookingCode ? `<p style="margin: 4px 0;">Mã đặt xe: <strong>${booking.rideHailingDetails.bookingCode}</strong></p>` : ''}
+            </div>
+            `;
+        }
+
+        const htmlContent = `
+        <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 650px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
+            <div style="background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); padding: 20px; text-align: center; color: white;">
+                <h2 style="margin: 0; font-size: 20px;">LỊCH XE CÔNG TÁC ĐÃ SẴN SÀNG</h2>
+                <p style="margin: 5px 0 0; opacity: 0.9; font-size: 13px;">Mã phiếu: <strong>${booking.bookingCode}</strong></p>
+            </div>
+            <div style="padding: 24px; background-color: #ffffff;">
+                <p>Chào <strong>${booking.requester.fullName || booking.requester.userName}</strong>,</p>
+                <p>Đơn vị quản lý xe đã hoàn tất phân bổ phương tiện cho chuyến công tác của bạn.</p>
+
+                ${dispatchInfoHtml}
+
+                <table style="width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px;">
+                    <tr>
+                        <td style="padding: 8px; border-bottom: 1px solid #f1f5f9; font-weight: bold; width: 35%; color: #64748b;">Nội dung:</td>
+                        <td style="padding: 8px; border-bottom: 1px solid #f1f5f9;">${booking.purpose}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #64748b;">Lộ trình:</td>
+                        <td style="padding: 8px; border-bottom: 1px solid #f1f5f9;">${booking.route}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #64748b;">Thời gian xuất phát:</td>
+                        <td style="padding: 8px; border-bottom: 1px solid #f1f5f9; color: #2563eb; font-weight: bold;">${formatVietnameseDateTime(booking.departureTime)}</td>
+                    </tr>
+                </table>
+
+                <div style="text-align: center; margin-top: 25px;">
+                    <a href="https://qlvb.namsaigon.edu.vn/vehicles" style="background-color: #1e3a8a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Xem chi tiết & In Phiếu điều xe</a>
+                </div>
+            </div>
+            <div style="background-color: #f8fafc; padding: 12px; text-align: center; font-size: 12px; color: #94a3b8; border-top: 1px solid #e2e8f0;">
+                Email được gửi tự động từ Hệ thống Quản lý Văn bản và Điều hành - Trường Cao đẳng Bách khoa Nam Sài Gòn.
+            </div>
+        </div>
+        `;
+
+        const mailOptions = {
+            from: sender,
+            to: booking.requester.email,
+            subject: subject,
+            html: applySystemBranding(htmlContent, brandName),
+        };
+
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`[Email] Đã gửi thông báo điều xe tới ${booking.requester.email}:`, info?.messageId);
+        return true;
+    } catch (error) {
+        console.error("Error in sendVehicleDispatchedEmail:", error);
+        return false;
+    }
+};
+
 module.exports = {
     sentTempPassword,
     sendRestoreOtpEmail,
@@ -1439,4 +1672,7 @@ module.exports = {
     sendMeetingReminderEmail,
     sendWorkScheduleRegistrationEmail,
     sendWorkScheduleStatusEmail,
+    sendVehicleBookingNotificationEmail,
+    sendVehicleBookingStatusEmail,
+    sendVehicleDispatchedEmail,
 };

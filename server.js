@@ -203,6 +203,11 @@ const approvalWorkflowRoutes = require('./src/routes/approvalWorkflow.routes');
 app.use('/api/approval-workflows', approvalWorkflowRoutes);
 app.use('/approval-workflows', approvalWorkflowRoutes);
 
+// Vehicle & Driver Management & Dispatch routes
+const vehicleRoutes = require('./src/routes/vehicle.routes');
+app.use('/api/vehicles', vehicleRoutes);
+app.use('/vehicles', vehicleRoutes);
+
 // Cron endpoint for Vercel
 const cronRoutes = require('./src/routes/cronRoutes');
 app.use('/api/cron', cronRoutes);
