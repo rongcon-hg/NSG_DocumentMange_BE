@@ -635,20 +635,22 @@ const updateTripStatus = async (req, res) => {
   }
 };
 
-// Hủy đơn đăng ký (Người đăng ký tự hủy khi chưa điều phối xe)
+// Hủy đơn đăng ký (Người đăng ký tự hủy khi chưa điều phối xe, hoặc Admin hủy bất kỳ)
 const cancelBooking = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user?.id || req.user?._id;
+    const userRole = (req.user?.role || "").toUpperCase();
+    const isAdmin = userRole === "ADMIN" || userRole === "MANAGER";
 
     const booking = await VehicleBooking.findById(id);
     if (!booking) return res.status(404).json({ success: false, message: "Không tìm thấy đơn đăng ký" });
 
-    if (booking.requester.toString() !== userId.toString()) {
+    if (!isAdmin && booking.requester.toString() !== userId.toString()) {
       return res.status(403).json({ success: false, message: "Bạn không có quyền hủy đơn đăng ký của người khác" });
     }
 
-    if (booking.dispatchStatus === "IN_PROGRESS" || booking.dispatchStatus === "COMPLETED") {
+    if (!isAdmin && (booking.dispatchStatus === "IN_PROGRESS" || booking.dispatchStatus === "COMPLETED")) {
       return res.status(400).json({ success: false, message: "Chuyến đi đang thực hiện hoặc đã kết thúc, không thể hủy" });
     }
 
@@ -659,6 +661,29 @@ const cancelBooking = async (req, res) => {
     return res.status(200).json({ success: true, message: "Đã hủy đơn đăng ký xe thành công" });
   } catch (error) {
     return res.status(500).json({ success: false, message: "Lỗi hủy đơn đăng ký" });
+  }
+};
+
+// Xóa hoàn toàn đơn đăng ký xe (Dành riêng cho Admin / Manager)
+const deleteBooking = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userRole = (req.user?.role || "").toUpperCase();
+    const isAdmin = userRole === "ADMIN" || userRole === "MANAGER";
+
+    if (!isAdmin) {
+      return res.status(403).json({ success: false, message: "Chỉ tài khoản Admin hoặc Manager mới có quyền xóa đơn đăng ký xe" });
+    }
+
+    const booking = await VehicleBooking.findByIdAndDelete(id);
+    if (!booking) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy đơn đăng ký để xóa" });
+    }
+
+    return res.status(200).json({ success: true, message: "Đã xóa hoàn toàn đơn đăng ký xe thành công" });
+  } catch (error) {
+    console.error("Lỗi xóa đơn đăng ký xe:", error);
+    return res.status(500).json({ success: false, message: "Lỗi xóa đơn đăng ký xe" });
   }
 };
 
@@ -683,4 +708,5 @@ module.exports = {
   dispatchVehicleAndDriver,
   updateTripStatus,
   cancelBooking,
+  deleteBooking,
 };

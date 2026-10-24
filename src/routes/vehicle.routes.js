@@ -32,5 +32,6 @@ router.put("/bookings/:id/review", vehicleController.reviewBookingByBGH); // BGH
 router.put("/bookings/:id/dispatch", vehicleController.dispatchVehicleAndDriver); // Phân bổ xe/tài xế
 router.put("/bookings/:id/trip-status", vehicleController.updateTripStatus); // Đang đi, hoàn thành
 router.put("/bookings/:id/cancel", vehicleController.cancelBooking); // Hủy đơn
+router.delete("/bookings/:id", vehicleController.deleteBooking); // Xóa đơn (Admin)
 
 module.exports = router;
