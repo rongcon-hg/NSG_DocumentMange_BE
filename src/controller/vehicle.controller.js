@@ -312,20 +312,28 @@ const getBookings = async (req, res) => {
     if (tab === "my") {
       query.requester = userId;
     }
-    // Tab "pending_approval": Dành cho BGH duyệt các đơn gửi cho mình
+    // Tab "pending_approval": Dành cho BGH duyệt (Admin/Manager xem được tất cả đơn PENDING, còn BGH xem các đơn gửi đích danh mình hoặc toàn bộ đơn chờ duyệt)
     else if (tab === "pending_approval") {
-      query.targetApprover = userId;
+      const isAdminOrManager = userRole === "ADMIN" || userRole === "MANAGER";
+      if (!isAdminOrManager) {
+        query.$or = [
+          { targetApprover: userId },
+          { targetApprover: null },
+        ];
+      }
       query.approvalStatus = "PENDING";
     }
     // Tab "dispatch": Dành cho người được giao nhiệm vụ phân bổ xe hoặc QTTB/Admin/Manager
     else if (tab === "dispatch") {
       query.approvalStatus = "APPROVED";
-      // Nếu không phải ADMIN hoặc MANAGER, chỉ thấy các đơn được BGH giao cho mình hoặc đơn thuộc quyền
+      // Đơn xe công nghệ thì không cần phân bổ xe (trừ khi xem ở tab all)
+      query.vehicleType = { $ne: "RIDE_HAILING" };
+      // Nếu không phải ADMIN hoặc MANAGER, chỉ thấy các đơn được BGH giao cho mình hoặc đơn chưa gán ai
       const isAdminOrManager = userRole === "ADMIN" || userRole === "MANAGER";
       if (!isAdminOrManager) {
         query.$or = [
           { assignedDispatcher: userId },
-          { assignedDispatcher: null }, // Đơn đã duyệt nhưng chưa chỉ định cụ thể ai phân bổ
+          { assignedDispatcher: null },
         ];
       }
     }
@@ -510,9 +518,16 @@ const reviewBookingByBGH = async (req, res) => {
       booking.approvalDate = new Date();
       booking.approvedBy = userId;
       booking.approvalNotes = approvalNotes || "";
-      booking.assignedDispatcher = assignedDispatcher || null; // Lãnh đạo được BGH giao nhiệm vụ phân bổ xe
       booking.rejectionReason = "";
-      booking.dispatchStatus = "UNASSIGNED"; // Đưa vào hàng đợi phân bổ xe
+
+      // Nếu là Xe công nghệ: BGH duyệt là xong, hoàn tất luôn quy trình phân bổ
+      if (booking.vehicleType === "RIDE_HAILING") {
+        booking.assignedDispatcher = null;
+        booking.dispatchStatus = "ASSIGNED"; // Đã được duyệt đi xe công nghệ, không cần bước phân bổ xe & tài xế
+      } else {
+        booking.assignedDispatcher = assignedDispatcher || null; // Lãnh đạo được BGH giao nhiệm vụ phân bổ xe trường
+        booking.dispatchStatus = "UNASSIGNED"; // Đưa vào hàng đợi phân bổ xe
+      }
     } else if (action === "REJECT") {
       booking.approvalStatus = "REJECTED";
       booking.approvalDate = new Date();
