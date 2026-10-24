@@ -1430,8 +1430,8 @@ const sendVehicleBookingNotificationEmail = async (booking, creatorUser, approve
         if (!approverUser || !approverUser.email) return false;
         const { transporter, sender, brandName } = await getTransporterAndSender();
 
-        const depTimeStr = formatVietnameseDateTime(booking.departureTime);
-        const retTimeStr = formatVietnameseDateTime(booking.estimatedReturnTime);
+        const depTimeStr = formatVietnamDateTime(booking.departureTime);
+        const retTimeStr = formatVietnamDateTime(booking.estimatedReturnTime);
         const vehicleTypeStr = booking.vehicleType === "SCHOOL_VEHICLE" ? "Xe trường" : "Xe công nghệ";
 
         const subject = `[${brandName}] Yêu cầu đăng ký xe công tác: ${booking.purpose}`;
@@ -1539,7 +1539,7 @@ const sendVehicleBookingStatusEmail = async (booking, creatorUser, approverUser,
                     </tr>
                     <tr>
                         <td style="padding: 8px; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #64748b;">Thời gian đi:</td>
-                        <td style="padding: 8px; border-bottom: 1px solid #f1f5f9;">${formatVietnameseDateTime(booking.departureTime)}</td>
+                        <td style="padding: 8px; border-bottom: 1px solid #f1f5f9;">${formatVietnamDateTime(booking.departureTime)}</td>
                     </tr>
                 </table>
 
@@ -1625,7 +1625,7 @@ const sendVehicleDispatchedEmail = async (booking) => {
                     </tr>
                     <tr>
                         <td style="padding: 8px; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #64748b;">Thời gian xuất phát:</td>
-                        <td style="padding: 8px; border-bottom: 1px solid #f1f5f9; color: #2563eb; font-weight: bold;">${formatVietnameseDateTime(booking.departureTime)}</td>
+                        <td style="padding: 8px; border-bottom: 1px solid #f1f5f9; color: #2563eb; font-weight: bold;">${formatVietnamDateTime(booking.departureTime)}</td>
                     </tr>
                 </table>
 
