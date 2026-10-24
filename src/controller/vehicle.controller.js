@@ -546,10 +546,22 @@ const reviewBookingByBGH = async (req, res) => {
 
     await booking.save();
 
-    // Gửi email kết quả phê duyệt cho người đăng ký
+    // Lấy thông tin đầy đủ gồm người đăng ký, BGH và lãnh đạo phân bổ để gửi email
+    const populatedForEmail = await VehicleBooking.findById(booking._id)
+      .populate("requester", "name fullName userName email phone")
+      .populate("assignedDispatcher", "name fullName userName email phone position");
+
+    // Gửi email kết quả phê duyệt cho người đăng ký và lãnh đạo được giao xếp xe
     try {
       if (typeof emailService.sendVehicleBookingStatusEmail === "function") {
-        emailService.sendVehicleBookingStatusEmail(booking, booking.requester, approver, booking.approvalStatus, booking.rejectionReason);
+        emailService.sendVehicleBookingStatusEmail(
+          populatedForEmail,
+          populatedForEmail.requester,
+          approver,
+          booking.approvalStatus,
+          booking.rejectionReason,
+          populatedForEmail.assignedDispatcher
+        );
       }
     } catch (e) {
       console.warn("Lỗi gửi mail thông báo kết quả phê duyệt:", e);
@@ -611,8 +623,11 @@ const dispatchVehicleAndDriver = async (req, res) => {
 
     const populated = await VehicleBooking.findById(id)
       .populate("assignedVehicle")
-      .populate("assignedDriver")
-      .populate("requester", "userName fullName email phone");
+      .populate({
+        path: "assignedDriver",
+        populate: { path: "userAccount", select: "name fullName userName email" },
+      })
+      .populate("requester", "userName fullName name email phone");
 
     // Gửi email thông báo điều phối xe thành công cho người đăng ký và tài xế
     try {
