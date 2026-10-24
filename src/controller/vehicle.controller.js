@@ -265,7 +265,7 @@ const createBooking = async (req, res) => {
       passengerNames: passengerNames || "",
       purpose: purpose.trim(),
       route: route.trim(),
-      departureLocation: departureLocation || "Trường CĐ Bách Khoa Nam Sài Gòn",
+      departureLocation: departureLocation || "Trường Cao đẳng Bách khoa Nam Sài Gòn",
       destination: destination || "",
       departureTime: new Date(departureTime),
       departureHour: departureHour || "",

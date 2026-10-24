@@ -1318,19 +1318,35 @@ const sendWorkScheduleRegistrationEmail = async (schedule, approverUser, creator
             ? `<p style="margin: 6px 0;"><strong>Ghi chú:</strong> <span style="color: #64748b; font-style: italic;">${schedule.notes}</span></p>`
             : "";
 
-        const creatorDept = creatorUser?.department?.departmentName || creatorUser?.departmentName || "Trường CĐ Nam Sài Gòn";
+        // Lấy đầy đủ Chức vụ và Đơn vị công tác
+        const creatorPos = creatorUser?.position?.positionName || creatorUser?.position?.name || creatorUser?.positionName || "";
+        const creatorDept = creatorUser?.department?.departmentName || creatorUser?.department?.name || creatorUser?.departmentName || "";
+        
+        let creatorAffiliation = "";
+        if (creatorPos && creatorDept) {
+            creatorAffiliation = `${creatorPos} - ${creatorDept}`;
+        } else if (creatorDept) {
+            creatorAffiliation = creatorDept;
+        } else if (creatorPos) {
+            creatorAffiliation = `${creatorPos} - Trường Cao đẳng Bách khoa Nam Sài Gòn`;
+        } else {
+            creatorAffiliation = "Trường Cao đẳng Bách khoa Nam Sài Gòn";
+        }
+
         const createdAtStr = formatVietnamDateTime(schedule.createdAt || Date.now());
+        const creatorDisplayName = creatorUser?.name || creatorUser?.fullName || creatorUser?.userName || "Cán bộ / Giảng viên";
+        const approverDisplayName = approverUser?.name || approverUser?.fullName || approverUser?.userName || "Thầy/Cô Ban Giám Hiệu";
 
         let htmlContent = WORK_SCHEDULE_REGISTRATION_EMAIL_TEMPLATE
-            .replace(/{approverName}/g, approverUser.name || "Thầy/Cô Ban Giám Hiệu")
+            .replace(/{approverName}/g, approverDisplayName)
             .replace(/{timeDisplay}/g, timeDisplay)
             .replace(/{content}/g, schedule.content || "Chưa có nội dung")
             .replace(/{host}/g, schedule.host || "Ban Giám Hiệu")
             .replace(/{participants}/g, schedule.participants || "Không có thông tin")
             .replace(/{location}/g, schedule.location || "Chưa xác định")
             .replace(/{notesHtml}/g, notesHtml)
-            .replace(/{creatorName}/g, creatorUser?.name || "Người dùng")
-            .replace(/{creatorDepartment}/g, creatorDept)
+            .replace(/{creatorName}/g, creatorDisplayName)
+            .replace(/{creatorDepartment}/g, creatorAffiliation)
             .replace(/{createdAtStr}/g, createdAtStr);
 
         const subject = `[${brandName} - Đăng ký lịch công tác] ${schedule.content ? schedule.content.substring(0, 60) : 'Lịch mới'} - ${dateStr}`;
@@ -1393,7 +1409,7 @@ const sendWorkScheduleStatusEmail = async (schedule, creatorUser, approverUser, 
             .replace(/{headerColorStart}/g, headerColorStart)
             .replace(/{headerColorEnd}/g, headerColorEnd)
             .replace(/{headerBorderColor}/g, headerBorderColor)
-            .replace(/{creatorName}/g, creatorUser.name || "Thầy/Cô")
+            .replace(/{creatorName}/g, creatorUser?.name || creatorUser?.fullName || creatorUser?.userName || "Thầy/Cô")
             .replace(/{statusBadgeHtml}/g, statusBadgeHtml)
             .replace(/{timeDisplay}/g, timeDisplay)
             .replace(/{content}/g, schedule.content || "Chưa có nội dung")
@@ -1443,8 +1459,8 @@ const sendVehicleBookingNotificationEmail = async (booking, creatorUser, approve
                 <p style="margin: 6px 0 0; opacity: 0.95; font-size: 13.5px;">Mã phiếu: <strong>${booking.bookingCode || 'Chờ cấp mã'}</strong></p>
             </div>
             <div style="padding: 24px; background-color: #ffffff;">
-                <p style="font-size: 15px;">Kính gửi <strong>${approverUser.fullName || approverUser.userName}</strong> (Ban Giám Hiệu),</p>
-                <p style="font-size: 14px; color: #475569;">Hệ thống vừa tiếp nhận yêu cầu đăng ký phương tiện đi công tác từ <strong>${creatorUser?.fullName || creatorUser?.userName || booking.requesterName}</strong> thuộc <strong>${booking.departmentName || 'Đơn vị'}</strong>. Kính trình Thầy/Cô xem xét và phê duyệt theo quy định:</p>
+                <p style="font-size: 15px;">Kính gửi <strong>${approverUser?.name || approverUser?.fullName || approverUser?.userName || 'Quý Thầy/Cô'}</strong> (Ban Giám Hiệu),</p>
+                <p style="font-size: 14px; color: #475569;">Hệ thống vừa tiếp nhận yêu cầu đăng ký phương tiện đi công tác từ <strong>${creatorUser?.name || creatorUser?.fullName || creatorUser?.userName || booking.requesterName || 'Người đăng ký'}</strong> thuộc <strong>${booking.departmentName || 'Trường Cao đẳng Bách khoa Nam Sài Gòn'}</strong>. Kính trình Thầy/Cô xem xét và phê duyệt theo quy định:</p>
                 
                 <table style="width: 100%; border-collapse: collapse; margin: 18px 0; font-size: 14px; background-color: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
                     <tr>
@@ -1473,7 +1489,7 @@ const sendVehicleBookingNotificationEmail = async (booking, creatorUser, approve
                     </tr>
                     <tr>
                         <td style="padding: 10px 14px; font-weight: bold; color: #64748b;">Người đăng ký liên hệ:</td>
-                        <td style="padding: 10px 14px;"><strong>${creatorUser?.fullName || creatorUser?.userName || booking.requesterName}</strong> - SĐT: <span style="color: #0284c7; font-weight: bold;">${booking.contactPhone}</span></td>
+                        <td style="padding: 10px 14px;"><strong>${creatorUser?.name || creatorUser?.fullName || creatorUser?.userName || booking.requesterName}</strong> - SĐT: <span style="color: #0284c7; font-weight: bold;">${booking.contactPhone}</span></td>
                     </tr>
                 </table>
 
@@ -1527,8 +1543,8 @@ const sendVehicleBookingStatusEmail = async (booking, creatorUser, approverUser,
                     <p style="margin: 6px 0 0; opacity: 0.95; font-size: 13.5px;">Mã phiếu: <strong>${booking.bookingCode}</strong></p>
                 </div>
                 <div style="padding: 24px; background-color: #ffffff;">
-                    <p style="font-size: 15px;">Kính gửi <strong>${creatorUser.fullName || creatorUser.userName}</strong>,</p>
-                    <p style="font-size: 14px; color: #475569;">Đơn đăng ký xe công tác của bạn đã được <strong>${approverUser ? (approverUser.fullName || approverUser.userName) : 'Ban Giám Hiệu'}</strong> xem xét và đưa ra quyết định:</p>
+                    <p style="font-size: 15px;">Kính gửi <strong>${creatorUser?.name || creatorUser?.fullName || creatorUser?.userName || booking.requesterName || 'Quý Thầy/Cô'}</strong>,</p>
+                    <p style="font-size: 14px; color: #475569;">Đơn đăng ký xe công tác của bạn đã được <strong>${approverUser ? (approverUser.name || approverUser.fullName || approverUser.userName) : 'Ban Giám Hiệu'}</strong> xem xét và đưa ra quyết định:</p>
                     
                     <div style="background-color: ${isApproved ? '#f0fdf4' : '#fef2f2'}; border-left: 4px solid ${isApproved ? '#10b981' : '#ef4444'}; padding: 14px 18px; margin: 18px 0; border-radius: 6px;">
                         <p style="margin: 0; font-weight: bold; font-size: 15px; color: ${isApproved ? '#15803d' : '#b91c1c'};">
@@ -1584,7 +1600,7 @@ const sendVehicleBookingStatusEmail = async (booking, creatorUser, approverUser,
                     <p style="margin: 6px 0 0; opacity: 0.95; font-size: 13.5px;">Mã phiếu: <strong>${booking.bookingCode}</strong></p>
                 </div>
                 <div style="padding: 24px; background-color: #ffffff;">
-                    <p style="font-size: 15px;">Kính gửi <strong>${assignedDispatcher.fullName || assignedDispatcher.name || assignedDispatcher.userName}</strong>,</p>
+                    <p style="font-size: 15px;">Kính gửi <strong>${assignedDispatcher?.name || assignedDispatcher?.fullName || assignedDispatcher?.userName || 'Thầy/Cô'}</strong>,</p>
                     <p style="font-size: 14px; color: #475569;">Ban Giám Hiệu vừa phê duyệt đơn đăng ký xe công tác và <strong>giao nhiệm vụ phân bổ phương tiện, tài xế</strong> cho Thầy/Cô. Thông tin chi tiết chuyến đi:</p>
 
                     <table style="width: 100%; border-collapse: collapse; margin: 18px 0; font-size: 14px; background-color: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
@@ -1606,7 +1622,7 @@ const sendVehicleBookingStatusEmail = async (booking, creatorUser, approverUser,
                         </tr>
                         <tr>
                             <td style="padding: 10px 14px; border-bottom: 1px solid #e2e8f0; font-weight: bold; color: #64748b;">Người đăng ký:</td>
-                            <td style="padding: 10px 14px; border-bottom: 1px solid #e2e8f0;"><strong>${creatorUser?.fullName || creatorUser?.userName || booking.requesterName}</strong> (${booking.departmentName || ''}) - SĐT: ${booking.contactPhone}</td>
+                            <td style="padding: 10px 14px; border-bottom: 1px solid #e2e8f0;"><strong>${creatorUser?.name || creatorUser?.fullName || creatorUser?.userName || booking.requesterName}</strong> (${booking.departmentName || 'Trường Cao đẳng Bách khoa Nam Sài Gòn'}) - SĐT: ${booking.contactPhone}</td>
                         </tr>
                         <tr>
                             <td style="padding: 10px 14px; border-bottom: 1px solid #e2e8f0; font-weight: bold; color: #64748b;">Số lượng người đi:</td>
@@ -1741,7 +1757,7 @@ const sendVehicleDispatchedEmail = async (booking) => {
                         <p style="margin: 6px 0; font-size: 14px;">Phương tiện phụ trách: <strong>${vehicleName}</strong> (Biển số: <strong style="color: #b91c1c;">${licensePlate}</strong>)</p>
                         <p style="margin: 6px 0; font-size: 14px;">Thời gian xuất phát: <strong style="color: #059669; font-size: 15px;">${depHourStr}ngày ${depDateStr}</strong></p>
                         <p style="margin: 6px 0; font-size: 14px;">Lộ trình: <strong>${booking.route}</strong></p>
-                        <p style="margin: 6px 0; font-size: 14px;">Người liên hệ / Trưởng đoàn: <strong>${booking.requester?.fullName || booking.requesterName}</strong> - SĐT: <a href="tel:${booking.contactPhone}" style="color: #0284c7; font-weight: bold; text-decoration: none;">${booking.contactPhone}</a></p>
+                        <p style="margin: 6px 0; font-size: 14px;">Người liên hệ / Trưởng đoàn: <strong>${booking.requester?.name || booking.requester?.fullName || booking.requesterName}</strong> - SĐT: <a href="tel:${booking.contactPhone}" style="color: #0284c7; font-weight: bold; text-decoration: none;">${booking.contactPhone}</a></p>
                         <p style="margin: 6px 0; font-size: 14px;">Số lượng người đi: <strong>${booking.passengersCount || 1}</strong> người ${booking.passengerNames ? `(${booking.passengerNames})` : ''}</p>
                         ${booking.dispatchNotes ? `<p style="margin: 10px 0 0; font-size: 13.5px; color: #166534; background: #fff; padding: 8px 12px; border-radius: 4px; border: 1px dashed #86efac;"><strong>Ghi chú điểm đón/ca trực:</strong> ${booking.dispatchNotes}</p>` : ''}
                     </div>

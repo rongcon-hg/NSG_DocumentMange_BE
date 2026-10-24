@@ -55,7 +55,7 @@ const vehicleBookingSchema = new mongoose.Schema(
     },
     departureLocation: {
       type: String,
-      default: "Trường CĐ Bách Khoa Nam Sài Gòn",
+      default: "Trường Cao đẳng Bách khoa Nam Sài Gòn",
       trim: true,
     },
     destination: {

@@ -14,7 +14,7 @@ const SEED_TEMPLATES = [
   <tr>
     <td style="width: 45%; text-align: center; vertical-align: top;">
       UBND THÀNH PHỐ HỒ CHÍ MINH<br/>
-      <strong>TRƯỜNG CĐ BÁCH KHOA NAM SÀI GÒN</strong><br/>
+      <strong>TRƯỜNG CAO ĐẲNG BÁCH KHOA NAM SÀI GÒN</strong><br/>
       Đơn vị: <strong>{{DON_VI}}</strong><br/>
       Số: ....../TTr-{{MA_DON_VI}}
     </td>
@@ -83,7 +83,7 @@ Kính trình Ban Giám hiệu xem xét và phê duyệt để đơn vị tiến 
   <tr>
     <td style="width: 45%; text-align: center; vertical-align: top;">
       UBND THÀNH PHỐ HỒ CHÍ MINH<br/>
-      <strong>TRƯỜNG CĐ BÁCH KHOA NAM SÀI GÒN</strong><br/>
+      <strong>TRƯỜNG CAO ĐẲNG BÁCH KHOA NAM SÀI GÒN</strong><br/>
       Số: ....../GM-CĐBNSG
     </td>
     <td style="width: 55%; text-align: center; vertical-align: top;">
@@ -150,7 +150,7 @@ Trường Cao đẳng Bách khoa Nam Sài Gòn trân trọng kính mời:
   <tr>
     <td style="width: 45%; text-align: center; vertical-align: top;">
       UBND THÀNH PHỐ HỒ CHÍ MINH<br/>
-      <strong>TRƯỜNG CĐ BÁCH KHOA NAM SÀI GÒN</strong><br/>
+      <strong>TRƯỜNG CAO ĐẲNG BÁCH KHOA NAM SÀI GÒN</strong><br/>
       Đơn vị: <strong>{{DON_VI}}</strong><br/>
       Số: ....../BC-{{MA_DON_VI}}
     </td>
@@ -210,7 +210,7 @@ Trường Cao đẳng Bách khoa Nam Sài Gòn trân trọng kính mời:
   <tr>
     <td style="width: 45%; text-align: center; vertical-align: top;">
       UBND THÀNH PHỐ HỒ CHÍ MINH<br/>
-      <strong>TRƯỜNG CĐ BÁCH KHOA NAM SÀI GÒN</strong><br/>
+      <strong>TRƯỜNG CAO ĐẲNG BÁCH KHOA NAM SÀI GÒN</strong><br/>
       Đơn vị: <strong>{{DON_VI}}</strong>
     </td>
     <td style="width: 55%; text-align: center; vertical-align: top;">
@@ -333,7 +333,7 @@ exports.getTemplateById = async (req, res) => {
 
       if (currentUser) {
         const userName = currentUser.name || "";
-        const deptName = currentUser.department?.departmentName || "Trường CĐ Bách khoa Nam Sài Gòn";
+        const deptName = currentUser.department?.departmentName || "Trường Cao đẳng Bách khoa Nam Sài Gòn";
         const deptCode = currentUser.department?.departmentCode || "NSG";
         const posName = currentUser.position?.positionName || "Viên chức";
         const now = new Date();
