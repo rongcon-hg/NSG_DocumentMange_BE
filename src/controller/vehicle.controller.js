@@ -235,6 +235,7 @@ const createBooking = async (req, res) => {
       departureLocation,
       destination,
       departureTime,
+      departureHour,
       estimatedReturnTime,
       vehicleType,
       requiredSeats,
@@ -245,7 +246,7 @@ const createBooking = async (req, res) => {
     if (!purpose || !route || !departureTime || !estimatedReturnTime || !targetApprover) {
       return res.status(400).json({
         success: false,
-        message: "Vui lòng điền đầy đủ các thông tin bắt buộc: Mục đích, Lộ trình, Thời gian xuất phát, Thời gian về và BGH duyệt",
+        message: "Vui lòng điền đầy đủ các thông tin bắt buộc: Mục đích, Lộ trình, Ngày xuất phát, Ngày về và BGH duyệt",
       });
     }
 
@@ -267,6 +268,7 @@ const createBooking = async (req, res) => {
       departureLocation: departureLocation || "Trường CĐ Bách Khoa Nam Sài Gòn",
       destination: destination || "",
       departureTime: new Date(departureTime),
+      departureHour: departureHour || "",
       estimatedReturnTime: new Date(estimatedReturnTime),
       vehicleType: vehicleType || "SCHOOL_VEHICLE",
       requiredSeats: Number(requiredSeats) || 7,

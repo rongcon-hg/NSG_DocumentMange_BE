@@ -68,6 +68,11 @@ const vehicleBookingSchema = new mongoose.Schema(
       required: [true, "Thời gian xuất phát là bắt buộc"],
       index: true,
     },
+    departureHour: {
+      type: String, // Giờ xuất phát (ví dụ: "07:30", "14:00")
+      default: "",
+      trim: true,
+    },
     estimatedReturnTime: {
       type: Date, // Thời gian kết thúc dự kiến
       required: [true, "Thời gian kết thúc là bắt buộc"],
