@@ -317,19 +317,43 @@ const getBookings = async (req, res) => {
       query.targetApprover = userId;
       query.approvalStatus = "PENDING";
     }
-    // Tab "dispatch": Dành cho đơn vị quản lý xe xếp xe (các đơn đã được BGH duyệt)
+    // Tab "dispatch": Dành cho người được giao nhiệm vụ phân bổ xe hoặc QTTB/Admin/Manager
     else if (tab === "dispatch") {
       query.approvalStatus = "APPROVED";
+      // Nếu không phải ADMIN hoặc MANAGER, chỉ thấy các đơn được BGH giao cho mình hoặc đơn thuộc quyền
+      const isAdminOrManager = userRole === "ADMIN" || userRole === "MANAGER";
+      if (!isAdminOrManager) {
+        query.$or = [
+          { assignedDispatcher: userId },
+          { assignedDispatcher: null }, // Đơn đã duyệt nhưng chưa chỉ định cụ thể ai phân bổ
+        ];
+      }
+    }
+    // Tab "assigned_driver": Lịch phân công của riêng tài xế
+    else if (tab === "assigned_driver") {
+      // Tìm driver liên kết với user này
+      const driverRecord = await Driver.findOne({ userAccount: userId, isActive: true });
+      if (driverRecord) {
+        query.assignedDriver = driverRecord._id;
+      } else {
+        query.requester = userId; // fallback
+      }
     }
     // Tab "all": Cho Admin/Manager hoặc xem tổng hợp
     else {
-      // Nếu không phải admin/manager và không phải BGH, chỉ xem đơn của chính mình
+      // Nếu không phải admin/manager và không phải BGH, chỉ xem đơn liên quan đến mình
       const isAdminOrManager = userRole === "ADMIN" || userRole === "MANAGER";
-      const isBGH = ["HIỆU TRƯỞNG", "Q.HIỆU TRƯỞNG", "PHÓ HIỆU TRƯỞNG"].some((r) =>
+      const isBGH = ["HIỆU TRƯỞNG", "Q.HIỆU TRƯỞNG", "PHÓ HIỆU TRƯỞNG", "BGH"].some((r) =>
         userRole.includes(r.toUpperCase())
       );
       if (!isAdminOrManager && !isBGH) {
-        query.requester = userId;
+        // Kiểm tra xem user có phải tài xế không
+        const driverRecord = await Driver.findOne({ userAccount: userId, isActive: true });
+        query.$or = [
+          { requester: userId },
+          { assignedDispatcher: userId },
+          ...(driverRecord ? [{ assignedDriver: driverRecord._id }] : []),
+        ];
       }
     }
 
@@ -384,6 +408,14 @@ const getBookings = async (req, res) => {
           select: "name fullName userName position department email",
           populate: { path: "position", select: "positionName name abbreviation" },
         })
+        .populate({
+          path: "assignedDispatcher",
+          select: "name fullName userName position department email",
+          populate: [
+            { path: "position", select: "positionName name abbreviation" },
+            { path: "department", select: "departmentName departmentCode" },
+          ],
+        })
         .populate("assignedVehicle")
         .populate("assignedDriver")
         .sort({ departureTime: -1 })
@@ -432,6 +464,14 @@ const getBookingById = async (req, res) => {
         select: "name fullName userName position department email",
         populate: { path: "position", select: "positionName name abbreviation" },
       })
+      .populate({
+        path: "assignedDispatcher",
+        select: "name fullName userName position department email",
+        populate: [
+          { path: "position", select: "positionName name abbreviation" },
+          { path: "department", select: "departmentName departmentCode" },
+        ],
+      })
       .populate("assignedVehicle")
       .populate("assignedDriver");
 
@@ -449,7 +489,7 @@ const reviewBookingByBGH = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user?.id || req.user?._id;
-    const { action, rejectionReason } = req.body; // action: "APPROVE" hoặc "REJECT"
+    const { action, rejectionReason, approvalNotes, assignedDispatcher } = req.body; // action: "APPROVE" hoặc "REJECT"
 
     const booking = await VehicleBooking.findById(id)
       .populate("requester", "userName fullName email phone")
@@ -469,6 +509,8 @@ const reviewBookingByBGH = async (req, res) => {
       booking.approvalStatus = "APPROVED";
       booking.approvalDate = new Date();
       booking.approvedBy = userId;
+      booking.approvalNotes = approvalNotes || "";
+      booking.assignedDispatcher = assignedDispatcher || null; // Lãnh đạo được BGH giao nhiệm vụ phân bổ xe
       booking.rejectionReason = "";
       booking.dispatchStatus = "UNASSIGNED"; // Đưa vào hàng đợi phân bổ xe
     } else if (action === "REJECT") {

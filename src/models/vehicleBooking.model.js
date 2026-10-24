@@ -116,6 +116,17 @@ const vehicleBookingSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
     },
+    approvalNotes: {
+      type: String, // Ý kiến chỉ đạo của BGH khi duyệt
+      default: "",
+      trim: true,
+    },
+    assignedDispatcher: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User", // Lãnh đạo/nhân sự được BGH giao nhiệm vụ phân bổ xe (thường thuộc P.QTTB-CSVC)
+      default: null,
+      index: true,
+    },
     rejectionReason: {
       type: String,
       default: "",
