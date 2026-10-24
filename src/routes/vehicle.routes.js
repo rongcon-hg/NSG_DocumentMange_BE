@@ -27,6 +27,7 @@ router.delete("/drivers/:id", vehicleController.deleteDriver);
 // ==========================================
 router.post("/bookings", vehicleController.createBooking);
 router.get("/bookings", vehicleController.getBookings);
+router.get("/bookings/pending-count", vehicleController.getVehiclePendingCounts);
 router.get("/bookings/:id", vehicleController.getBookingById);
 router.put("/bookings/:id/review", vehicleController.reviewBookingByBGH); // BGH duyệt/từ chối
 router.put("/bookings/:id/dispatch", vehicleController.dispatchVehicleAndDriver); // Phân bổ xe/tài xế

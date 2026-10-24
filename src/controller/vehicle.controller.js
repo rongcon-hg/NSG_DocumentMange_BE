@@ -702,6 +702,98 @@ const deleteBooking = async (req, res) => {
   }
 };
 
+// Lấy số lượng thông báo / việc cần xử lý về điều xe theo vai trò người dùng
+const getVehiclePendingCounts = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.user?._id;
+    const userRole = (req.user?.role || "").toUpperCase();
+    const isAdminOrManager = userRole === "ADMIN" || userRole === "MANAGER";
+
+    // 1. Kiểm tra vai trò BGH
+    const user = await User.findById(userId).populate("position").populate("department");
+    const posCode = (user?.position?.positionCode || user?.position?.abbreviation || "").toUpperCase();
+    const deptCode = (user?.department?.departmentCode || "").toUpperCase();
+    const deptName = (user?.department?.departmentName || "").toLowerCase();
+    const isBgh =
+      isAdminOrManager ||
+      deptCode === "BGH" ||
+      deptName.includes("giám hiệu") ||
+      ["HT", "PHT", "QHT"].includes(posCode) ||
+      ["HIỆU TRƯỞNG", "Q.HIỆU TRƯỞNG", "PHÓ HIỆU TRƯỞNG"].some((r) => userRole.includes(r));
+
+    // 2. Số lượng đơn chờ BGH duyệt
+    let bghPendingCount = 0;
+    if (isBgh) {
+      const bghQuery = { approvalStatus: "PENDING" };
+      if (!isAdminOrManager) {
+        bghQuery.$or = [{ targetApprover: userId }, { targetApprover: null }];
+      }
+      bghPendingCount = await VehicleBooking.countDocuments(bghQuery);
+    }
+
+    // 3. Số lượng đơn chờ Lãnh đạo phân bổ xe (Đơn đã duyệt, là xe trường, chưa xếp xe)
+    let dispatchPendingCount = 0;
+    const dispatchQuery = {
+      approvalStatus: "APPROVED",
+      dispatchStatus: "UNASSIGNED",
+      vehicleType: { $ne: "RIDE_HAILING" },
+    };
+    if (!isAdminOrManager) {
+      dispatchQuery.$or = [{ assignedDispatcher: userId }, { assignedDispatcher: null }];
+    }
+    dispatchPendingCount = await VehicleBooking.countDocuments(dispatchQuery);
+
+    // 4. Số lượng chuyến xe của Tài xế (Được gán xe mà chưa chạy hoặc đang đi)
+    let driverTripCount = 0;
+    const driverRecord = await Driver.findOne({
+      $or: [
+        { userAccount: userId },
+        ...(user?.mobile ? [{ phone: user.mobile }] : []),
+        ...(user?.phone ? [{ phone: user.phone }] : []),
+      ],
+      isActive: true,
+    });
+
+    if (driverRecord) {
+      driverTripCount = await VehicleBooking.countDocuments({
+        assignedDriver: driverRecord._id,
+        dispatchStatus: { $in: ["ASSIGNED", "IN_PROGRESS"] },
+      });
+    }
+
+    // 5. Tổng số sự kiện cần xử lý cho người dùng này:
+    let totalPending = 0;
+    if (isBgh) totalPending += bghPendingCount;
+    // Nếu là người được giao phân bổ hoặc admin/manager
+    if (isAdminOrManager || dispatchPendingCount > 0) {
+      // Nếu user có nhiệm vụ phân bổ cụ thể
+      const myDispatchCount = await VehicleBooking.countDocuments({
+        approvalStatus: "APPROVED",
+        dispatchStatus: "UNASSIGNED",
+        assignedDispatcher: userId,
+        vehicleType: { $ne: "RIDE_HAILING" },
+      });
+      totalPending += isAdminOrManager ? dispatchPendingCount : myDispatchCount;
+    }
+    if (driverRecord) totalPending += driverTripCount;
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        total: totalPending,
+        bghPendingCount,
+        dispatchPendingCount,
+        driverTripCount,
+        isBgh,
+        isDriver: !!driverRecord,
+      },
+    });
+  } catch (error) {
+    console.error("Lỗi lấy vehicle pending counts:", error);
+    return res.status(500).json({ success: false, message: "Lỗi tải số thông báo điều xe" });
+  }
+};
+
 module.exports = {
   // Vehicle CRUD
   getAllVehicles,
@@ -724,4 +816,5 @@ module.exports = {
   updateTripStatus,
   cancelBooking,
   deleteBooking,
+  getVehiclePendingCounts,
 };
