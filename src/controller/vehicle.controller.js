@@ -256,10 +256,10 @@ const createBooking = async (req, res) => {
 
     const booking = new VehicleBooking({
       requester: userId,
-      requesterName: user.fullName || user.userName,
+      requesterName: user.name || user.fullName || user.userName || "",
       department: user.department?._id || user.department,
-      departmentName: user.department?.name || "",
-      contactPhone: contactPhone || user.phone || "",
+      departmentName: user.department?.departmentName || user.department?.name || "",
+      contactPhone: contactPhone || user.mobile || user.phone || "",
       passengersCount: Number(passengersCount) || 1,
       passengerNames: passengerNames || "",
       purpose: purpose.trim(),
@@ -365,10 +365,25 @@ const getBookings = async (req, res) => {
     const skip = (Number(page) - 1) * Number(limit);
     const [bookings, total] = await Promise.all([
       VehicleBooking.find(query)
-        .populate("requester", "userName fullName email phone")
-        .populate("department", "name")
-        .populate("targetApprover", "userName fullName position")
-        .populate("approvedBy", "userName fullName position")
+        .populate({
+          path: "requester",
+          select: "name fullName userName email mobile phone department position",
+          populate: [
+            { path: "department", select: "departmentName departmentCode" },
+            { path: "position", select: "positionName name abbreviation" },
+          ],
+        })
+        .populate("department", "departmentName departmentCode name")
+        .populate({
+          path: "targetApprover",
+          select: "name fullName userName position department email",
+          populate: { path: "position", select: "positionName name abbreviation" },
+        })
+        .populate({
+          path: "approvedBy",
+          select: "name fullName userName position department email",
+          populate: { path: "position", select: "positionName name abbreviation" },
+        })
         .populate("assignedVehicle")
         .populate("assignedDriver")
         .sort({ departureTime: -1 })
@@ -398,10 +413,25 @@ const getBookingById = async (req, res) => {
   try {
     const { id } = req.params;
     const booking = await VehicleBooking.findById(id)
-      .populate("requester", "userName fullName email phone")
-      .populate("department", "name")
-      .populate("targetApprover", "userName fullName position")
-      .populate("approvedBy", "userName fullName position")
+      .populate({
+        path: "requester",
+        select: "name fullName userName email mobile phone department position",
+        populate: [
+          { path: "department", select: "departmentName departmentCode" },
+          { path: "position", select: "positionName name abbreviation" },
+        ],
+      })
+      .populate("department", "departmentName departmentCode name")
+      .populate({
+        path: "targetApprover",
+        select: "name fullName userName position department email",
+        populate: { path: "position", select: "positionName name abbreviation" },
+      })
+      .populate({
+        path: "approvedBy",
+        select: "name fullName userName position department email",
+        populate: { path: "position", select: "positionName name abbreviation" },
+      })
       .populate("assignedVehicle")
       .populate("assignedDriver");
 
