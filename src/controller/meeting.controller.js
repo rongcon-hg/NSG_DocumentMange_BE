@@ -259,6 +259,22 @@ const updateMeeting = async (req, res) => {
       return res.status(404).json({ success: false, message: "Không tìm thấy phiên họp" });
     }
 
+    // Chỉ cho phép điểm danh khi phiên họp đang ở trạng thái Bắt đầu (IN_PROGRESS)
+    if (meeting.status !== "IN_PROGRESS") {
+      let statusMsg = "Phiên họp chưa ở trạng thái bắt đầu hoặc đã kết thúc, không thể thực hiện điểm danh!";
+      if (meeting.status === "PREPARING") {
+        statusMsg = "Phiên họp đang ở trạng thái chuẩn bị (chưa bắt đầu). Vui lòng đợi Chủ tọa / Thư ký bắt đầu phiên họp để điểm danh!";
+      } else if (meeting.status === "CONCLUDED") {
+        statusMsg = "Phiên họp này đã bế mạc (kết thúc). Hệ thống đã khóa điểm danh!";
+      } else if (meeting.status === "CANCELLED") {
+        statusMsg = "Phiên họp này đã bị hủy, không thể điểm danh!";
+      }
+      return res.status(400).json({
+        success: false,
+        message: statusMsg,
+      });
+    }
+
     Object.assign(meeting, updateData);
     await meeting.save();
 
@@ -420,7 +436,8 @@ const logMeetingAccess = async (req, res) => {
           email: userDoc?.email || "",
           departmentName: userDoc?.department?.departmentName || "",
           roleInMeeting: "GUEST",
-          attendanceStatus: "ATTENDED",
+          attendanceStatus: meeting.status === "IN_PROGRESS" ? "ATTENDED" : "ABSENT",
+          checkInTime: meeting.status === "IN_PROGRESS" ? now : undefined,
           accessLogs: [],
           totalAttendanceMinutes: 0,
         };
@@ -944,11 +961,19 @@ const guestJoinMeeting = async (req, res) => {
       return res.status(404).json({ success: false, message: "Không tìm thấy phiên họp" });
     }
 
-    // Kiểm tra trạng thái cuộc họp: Nếu đã bế mạc hoặc hủy thì mã QR hết hiệu lực
-    if (meeting.status === "CONCLUDED" || meeting.status === "CANCELLED") {
+    // Chỉ cho phép tham gia và điểm danh khi phiên họp đang ở trạng thái Bắt đầu (IN_PROGRESS)
+    if (meeting.status !== "IN_PROGRESS") {
+      let statusMsg = "Phiên họp chưa ở trạng thái bắt đầu hoặc đã kết thúc, không thể thực hiện điểm danh!";
+      if (meeting.status === "PREPARING") {
+        statusMsg = "Phiên họp đang ở trạng thái chuẩn bị (chưa bắt đầu). Vui lòng đợi Chủ tọa / Thư ký bắt đầu phiên họp để tham gia điểm danh!";
+      } else if (meeting.status === "CONCLUDED") {
+        statusMsg = "Phiên họp này đã bế mạc (kết thúc). Mã QR điểm danh và tham gia không còn hiệu lực!";
+      } else if (meeting.status === "CANCELLED") {
+        statusMsg = "Phiên họp này đã bị hủy, không thể tham gia điểm danh!";
+      }
       return res.status(400).json({
         success: false,
-        message: "Phiên họp này đã bế mạc hoặc kết thúc. Mã QR tham gia không còn hiệu lực!",
+        message: statusMsg,
       });
     }
 
