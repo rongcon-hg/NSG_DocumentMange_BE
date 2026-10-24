@@ -428,6 +428,8 @@ const getBookings = async (req, res) => {
         })
         .populate("assignedVehicle")
         .populate("assignedDriver")
+        .populate("departureConfirmedBy", "name fullName userName mobile phone")
+        .populate("returnConfirmedBy", "name fullName userName mobile phone")
         .sort({ departureTime: -1 })
         .skip(skip)
         .limit(Number(limit)),
@@ -483,7 +485,9 @@ const getBookingById = async (req, res) => {
         ],
       })
       .populate("assignedVehicle")
-      .populate("assignedDriver");
+      .populate("assignedDriver")
+      .populate("departureConfirmedBy", "name fullName userName mobile phone")
+      .populate("returnConfirmedBy", "name fullName userName mobile phone");
 
     if (!booking) {
       return res.status(404).json({ success: false, message: "Không tìm thấy đơn đăng ký xe" });
@@ -634,19 +638,48 @@ const dispatchVehicleAndDriver = async (req, res) => {
 const updateTripStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, actualReturnTime, actualCost } = req.body;
+    const { status, actualDepartureTime, actualReturnTime, actualCost } = req.body;
+    const currentUserId = req.user?.id || req.user?._id;
 
     const booking = await VehicleBooking.findById(id);
     if (!booking) return res.status(404).json({ success: false, message: "Không tìm thấy đơn điều xe" });
 
-    if (status) booking.dispatchStatus = status;
-    if (actualReturnTime) booking.actualReturnTime = new Date(actualReturnTime);
+    if (status) {
+      booking.dispatchStatus = status;
+
+      // Tự động ghi nhận thời gian và người xác nhận khi bắt đầu đi
+      if (status === "IN_PROGRESS") {
+        booking.actualDepartureTime = actualDepartureTime ? new Date(actualDepartureTime) : new Date();
+        if (currentUserId) booking.departureConfirmedBy = currentUserId;
+      }
+
+      // Tự động ghi nhận thời gian và người xác nhận khi đã về (kết thúc)
+      if (status === "COMPLETED") {
+        booking.actualReturnTime = actualReturnTime ? new Date(actualReturnTime) : new Date();
+        if (currentUserId) booking.returnConfirmedBy = currentUserId;
+      }
+    } else {
+      if (actualDepartureTime) booking.actualDepartureTime = new Date(actualDepartureTime);
+      if (actualReturnTime) booking.actualReturnTime = new Date(actualReturnTime);
+    }
+
     if (actualCost !== undefined && booking.rideHailingDetails) {
       booking.rideHailingDetails.actualCost = Number(actualCost);
     }
 
     await booking.save();
-    return res.status(200).json({ success: true, message: "Cập nhật tiến độ chuyến đi thành công", data: booking });
+
+    const populatedBooking = await VehicleBooking.findById(booking._id)
+      .populate("assignedVehicle")
+      .populate("assignedDriver")
+      .populate("departureConfirmedBy", "name fullName userName mobile phone")
+      .populate("returnConfirmedBy", "name fullName userName mobile phone");
+
+    return res.status(200).json({
+      success: true,
+      message: "Cập nhật tiến độ chuyến đi thành công",
+      data: populatedBooking,
+    });
   } catch (error) {
     return res.status(500).json({ success: false, message: "Lỗi cập nhật tiến độ chuyến đi" });
   }

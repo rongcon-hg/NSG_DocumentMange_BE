@@ -78,8 +78,22 @@ const vehicleBookingSchema = new mongoose.Schema(
       required: [true, "Thời gian kết thúc là bắt buộc"],
       index: true,
     },
+    actualDepartureTime: {
+      type: Date, // Thời gian thực tế bắt đầu đi
+      default: null,
+    },
     actualReturnTime: {
-      type: Date,
+      type: Date, // Thời gian thực tế đã về (kết thúc)
+      default: null,
+    },
+    departureConfirmedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User", // Người bấm xác nhận bắt đầu đi (Tài xế, Người đăng ký hoặc Quản trị viên)
+      default: null,
+    },
+    returnConfirmedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User", // Người bấm xác nhận đã về (Tài xế, Người đăng ký hoặc Quản trị viên)
       default: null,
     },
 
