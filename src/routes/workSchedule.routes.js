@@ -14,6 +14,9 @@ router.delete("/recurring/:id", verifyToken, recurringController.deleteRecurring
 router.patch("/recurring/:id/toggle", verifyToken, recurringController.toggleRecurringWorkSchedule);
 router.post("/recurring/:id/run-now", verifyToken, recurringController.runRecurringWorkScheduleNow);
 
+// Xem lịch công tác công khai không cần đăng nhập (quét QR code)
+router.get("/public", workScheduleController.getPublicWorkSchedules);
+
 // Lấy danh sách lịch công tác (Tất cả người dùng đều có thể xem theo phân quyền)
 router.get("/", verifyToken, workScheduleController.getWorkSchedules);
 

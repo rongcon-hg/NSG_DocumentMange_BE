@@ -1240,3 +1240,40 @@ exports.importWorkSchedules = async (req, res) => {
   }
 };
 
+
+/**
+ * Lấy danh sách lịch công tác đã duyệt công khai (không cần đăng nhập - phục vụ quét mã QR xem lịch tuần)
+ */
+exports.getPublicWorkSchedules = async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const filter = { status: "APPROVED" };
+
+    if (startDate && endDate) {
+      filter.startDate = { $lte: new Date(`${endDate}T23:59:59+07:00`) };
+      filter.endDate = { $gte: new Date(`${startDate}T00:00:00+07:00`) };
+    } else if (startDate) {
+      filter.endDate = { $gte: new Date(`${startDate}T00:00:00+07:00`) };
+    } else if (endDate) {
+      filter.startDate = { $lte: new Date(`${endDate}T23:59:59+07:00`) };
+    }
+
+    const schedules = await WorkSchedule.find(filter)
+      .sort({ startDate: 1, startTime: 1 })
+      .select("startDate endDate startTime endTime content host participants location notes status")
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      data: schedules,
+      total: schedules.length,
+    });
+  } catch (error) {
+    console.error("Lỗi getPublicWorkSchedules:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi lấy lịch công tác công khai",
+      error: error.message,
+    });
+  }
+};
