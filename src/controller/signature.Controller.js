@@ -1,7 +1,9 @@
 const User = require("../models/user.model");
+const crypto = require("crypto");
 const { google } = require("googleapis");
 const { Readable } = require("stream");
 const { authorize, getOrCreateMonthFolder, sanitizeFileName } = require("./uploadfile.Controller");
+const { verifyPdfDigitalSignature } = require("../service/signatureVerification.service");
 
 // Lấy thông tin chữ ký cá nhân
 const getMySignature = async (req, res) => {
@@ -329,6 +331,7 @@ const signPdf = async (req, res) => {
         }
 
         const signedPdfBytes = await pdfDoc.save();
+        const fileHashSha256 = crypto.createHash("sha256").update(Buffer.from(signedPdfBytes)).digest("hex");
 
         // Lưu file PDF đã ký lên Google Drive
         const folderId = await getOrCreateMonthFolder(drive);
@@ -351,7 +354,15 @@ const signPdf = async (req, res) => {
             originalFileName: file.originalname,
             signedFileName: uploadRes.data.name,
             fileId: uploadRes.data.id,
-            mimeType: uploadRes.data.mimeType
+            fileHashSha256,
+            mimeType: uploadRes.data.mimeType,
+            signatureType,
+            certificateInfo: {
+                subject: signerRaw,
+                issuer: caRaw,
+                serialNumber: serialNo,
+                validTo: certData.validTo || "19/09/2028"
+            }
         });
         await signedDoc.save();
 
@@ -473,8 +484,55 @@ const updateCertificate = async (req, res) => {
     }
 };
 
+// Kiểm tra tính hợp lệ của chữ ký số trong file PDF
+const verifyPdfSignatureController = async (req, res) => {
+    try {
+        const file = req.file;
+        if (!file) {
+            return res.status(400).json({ success: false, message: "Vui lòng tải lên tệp PDF cần kiểm tra chữ ký" });
+        }
+
+        const verifyResult = await verifyPdfDigitalSignature(file.buffer, file.originalname);
+        return res.status(200).json(verifyResult);
+    } catch (error) {
+        console.error("Error verifying PDF signature:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Lỗi trong quá trình kiểm tra chữ ký số",
+            error: error.message
+        });
+    }
+};
+
+// Kiểm tra chữ ký số trực tiếp từ tài liệu đã ký trong kho
+const verifyArchiveDocSignature = async (req, res) => {
+    try {
+        const docId = req.params.id;
+        const doc = await SignedDocument.findById(docId).populate("user", "name email position department digitalCertificate");
+        if (!doc) {
+            return res.status(404).json({ success: false, message: "Không tìm thấy tài liệu trong kho lưu trữ" });
+        }
+
+        const auth = await authorize();
+        const drive = google.drive({ version: "v3", auth });
+        const pdfBuffer = await getDriveFileBuffer(drive, doc.fileId);
+
+        const verifyResult = await verifyPdfDigitalSignature(pdfBuffer, doc.signedFileName);
+        return res.status(200).json(verifyResult);
+    } catch (error) {
+        console.error("Error verifying archive doc signature:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Lỗi trong quá trình kiểm tra chữ ký",
+            error: error.message
+        });
+    }
+};
+
 module.exports = {
     updateCertificate,
+    verifyPdfSignatureController,
+    verifyArchiveDocSignature,
     getMySignature,
     uploadSignature,
     signPdf,

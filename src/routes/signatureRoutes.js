@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { verifyToken } = require("../middleware/authMiddleware");
+const { verifyToken, optionalVerifyToken } = require("../middleware/authMiddleware");
 const upload = require("../middleware/multer");
 const signatureController = require("../controller/signature.Controller");
 
@@ -24,6 +24,12 @@ router.get("/image/:fileId", signatureController.getSignatureImage);
 
 // Cập nhật cấu hình chứng thư số cá nhân
 router.post("/update-certificate", verifyToken, signatureController.updateCertificate);
+
+// Kiểm tra tính hợp lệ của chữ ký số (tải lên tệp PDF)
+router.post("/verify", optionalVerifyToken, upload.single("pdfFile"), signatureController.verifyPdfSignatureController);
+
+// Kiểm tra chữ ký số của tài liệu trong kho
+router.get("/verify-archive/:id", verifyToken, signatureController.verifyArchiveDocSignature);
 
 // Xóa văn bản đã ký
 router.delete("/archive/:id", verifyToken, signatureController.deleteArchiveDoc);
