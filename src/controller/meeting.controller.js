@@ -5,10 +5,59 @@ const Notification = require("../models/notification.model");
 const { sendPushToUsers } = require("../service/webPush.service");
 
 /**
+ * Tự động cập nhật trạng thái cuộc họp theo thời gian thực:
+ * - Khi đến giờ bắt đầu (now >= startTime && now < endTime): tự động chuyển từ PREPARING sang IN_PROGRESS
+ * - Khi đã hết giờ kết thúc (now >= endTime): tự động chuyển từ PREPARING / IN_PROGRESS sang CONCLUDED
+ */
+const autoUpdateMeetingStatuses = async (meetingIdOrFilter = null) => {
+  try {
+    const now = new Date();
+    let baseFilter = {};
+    if (meetingIdOrFilter) {
+      if (typeof meetingIdOrFilter === "string" || (meetingIdOrFilter && meetingIdOrFilter._bsontype === "ObjectID")) {
+        baseFilter = { _id: meetingIdOrFilter };
+      } else if (typeof meetingIdOrFilter === "object") {
+        baseFilter = meetingIdOrFilter;
+      }
+    }
+
+    // 1. Tự động BẮT ĐẦU các cuộc họp đã đến giờ (startTime <= now < endTime)
+    await Meeting.updateMany(
+      {
+        ...baseFilter,
+        status: "PREPARING",
+        startTime: { $lte: now },
+        endTime: { $gt: now },
+      },
+      {
+        $set: { status: "IN_PROGRESS" },
+      }
+    );
+
+    // 2. Tự động KẾT THÚC các cuộc họp đã hết giờ (endTime <= now)
+    await Meeting.updateMany(
+      {
+        ...baseFilter,
+        status: { $in: ["PREPARING", "IN_PROGRESS"] },
+        endTime: { $lte: now },
+      },
+      {
+        $set: { status: "CONCLUDED" },
+      }
+    );
+  } catch (err) {
+    console.error("Lỗi autoUpdateMeetingStatuses:", err.message);
+  }
+};
+
+/**
  * 1. Lấy danh sách cuộc họp (Lọc theo thời gian, trạng thái, vai trò tham gia)
  */
 const getMeetings = async (req, res) => {
   try {
+    // Tự động cập nhật trạng thái các cuộc họp đã đến giờ hoặc hết giờ
+    await autoUpdateMeetingStatuses();
+
     const currentUserId = req.user?.userId || req.user?._id;
     const currentUserRole = req.user?.role;
     const { status, type, startDate, endDate, search } = req.query;
@@ -33,11 +82,10 @@ const getMeetings = async (req, res) => {
     }
 
     // Phân quyền xem cuộc họp:
-    // Admin / Manager / BGH: Thấy tất cả các cuộc họp
-    // Cán bộ thông thường: Thấy cuộc họp do mình tạo, mình làm chủ tọa/thư ký, hoặc có tên trong danh sách tham dự
-    const isPrivileged = ["admin", "manager"].includes(currentUserRole);
+    // Chỉ Admin, người tạo cuộc họp, chủ tọa, thư ký và những người có tên trong danh sách tham dự mới thấy phiên họp trong tài khoản của mình
+    const isAdminOnly = currentUserRole === "admin";
 
-    if (!isPrivileged) {
+    if (!isAdminOnly) {
       const accessCondition = {
         $or: [
           { createdBy: currentUserId },
@@ -80,6 +128,7 @@ const getMeetings = async (req, res) => {
 const getMeetingById = async (req, res) => {
   try {
     const { id } = req.params;
+    await autoUpdateMeetingStatuses(id);
     const meeting = await Meeting.findById(id)
       .populate("host", "name email position avatar")
       .populate("secretary", "name email position avatar")
@@ -247,41 +296,145 @@ const createMeeting = async (req, res) => {
 };
 
 /**
- * 4. Cập nhật thông tin phiên họp
+ * 4. Cập nhật thông tin phiên họp (Admin, Người tạo cuộc họp, Chủ trì/Chủ tọa, hoặc Thư ký khi cập nhật chương trình/tài liệu)
  */
 const updateMeeting = async (req, res) => {
   try {
     const { id } = req.params;
-    const updateData = req.body;
+    const currentUserId = req.user?.userId || req.user?._id;
+    const currentUserRole = req.user?.role;
+    const updateData = { ...req.body };
 
     const meeting = await Meeting.findById(id);
     if (!meeting) {
       return res.status(404).json({ success: false, message: "Không tìm thấy phiên họp" });
     }
 
-    // Chỉ cho phép điểm danh khi phiên họp đang ở trạng thái Bắt đầu (IN_PROGRESS)
-    if (meeting.status !== "IN_PROGRESS") {
-      let statusMsg = "Phiên họp chưa ở trạng thái bắt đầu hoặc đã kết thúc, không thể thực hiện điểm danh!";
-      if (meeting.status === "PREPARING") {
-        statusMsg = "Phiên họp đang ở trạng thái chuẩn bị (chưa bắt đầu). Vui lòng đợi Chủ tọa / Thư ký bắt đầu phiên họp để điểm danh!";
-      } else if (meeting.status === "CONCLUDED") {
-        statusMsg = "Phiên họp này đã bế mạc (kết thúc). Hệ thống đã khóa điểm danh!";
-      } else if (meeting.status === "CANCELLED") {
-        statusMsg = "Phiên họp này đã bị hủy, không thể điểm danh!";
-      }
-      return res.status(400).json({
+    const isCreator = (meeting.createdBy?._id || meeting.createdBy)?.toString() === currentUserId?.toString();
+    const isHost = (meeting.host?._id || meeting.host)?.toString() === currentUserId?.toString();
+    const isSecretary = (meeting.secretary?._id || meeting.secretary)?.toString() === currentUserId?.toString();
+    const isAdmin = currentUserRole === "admin";
+
+    if (!isAdmin && !isCreator && !isHost && !isSecretary) {
+      return res.status(403).json({
         success: false,
-        message: statusMsg,
+        message: "Chỉ Admin, Người tạo cuộc họp hoặc Chủ trì mới có quyền chỉnh sửa phiên họp!",
       });
     }
 
+    // Nếu thay đổi host hoặc secretary thì cập nhật luôn hostName / secretaryName
+    const targetHostId = updateData.host || meeting.host;
+    const targetSecretaryId = updateData.secretary !== undefined ? updateData.secretary : meeting.secretary;
+
+    if (updateData.host) {
+      const hostDoc = await User.findById(updateData.host).select("name");
+      updateData.hostName = hostDoc?.name || "";
+    }
+    if (updateData.secretary !== undefined) {
+      if (updateData.secretary) {
+        const secretaryDoc = await User.findById(updateData.secretary).select("name");
+        updateData.secretaryName = secretaryDoc?.name || "";
+      } else {
+        updateData.secretary = null;
+        updateData.secretaryName = "";
+      }
+    }
+
+    // Nếu gửi lên mảng attendees (dạng mảng userIds từ form sửa phiên họp hoặc mảng object)
+    if (Array.isArray(updateData.attendees)) {
+      const isSimpleIdArray = updateData.attendees.some(
+        (a) => typeof a === "string" || (typeof a === "object" && !a.user && !a.guestId && a._bsontype === "ObjectID")
+      );
+
+      if (isSimpleIdArray || updateData.attendees.every((a) => typeof a === "string")) {
+        const existingAttendeesMap = new Map();
+        (meeting.attendees || []).forEach((att) => {
+          if (att.user) {
+            existingAttendeesMap.set(att.user.toString(), att.toObject ? att.toObject() : att);
+          }
+        });
+        // Giữ lại các khách mời (GUEST không có user id) đã tham gia nếu có
+        const existingGuests = (meeting.attendees || []).filter((att) => !att.user && att.guestId);
+
+        const userIds = updateData.attendees.map((a) => (typeof a === "object" ? a.user || a.userId || a._id : a)).filter(Boolean);
+        const userDocs = await User.find({ _id: { $in: userIds } })
+          .populate("department", "departmentName")
+          .populate("position", "positionName")
+          .select("name email department position");
+
+        const formattedAttendees = userDocs.map((u) => {
+          const uIdStr = u._id.toString();
+          const customRole =
+            targetHostId && uIdStr === targetHostId.toString()
+              ? "HOST"
+              : targetSecretaryId && uIdStr === targetSecretaryId.toString()
+              ? "SECRETARY"
+              : "MEMBER";
+
+          const existing = existingAttendeesMap.get(uIdStr);
+          if (existing) {
+            return {
+              ...existing,
+              user: u._id,
+              name: u.name || existing.name,
+              email: u.email || existing.email,
+              positionName: u.position?.positionName || existing.positionName || "",
+              departmentName: u.department?.departmentName || existing.departmentName || "",
+              roleInMeeting: customRole,
+            };
+          }
+
+          return {
+            user: u._id,
+            name: u.name,
+            email: u.email,
+            positionName: u.position?.positionName || "",
+            departmentName: u.department?.departmentName || "",
+            roleInMeeting: customRole,
+            attendanceStatus: "ABSENT",
+          };
+        });
+
+        // Đảm bảo Host luôn có mặt trong attendees
+        if (targetHostId && !formattedAttendees.some((a) => a.user && a.user.toString() === targetHostId.toString())) {
+          const existingHost = existingAttendeesMap.get(targetHostId.toString());
+          const hostDoc = await User.findById(targetHostId).populate("department", "departmentName").populate("position", "positionName");
+          formattedAttendees.unshift(
+            existingHost
+              ? { ...existingHost, roleInMeeting: "HOST" }
+              : {
+                  user: targetHostId,
+                  name: hostDoc?.name || updateData.hostName || meeting.hostName || "",
+                  email: hostDoc?.email || "",
+                  positionName: hostDoc?.position?.positionName || "",
+                  departmentName: hostDoc?.department?.departmentName || "",
+                  roleInMeeting: "HOST",
+                  attendanceStatus: "ABSENT",
+                }
+          );
+        }
+
+        updateData.attendees = [...formattedAttendees, ...existingGuests];
+      }
+    }
+
+    if (updateData.startTime) updateData.startTime = new Date(updateData.startTime);
+    if (updateData.endTime) updateData.endTime = new Date(updateData.endTime);
+
     Object.assign(meeting, updateData);
     await meeting.save();
+    // Tự động kiểm tra cập nhật lại trạng thái theo startTime/endTime mới nếu có
+    await autoUpdateMeetingStatuses(id);
+    const updatedMeeting = await Meeting.findById(id)
+      .populate("host", "name email position avatar")
+      .populate("secretary", "name email position avatar")
+      .populate("department", "departmentName")
+      .populate("createdBy", "name email");
 
     return res.status(200).json({
       success: true,
       message: "Cập nhật phiên họp thành công!",
-      data: meeting,
+      data: updatedMeeting || meeting,
     });
   } catch (error) {
     console.error("Lỗi updateMeeting:", error);
@@ -322,6 +475,7 @@ const updateMeetingStatus = async (req, res) => {
 const checkInMeeting = async (req, res) => {
   try {
     const { id } = req.params;
+    await autoUpdateMeetingStatuses(id);
     const currentUserId = req.user?.userId || req.user?._id;
     const { pinCode, method, location, coords, device } = req.body;
 
@@ -731,6 +885,193 @@ const closeVote = async (req, res) => {
 };
 
 /**
+ * 10b. Chỉnh sửa thông tin biểu quyết (Admin, Chủ tọa, Thư ký, Người tạo)
+ */
+const updateVote = async (req, res) => {
+  try {
+    const { id, voteId } = req.params;
+    const currentUserId = req.user?.userId || req.user?._id;
+    const currentUserRole = req.user?.role;
+    const { title, description, isSecret, isMultipleChoice, status, options } = req.body;
+
+    const meeting = await Meeting.findById(id);
+    if (!meeting) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy phiên họp" });
+    }
+
+    const hostId = meeting.host?._id || meeting.host;
+    const secretaryId = meeting.secretary?._id || meeting.secretary;
+    const createdById = meeting.createdBy?._id || meeting.createdBy;
+
+    const isHost = hostId && hostId.toString() === currentUserId?.toString();
+    const isSecretary = secretaryId && secretaryId.toString() === currentUserId?.toString();
+    const isCreator = createdById && createdById.toString() === currentUserId?.toString();
+    const isAdmin = currentUserRole === "admin" || currentUserRole === "manager";
+
+    if (!isHost && !isSecretary && !isCreator && !isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: "Chỉ Quản trị viên, Chủ tọa hoặc Thư ký phiên họp mới có quyền chỉnh sửa biểu quyết!",
+      });
+    }
+
+    const vote = meeting.votes.id(voteId);
+    if (!vote) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy phiên biểu quyết cần sửa" });
+    }
+
+    const hasVotesCast =
+      (vote.totalVotes || 0) > 0 ||
+      (vote.options || []).some((opt) => (opt.voteCount || 0) > 0 || (opt.voters && opt.voters.length > 0));
+
+    const isOnlyStatusChange =
+      status !== undefined &&
+      title === undefined &&
+      description === undefined &&
+      isSecret === undefined &&
+      isMultipleChoice === undefined &&
+      options === undefined;
+
+    if (hasVotesCast && !isOnlyStatusChange && currentUserRole !== "admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Đợt biểu quyết này đã có người thực hiện biểu quyết, không thể chỉnh sửa nội dung hoặc danh sách (trừ quyền Admin)!",
+      });
+    }
+
+    if (title !== undefined) vote.title = title.trim();
+    if (description !== undefined) vote.description = description || "";
+    if (isSecret !== undefined) vote.isSecret = Boolean(isSecret);
+    if (isMultipleChoice !== undefined) vote.isMultipleChoice = Boolean(isMultipleChoice);
+    if (status && ["OPEN", "CLOSED", "DRAFT"].includes(status)) {
+      vote.status = status;
+      if (status === "CLOSED" && !vote.closedAt) {
+        vote.closedAt = new Date();
+      }
+    }
+
+    // Cập nhật danh sách phương án / nhân sự bầu chọn nếu có
+    if (Array.isArray(options) && options.length > 0) {
+      const existingOptionsMap = new Map();
+      vote.options.forEach((opt) => {
+        if (opt._id) existingOptionsMap.set(opt._id.toString(), opt);
+        if (opt.optionText) existingOptionsMap.set(opt.optionText.trim().toLowerCase(), opt);
+      });
+
+      const newOptions = options.map((opt) => {
+        const text = (typeof opt === "string" ? opt : opt.optionText || "").trim();
+        const optId = opt._id ? opt._id.toString() : null;
+
+        let matched = null;
+        if (optId && existingOptionsMap.has(optId)) {
+          matched = existingOptionsMap.get(optId);
+        } else if (existingOptionsMap.has(text.toLowerCase())) {
+          matched = existingOptionsMap.get(text.toLowerCase());
+        }
+
+        if (matched) {
+          return {
+            _id: matched._id,
+            optionText: text,
+            voteCount: matched.voteCount || 0,
+            voters: matched.voters || [],
+          };
+        }
+
+        return {
+          optionText: text,
+          voteCount: 0,
+          voters: [],
+        };
+      });
+
+      vote.options = newOptions;
+
+      // Tính lại tổng số phiếu
+      const allVoterIds = new Set();
+      vote.options.forEach((opt) => {
+        (opt.voters || []).forEach((v) => {
+          const vStr = typeof v === "object" ? (v._id || v.userId || v.guestId) : v;
+          if (vStr) allVoterIds.add(vStr.toString());
+        });
+      });
+      vote.totalVotes = allVoterIds.size;
+    }
+
+    await meeting.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Cập nhật phiên biểu quyết thành công!",
+      data: meeting.votes,
+    });
+  } catch (error) {
+    console.error("Lỗi updateVote:", error);
+    return res.status(500).json({ success: false, message: "Lỗi cập nhật biểu quyết", error: error.message });
+  }
+};
+
+/**
+ * 10c. Xóa phiên biểu quyết (Admin, Chủ tọa, Thư ký, Người tạo)
+ */
+const deleteVote = async (req, res) => {
+  try {
+    const { id, voteId } = req.params;
+    const currentUserId = req.user?.userId || req.user?._id;
+    const currentUserRole = req.user?.role;
+
+    const meeting = await Meeting.findById(id);
+    if (!meeting) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy phiên họp" });
+    }
+
+    const hostId = meeting.host?._id || meeting.host;
+    const secretaryId = meeting.secretary?._id || meeting.secretary;
+    const createdById = meeting.createdBy?._id || meeting.createdBy;
+
+    const isHost = hostId && hostId.toString() === currentUserId?.toString();
+    const isSecretary = secretaryId && secretaryId.toString() === currentUserId?.toString();
+    const isCreator = createdById && createdById.toString() === currentUserId?.toString();
+    const isAdmin = currentUserRole === "admin" || currentUserRole === "manager";
+
+    if (!isHost && !isSecretary && !isCreator && !isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: "Chỉ Quản trị viên, Chủ tọa hoặc Thư ký phiên họp mới có quyền xóa biểu quyết!",
+      });
+    }
+
+    const vote = meeting.votes.id(voteId);
+    if (!vote) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy phiên biểu quyết cần xóa" });
+    }
+
+    const hasVotesCast =
+      (vote.totalVotes || 0) > 0 ||
+      (vote.options || []).some((opt) => (opt.voteCount || 0) > 0 || (opt.voters && opt.voters.length > 0));
+
+    if (hasVotesCast && currentUserRole !== "admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Đợt biểu quyết này đã có người thực hiện biểu quyết, không thể xóa (trừ quyền Admin)!",
+      });
+    }
+
+    meeting.votes.pull(voteId);
+    await meeting.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Đã xóa phiên biểu quyết thành công!",
+      data: meeting.votes,
+    });
+  } catch (error) {
+    console.error("Lỗi deleteVote:", error);
+    return res.status(500).json({ success: false, message: "Lỗi xóa biểu quyết", error: error.message });
+  }
+};
+
+/**
  * 11. Lưu biên bản cuộc họp & Tự động sinh công việc (Action Items)
  */
 const saveMinutesAndActionItems = async (req, res) => {
@@ -863,6 +1204,68 @@ const addMeetingDocument = async (req, res) => {
 };
 
 /**
+ * 13b. Chỉnh sửa thông tin tài liệu đính kèm trong phiên họp
+ */
+const updateMeetingDocument = async (req, res) => {
+  try {
+    const { id, docId } = req.params;
+    const { title, fileId, fileUrl, fileName, fileSize, mimeType, isConfidential } = req.body;
+    const currentUserId = req.user?.userId || req.user?._id;
+    const currentUserRole = req.user?.role;
+
+    const meeting = await Meeting.findById(id);
+    if (!meeting) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy phiên họp" });
+    }
+
+    const docIndex = meeting.documents.findIndex(
+      (d) => d._id?.toString() === docId || d.fileId === docId
+    );
+
+    if (docIndex === -1) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy tài liệu này trong phiên họp" });
+    }
+
+    const targetDoc = meeting.documents[docIndex];
+    const isOwner = targetDoc.uploadedBy && targetDoc.uploadedBy.toString() === currentUserId?.toString();
+    const isHost = (meeting.host?._id || meeting.host)?.toString() === currentUserId?.toString();
+    const isSecretary = (meeting.secretary?._id || meeting.secretary)?.toString() === currentUserId?.toString();
+    const isCreator = (meeting.createdBy?._id || meeting.createdBy)?.toString() === currentUserId?.toString();
+    const isPrivileged = ["admin", "manager"].includes(currentUserRole);
+
+    if (!isHost && !isSecretary && !isPrivileged && !isCreator && !isOwner) {
+      return res.status(403).json({
+        success: false,
+        message: "Bạn không có quyền chỉnh sửa tài liệu này!",
+      });
+    }
+
+    if (title !== undefined) targetDoc.title = title.trim() || targetDoc.fileName || "Tài liệu phiên họp";
+    if (fileId !== undefined) targetDoc.fileId = fileId;
+    if (fileUrl !== undefined) {
+      targetDoc.fileUrl = fileUrl || (targetDoc.fileId ? `https://drive.google.com/file/d/${targetDoc.fileId}/view?usp=sharing` : "");
+    } else if (fileId) {
+      targetDoc.fileUrl = `https://drive.google.com/file/d/${fileId}/view?usp=sharing`;
+    }
+    if (fileName !== undefined) targetDoc.fileName = fileName || targetDoc.title || "document.pdf";
+    if (fileSize !== undefined) targetDoc.fileSize = fileSize;
+    if (mimeType !== undefined) targetDoc.mimeType = mimeType;
+    if (isConfidential !== undefined) targetDoc.isConfidential = Boolean(isConfidential);
+
+    await meeting.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Cập nhật thông tin tài liệu thành công!",
+      data: meeting.documents,
+    });
+  } catch (error) {
+    console.error("Lỗi updateMeetingDocument:", error);
+    return res.status(500).json({ success: false, message: "Lỗi cập nhật tài liệu phiên họp", error: error.message });
+  }
+};
+
+/**
  * 14. Xóa tài liệu khỏi phiên họp (Chủ trì, Quản lý/Manager, Admin, hoặc người tải lên)
  */
 const deleteMeetingDocument = async (req, res) => {
@@ -917,6 +1320,7 @@ const deleteMeetingDocument = async (req, res) => {
 const getPublicMeeting = async (req, res) => {
   try {
     const { id } = req.params;
+    await autoUpdateMeetingStatuses(id);
     const meeting = await Meeting.findById(id)
       .populate("host", "name email department position")
       .populate("secretary", "name email department position")
@@ -950,6 +1354,7 @@ const getPublicMeeting = async (req, res) => {
 const guestJoinMeeting = async (req, res) => {
   try {
     const { id } = req.params;
+    await autoUpdateMeetingStatuses(id);
     const { pinCode, name, position, department, location, coords, guestId, device } = req.body;
 
     if (!name || !name.trim()) {
@@ -1057,6 +1462,7 @@ const guestJoinMeeting = async (req, res) => {
 };
 
 module.exports = {
+  autoUpdateMeetingStatuses,
   getMeetings,
   getMeetingById,
   createMeeting,
@@ -1065,11 +1471,14 @@ module.exports = {
   checkInMeeting,
   toggleSpeakRequest,
   createOrOpenVote,
+  updateVote,
+  deleteVote,
   submitVote,
   closeVote,
   saveMinutesAndActionItems,
   deleteMeeting,
   addMeetingDocument,
+  updateMeetingDocument,
   deleteMeetingDocument,
   logMeetingAccess,
   getPublicMeeting,

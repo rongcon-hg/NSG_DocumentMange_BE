@@ -237,7 +237,17 @@ const { executeRecurringTasksGeneration } = require('./src/service/recurringTask
 const { executeRecurringWorkSchedulesGeneration } = require('./src/service/recurringWorkSchedule.service');
 const { executeQuarterlyPlanReminders } = require('./src/service/quarterlyPlanCron.service');
 const { autoUpdateEffectiveStatuses } = require('./src/controller/legalBasis.controller');
+const { autoUpdateMeetingStatuses } = require('./src/controller/meeting.controller');
 const { executeMeetingReminders } = require('./src/service/meetingReminder.service');
+
+// Quét cập nhật trạng thái Bắt đầu và Kết thúc cuộc họp mỗi phút
+cron.schedule('* * * * *', async () => {
+    try {
+        await autoUpdateMeetingStatuses();
+    } catch (e) {
+        console.error('Lỗi chạy Cron tự động cập nhật trạng thái cuộc họp:', e);
+    }
+});
 
 // Quét nhắc lịch họp mỗi 5 phút (trước 1 ngày, trước 30 phút và khi bắt đầu)
 cron.schedule('*/5 * * * *', async () => {

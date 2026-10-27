@@ -2,6 +2,7 @@ const Meeting = require("../models/meeting.model");
 const Notification = require("../models/notification.model");
 const { sendPushToUsers } = require("./webPush.service");
 const { sendMeetingReminderEmail } = require("./NodeMailer.service/email");
+const { autoUpdateMeetingStatuses } = require("../controller/meeting.controller");
 
 /**
  * Quét các cuộc họp và gửi thông báo / email nhắc nhở:
@@ -11,6 +12,9 @@ const { sendMeetingReminderEmail } = require("./NodeMailer.service/email");
  */
 const executeMeetingReminders = async () => {
   try {
+    // Tự động chuyển trạng thái Bắt đầu (IN_PROGRESS) và Kết thúc (CONCLUDED) theo giờ
+    await autoUpdateMeetingStatuses();
+
     const now = new Date();
 
     // Chỉ quét các cuộc họp chưa bế mạc hoặc hủy
