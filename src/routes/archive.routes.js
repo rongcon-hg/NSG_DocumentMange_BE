@@ -5,6 +5,7 @@ const { verifyToken } = require('../middleware/authMiddleware');
 
 router.use(verifyToken);
 
+router.get('/next-code', archiveController.getNextArchiveFolderCode);
 router.get('/', archiveController.getArchiveFolders);
 router.post('/batch-import', archiveController.batchImportArchiveFolders);
 router.get('/:id', archiveController.getArchiveFolderById);

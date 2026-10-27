@@ -147,20 +147,86 @@ const getArchiveFolderById = async (req, res) => {
 };
 
 /**
+ * Lấy mã hồ sơ tiếp theo tự động (Ví dụ: HS-2026/008)
+ */
+const getNextArchiveFolderCode = async (req, res) => {
+  try {
+    const currentYear = new Date().getFullYear();
+    const prefix = `HS-${currentYear}/`;
+
+    // Tìm tất cả các hồ sơ có mã dạng HS-YYYY/... hoặc HS-YYYY-...
+    const regex = new RegExp(`^HS-?${currentYear}[/-](\\d+)`, 'i');
+    const folders = await ArchiveFolder.find({
+      folderCode: { $regex: regex }
+    }).select('folderCode').lean();
+
+    let maxNum = 0;
+    folders.forEach(f => {
+      const match = (f.folderCode || '').match(regex);
+      if (match && match[1]) {
+        const num = parseInt(match[1], 10);
+        if (!isNaN(num) && num > maxNum) {
+          maxNum = num;
+        }
+      }
+    });
+
+    const nextNum = maxNum + 1;
+    const nextCode = `${prefix}${String(nextNum).padStart(3, '0')}`;
+
+    return res.json({
+      success: true,
+      nextCode,
+      currentYear,
+      nextNum,
+    });
+  } catch (error) {
+    console.error('Lỗi getNextArchiveFolderCode:', error);
+    const fallbackYear = new Date().getFullYear();
+    return res.json({
+      success: true,
+      nextCode: `HS-${fallbackYear}/001`,
+    });
+  }
+};
+
+/**
  * Tạo mới hồ sơ lưu trữ
  */
 const createArchiveFolder = async (req, res) => {
   try {
-    const { folderCode, title, academicYear, retentionPeriod, department, description, accessScope, allowedDepartments, allowedUsers } = req.body;
+    let { folderCode, title, academicYear, retentionPeriod, department, description, accessScope, allowedDepartments, allowedUsers } = req.body;
     const userId = req.user?._id || req.user?.id;
 
-    if (!folderCode || !title) {
-      return res.status(400).json({ success: false, message: 'Vui lòng nhập Mã hồ sơ và Tiêu đề hồ sơ' });
+    if (!title || !title.trim()) {
+      return res.status(400).json({ success: false, message: 'Vui lòng nhập Tiêu đề hồ sơ' });
     }
 
-    const existing = await ArchiveFolder.findOne({ folderCode: folderCode.trim() });
-    if (existing) {
-      return res.status(400).json({ success: false, message: `Mã hồ sơ "${folderCode}" đã tồn tại trên hệ thống!` });
+    // Nếu người dùng không nhập mã hồ sơ hoặc để trống, hệ thống tự động sinh mã
+    if (!folderCode || !folderCode.trim()) {
+      const currentYear = new Date().getFullYear();
+      const prefix = `HS-${currentYear}/`;
+      const regex = new RegExp(`^HS-?${currentYear}[/-](\\d+)`, 'i');
+      const folders = await ArchiveFolder.find({
+        folderCode: { $regex: regex }
+      }).select('folderCode').lean();
+
+      let maxNum = 0;
+      folders.forEach(f => {
+        const match = (f.folderCode || '').match(regex);
+        if (match && match[1]) {
+          const num = parseInt(match[1], 10);
+          if (!isNaN(num) && num > maxNum) {
+            maxNum = num;
+          }
+        }
+      });
+      folderCode = `${prefix}${String(maxNum + 1).padStart(3, '0')}`;
+    } else {
+      const existing = await ArchiveFolder.findOne({ folderCode: folderCode.trim() });
+      if (existing) {
+        return res.status(400).json({ success: false, message: `Mã hồ sơ "${folderCode}" đã tồn tại trên hệ thống!` });
+      }
     }
 
     let deptId = department || req.user?.department;
@@ -672,6 +738,7 @@ const batchImportArchiveFolders = async (req, res) => {
 };
 
 module.exports = {
+  getNextArchiveFolderCode,
   getArchiveFolders,
   getArchiveFolderById,
   createArchiveFolder,
