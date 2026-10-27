@@ -959,7 +959,7 @@ const updateVote = async (req, res) => {
     if (hasVotesCast && !isOnlyStatusChange && currentUserRole !== "admin") {
       return res.status(403).json({
         success: false,
-        message: "Đợt biểu quyết này đã có người thực hiện biểu quyết, không thể chỉnh sửa nội dung hoặc danh sách (trừ quyền Admin)!",
+        message: "Đợt biểu quyết này đã có người thực hiện biểu quyết, không thể chỉnh sửa nội dung hoặc danh sách!",
       });
     }
 
@@ -1077,7 +1077,7 @@ const deleteVote = async (req, res) => {
     if (hasVotesCast && currentUserRole !== "admin") {
       return res.status(403).json({
         success: false,
-        message: "Đợt biểu quyết này đã có người thực hiện biểu quyết, không thể xóa (trừ quyền Admin)!",
+        message: "Đợt biểu quyết này đã có người thực hiện biểu quyết, không thể xóa!",
       });
     }
 
