@@ -94,6 +94,7 @@ const handleChat = async (req, res) => {
     let userDataContext = "";
     let todoTaskCount = 0;
     let unreadDocCount = 0;
+    let overdueDocCount = 0;
     let userDepartmentId = null;
 
     if (userId) {
@@ -115,7 +116,7 @@ const handleChat = async (req, res) => {
         const startOfToday = new Date();
         startOfToday.setHours(0, 0, 0, 0);
 
-        const overdueDocCount = await Document.countDocuments({
+        overdueDocCount = await Document.countDocuments({
           docType: "received",
           "assignedToUsers": {
             $elemMatch: {
@@ -298,24 +299,46 @@ NGUYÊN TẮC TRẢ LỜI:
 3. Nếu mục đó có Tệp đính kèm (Drive file), BẮT BUỘC chèn đường link dạng Markdown: [Tên file](https://drive.google.com/file/d/MÃ_FILE/view) để người dùng có thể nhấp vào xem trực tiếp.
 4. Tuyệt đối không bịa đặt dữ liệu. Nếu không tìm thấy, hãy thông báo lịch sự rằng không tìm thấy kết quả phù hợp.`;
 
-    let model;
-    try {
-      model = genAI.getGenerativeModel({ 
-        model: "gemini-2.5-flash",
-        systemInstruction,
-        tools 
-      });
-    } catch (e) {
-      model = genAI.getGenerativeModel({ 
-        model: "gemini-2.5-pro",
-        systemInstruction,
-        tools 
-      });
+    const candidateModels = [
+      config.model,
+      "gemini-3.8-flash",
+      "gemini-3.5-flash",
+      "gemini-3.6-flash",
+      "gemini-flash-latest",
+      "gemini-2.0-flash",
+      "gemini-1.5-flash"
+    ].filter(Boolean);
+
+    let chat = null;
+    let result = null;
+    let response = null;
+    let lastError = null;
+
+    for (const modelName of candidateModels) {
+      try {
+        const model = genAI.getGenerativeModel({
+          model: modelName,
+          systemInstruction,
+          tools
+        });
+        const currentChat = model.startChat({ history: validHistory });
+        const currentResult = await currentChat.sendMessage(message);
+        const currentResponse = await currentResult.response;
+
+        chat = currentChat;
+        result = currentResult;
+        response = currentResponse;
+        break;
+      } catch (err) {
+        lastError = err;
+        console.warn(`[Chatbot] Thử model ${modelName} thất bại:`, err.message);
+      }
     }
 
-    const chat = model.startChat({ history: validHistory });
-    const result = await chat.sendMessage(message);
-    const response = await result.response;
+    if (!response) {
+      throw lastError || new Error("Không thể khởi tạo hoặc gửi tin nhắn tới các model AI.");
+    }
+
     let finalAnswer = response.text();
 
     const functionCalls = response.functionCalls();
