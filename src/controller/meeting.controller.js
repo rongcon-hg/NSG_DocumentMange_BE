@@ -35,16 +35,26 @@ const autoUpdateMeetingStatuses = async (meetingIdOrFilter = null) => {
     );
 
     // 2. Tự động KẾT THÚC các cuộc họp đã hết giờ (endTime <= now)
-    await Meeting.updateMany(
-      {
-        ...baseFilter,
-        status: { $in: ["PREPARING", "IN_PROGRESS"] },
-        endTime: { $lte: now },
-      },
-      {
-        $set: { status: "CONCLUDED" },
+    const concludedMeetings = await Meeting.find({
+      ...baseFilter,
+      status: { $in: ["PREPARING", "IN_PROGRESS"] },
+      endTime: { $lte: now },
+    });
+
+    if (concludedMeetings.length > 0) {
+      for (const m of concludedMeetings) {
+        m.status = "CONCLUDED";
+        (m.votes || []).forEach((vote) => {
+          if (vote.status === "OPEN") {
+            vote.status = "CLOSED";
+            if (!vote.closedAt) {
+              vote.closedAt = now;
+            }
+          }
+        });
+        await m.save();
       }
-    );
+    }
   } catch (err) {
     console.error("Lỗi autoUpdateMeetingStatuses:", err.message);
   }
@@ -456,6 +466,20 @@ const updateMeetingStatus = async (req, res) => {
     }
 
     meeting.status = status;
+
+    // Nếu chuyển sang bế mạc (CONCLUDED) hoặc hủy (CANCELLED): tự động khóa tất cả các đợt biểu quyết đang mở
+    if (status === "CONCLUDED" || status === "CANCELLED") {
+      const now = new Date();
+      (meeting.votes || []).forEach((vote) => {
+        if (vote.status === "OPEN") {
+          vote.status = "CLOSED";
+          if (!vote.closedAt) {
+            vote.closedAt = now;
+          }
+        }
+      });
+    }
+
     await meeting.save();
 
     return res.status(200).json({
