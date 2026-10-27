@@ -4,6 +4,7 @@ const { google } = require("googleapis");
 const { Readable } = require("stream");
 const { authorize, getOrCreateMonthFolder, sanitizeFileName } = require("./uploadfile.Controller");
 const { verifyPdfDigitalSignature } = require("../service/signatureVerification.service");
+const { addSignaturePlaceholder, embedPkcs7Signature } = require("../service/pkcs7Signer.service");
 
 // Lấy thông tin chữ ký cá nhân
 const getMySignature = async (req, res) => {
@@ -330,7 +331,35 @@ const signPdf = async (req, res) => {
             }
         }
 
-        const signedPdfBytes = await pdfDoc.save();
+        // Nếu là ký số DIGITAL_SIGNATURE (USB Token), tạo placeholder chuẩn PKCS#7 / PAdES
+        if (signatureType === "DIGITAL_SIGNATURE") {
+            try {
+                addSignaturePlaceholder(pdfDoc, {
+                    name: signerName || "TRUONG CAO DANG BACH KHOA NAM SAI GON",
+                    reason: "Chung thuc ky so van ban dien tu (Viettel-CA / USB Token)",
+                    location: "TP. Ho Chi Minh, Viet Nam"
+                });
+            } catch (pErr) {
+                console.warn("Lỗi addSignaturePlaceholder:", pErr.message);
+            }
+        }
+
+        let signedPdfBytes = await pdfDoc.save({ useObjectStreams: false });
+
+        // Nếu là ký số DIGITAL_SIGNATURE, tính ByteRange và nhúng khối PKCS#7 chuẩn
+        if (signatureType === "DIGITAL_SIGNATURE") {
+            try {
+                signedPdfBytes = embedPkcs7Signature(Buffer.from(signedPdfBytes), {
+                    subject: signerRaw,
+                    issuer: caRaw,
+                    serialNumber: serialNo,
+                    validTo: certData.validTo || "19/09/2028"
+                });
+            } catch (embedErr) {
+                console.warn("Lỗi embedPkcs7Signature:", embedErr.message);
+            }
+        }
+
         const fileHashSha256 = crypto.createHash("sha256").update(Buffer.from(signedPdfBytes)).digest("hex");
 
         // Lưu file PDF đã ký lên Google Drive

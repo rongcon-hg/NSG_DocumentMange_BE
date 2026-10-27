@@ -35,15 +35,23 @@ async function verifyPdfDigitalSignature(pdfBuffer, fileName = "") {
   }
 
   // 1. Kiểm tra đối soát trong CSDL SignedDocument hoặc ApprovalDocument theo fileHash
-  let dbMatch = await SignedDocument.findOne({ fileHashSha256 })
-    .populate("user", "name email position department digitalCertificate")
-    .lean();
+  let dbMatch = null;
+  try {
+    if (SignedDocument && typeof SignedDocument.findOne === "function") {
+      dbMatch = await SignedDocument.findOne({ fileHashSha256 })
+        .populate("user", "name email position department digitalCertificate")
+        .lean()
+        .maxTimeMS(2000);
 
-  if (!dbMatch && fileName) {
-    // Thử tìm theo tên file đã ký
-    dbMatch = await SignedDocument.findOne({ signedFileName: fileName })
-      .populate("user", "name email position department digitalCertificate")
-      .lean();
+      if (!dbMatch && fileName) {
+        dbMatch = await SignedDocument.findOne({ signedFileName: fileName })
+          .populate("user", "name email position department digitalCertificate")
+          .lean()
+          .maxTimeMS(2000);
+      }
+    }
+  } catch (dbErr) {
+    // Không kết nối DB hoặc running độc lập
   }
 
   // 2. Tìm kiếm nội dung văn bản từ các stream nén
