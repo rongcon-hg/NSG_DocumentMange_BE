@@ -720,16 +720,38 @@ NGUYÊN TẮC TRẢ LỜI:
           }
         }
         
-        // Gửi kết quả tool về cho Gemini để sinh câu trả lời tự nhiên
-        const functionResponseResult = await chat.sendMessage([{
-          functionResponse: {
-            name: call.name,
-            response: { results: functionResponseData }
+        // Gửi kết quả dữ liệu đã tra cứu để Gemini sinh câu trả lời tự nhiên
+        try {
+          const synthesisPrompt = `Người dùng hỏi: "${message}"
+Dưới đây là kết quả tra cứu dữ liệu thực tế từ cơ sở dữ liệu hệ thống:
+${JSON.stringify(functionResponseData, null, 2)}
+
+Hãy đóng vai trò là Trợ lý ảo NSG-Office của Trường Cao đẳng Bách khoa Nam Sài Gòn, tổng hợp và trả lời người dùng một cách rõ ràng, ngắn gọn, lịch sự và chính xác bằng tiếng Việt.`;
+          
+          const synthResult = await model.generateContent(synthesisPrompt);
+          finalAnswer = synthResult.response.text();
+        } catch (synthErr) {
+          console.error("Synthesis error:", synthErr);
+          // Fallback thử chat.sendMessage
+          try {
+            const functionResponseResult = await chat.sendMessage([{
+              functionResponse: {
+                name: call.name,
+                response: { results: functionResponseData }
+              }
+            }]);
+            finalAnswer = functionResponseResult.response.text();
+          } catch (e2) {
+            console.error("Function fallback error:", e2);
+            if (Array.isArray(functionResponseData) && functionResponseData.length > 0) {
+              finalAnswer = "Dưới đây là thông tin tra cứu từ hệ thống:\n" + functionResponseData.map((item, idx) => {
+                return `${idx + 1}. ${item.thoiGian || ''} - ${item.noiDung || ''} (Chủ trì: ${item.chuTri || ''}, Địa điểm: ${item.diaDiem || ''})`;
+              }).join("\n");
+            } else if (functionResponseData?.result) {
+              finalAnswer = functionResponseData.result;
+            }
           }
-        }]);
-        
-        finalAnswer = functionResponseResult.response.text();
-        
+        }
       } catch (err) {
         console.error("Function call error:", err);
       }
