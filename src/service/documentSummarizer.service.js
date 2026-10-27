@@ -367,7 +367,10 @@ Hãy đọc kỹ tệp đính kèm (hoặc trang đầu) và trích xuất chín
   "urgency": "normal | high | immediately (mặc định normal; nếu có dấu Khẩn thì high; Hỏa tốc/Thượng khẩn thì immediately)",
   "rawDeadlineText": "Đoạn văn bản gốc thể hiện mốc thời hạn báo cáo/xử lý (Ví dụ: 'trước ngày 12 tháng 10 năm 2026', 'trước ngày 15/10/2026', 'ngày 20/10/2026' hoặc null nếu không có)",
   "deadlineDay": "Hạn báo cáo/xử lý theo định dạng YYYY-MM-DD. QUY TẮC ĐẶC BIỆT: Nếu trong văn bản có chữ 'trước' (hoặc trước ngày / hoàn thành trước ngày / gửi trước ngày...) thì hạn xử lý deadlineDay BẮT BUỘC phải là ngày liền kề trước đó (sớm hơn 1 ngày). Ví dụ: 'trước ngày 12/10/2026' hoặc 'trước ngày 12 tháng 10 năm 2026' thì ghi nhận deadlineDay là '2026-10-11'. Nếu không có chữ 'trước' (ví dụ: 'chậm nhất ngày 12/10/2026' hay 'đến ngày 12/10/2026') thì lấy đúng ngày '2026-10-12'. Nếu không có thời hạn thì để null.",
-  "relatedDocReferences": ["Mảng các số hiệu văn bản được viện dẫn hoặc phúc đáp trong văn bản, ví dụ: ['123/NSG-TCHC', '45/KH-SGDDT']"]
+  "relatedDocReferences": ["Mảng các số hiệu văn bản được viện dẫn hoặc phúc đáp trong văn bản, ví dụ: ['123/NSG-TCHC', '45/KH-SGDDT']"],
+  "emulationTitle": "Tên danh hiệu thi đua hoặc hình thức khen thưởng nếu văn bản là Quyết định khen thưởng (Ví dụ: Lao động tiên tiến, Chiến sĩ thi đua cơ sở, Giấy khen, Bằng khen, Tập thể lao động xuất sắc... hoặc rỗng nếu không phải)",
+  "awardedPersonOrTeam": "Tên cá nhân hoặc tập thể được khen thưởng nếu có trong quyết định (hoặc rỗng)",
+  "schoolYear": "Năm học liên quan nếu có trong quyết định (Ví dụ: 2025-2026, 2026-2027...)"
 }
 
 LƯU Ý CỰC KỲ QUAN TRỌNG:
@@ -501,7 +504,10 @@ LƯU Ý CỰC KỲ QUAN TRỌNG:
                 rawDeadlineText: parsed.rawDeadlineText || null,
                 deadlineDay: finalDeadlineDay,
                 relatedDocReferences: parsed.relatedDocReferences || [],
-                matchedRelatedDocs: matchedRelatedDocs
+                matchedRelatedDocs: matchedRelatedDocs,
+                emulationTitle: parsed.emulationTitle || "",
+                awardedPersonOrTeam: parsed.awardedPersonOrTeam || "",
+                schoolYear: parsed.schoolYear || ""
             }
         };
     } catch (err) {
