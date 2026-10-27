@@ -584,7 +584,7 @@ const getAchievements = async (req, res) => {
         .populate("title", "code name level")
         .populate("createdBy", "name role")
         .populate("history.actor", "name role avatar")
-        .sort({ decisionDate: -1, createdAt: -1 })
+        .sort({ createdAt: -1, decisionDate: -1 })
         .skip(skip)
         .limit(Number(limit)),
     ]);
