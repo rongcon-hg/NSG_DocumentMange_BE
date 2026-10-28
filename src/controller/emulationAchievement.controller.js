@@ -540,11 +540,14 @@ const getAchievements = async (req, res) => {
       filter.schoolYear = schoolYear;
     }
 
-    if (title) {
-      const titleFilter = [
-        { title: title },
-        { titleName: { $regex: title.trim(), $options: "i" } },
-      ];
+    if (title && title.trim()) {
+      const cleanTitle = title.trim();
+      const titleFilter = [];
+      if (mongoose.Types.ObjectId.isValid(cleanTitle)) {
+        titleFilter.push({ title: cleanTitle });
+      }
+      titleFilter.push({ titleName: { $regex: escapeRegex(cleanTitle), $options: "i" } });
+
       if (filter.$and) {
         filter.$and.push({ $or: titleFilter });
       } else if (filter.$or) {
