@@ -165,7 +165,7 @@ const documentSchema = new mongoose.Schema(
     },
     history: [
       {
-        action: { type: String, enum: ["Issued", "Forwarded", "Updated"] },
+        action: { type: String, enum: ["Issued", "Forwarded", "Updated", "Handover"] },
         actor: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
         actorName: { type: String },
         actorRole: { type: String },
