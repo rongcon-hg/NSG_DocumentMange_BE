@@ -628,6 +628,9 @@ const updateTask = async (req, res) => {
         }
         
         updates.files = updatedFiles;
+        if (req.body.missingAttachmentReason !== undefined) {
+            updates.missingAttachmentReason = req.body.missingAttachmentReason ? String(req.body.missingAttachmentReason).trim() : '';
+        }
 
         const updaterId = (req.user?._id || req.user?.id || req.body?.updatedBy || existingTask.createdBy?._id || existingTask.createdBy || '').toString();
         const updater = req.user ? req.user._id : (req.body.updatedBy || existingTask.createdBy);
@@ -946,6 +949,22 @@ const updateTask = async (req, res) => {
             if (updates.status === 'DONE') {
                 if (!updates.completedAt) {
                     updates.completedAt = new Date();
+                }
+
+                // Kiểm tra nếu hoàn thành mà không có tệp đính kèm nào
+                const totalFilesCount = (Array.isArray(updatedFiles) ? updatedFiles.length : 0);
+                const missingReason = (req.body.missingAttachmentReason || updates.missingAttachmentReason || '').trim();
+                if (totalFilesCount === 0) {
+                    if (!missingReason) {
+                        return res.status(400).json({
+                            success: false,
+                            message: "Công việc khi Hoàn thành nếu không có tệp đính kèm bắt buộc phải nêu rõ lý do!"
+                        });
+                    }
+                    updates.missingAttachmentReason = missingReason;
+                    changes.push(`Lý do không có tệp đính kèm khi hoàn thành: "${missingReason}"`);
+                } else if (missingReason) {
+                    updates.missingAttachmentReason = missingReason;
                 }
             } else if (existingTask.status === 'DONE') {
                 updates.completedAt = null;

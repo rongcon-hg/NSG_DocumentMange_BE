@@ -133,6 +133,9 @@ const taskSchema = new mongoose.Schema(
     timeChangeReason: {
       type: String,
     },
+    missingAttachmentReason: {
+      type: String,
+    },
     history: [
       {
         action: String,
