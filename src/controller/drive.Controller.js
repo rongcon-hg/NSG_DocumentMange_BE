@@ -152,3 +152,71 @@ exports.publicStreamFile = async (req, res) => {
     }
 };
 
+/**
+ * Liệt kê danh sách tệp con trong một thư mục Google Drive (cho tính năng xem trước thư mục phòng họp)
+ */
+exports.listFolderContents = async (req, res) => {
+    try {
+        const { folderId } = req.params;
+        if (!folderId) {
+            return res.status(400).json({ success: false, message: "Thiếu folderId" });
+        }
+
+        const config = await DriveConfig.findOne();
+        if (!config || !config.clientEmail || !config.privateKey) {
+            return res.status(400).json({ success: false, message: "Chưa cấu hình Service Account cho Google Drive." });
+        }
+
+        const auth = new google.auth.JWT({
+            email: config.clientEmail,
+            key: config.privateKey.replace(/\\n/g, '\n'),
+            scopes: ['https://www.googleapis.com/auth/drive'],
+        });
+
+        const drive = google.drive({ version: 'v3', auth });
+
+        // Lấy thông tin thư mục cha
+        let folderName = "Thư mục Google Drive";
+        try {
+            const folderMeta = await drive.files.get({
+                fileId: folderId,
+                fields: "id, name, mimeType",
+                supportsAllDrives: true,
+            });
+            if (folderMeta.data && folderMeta.data.name) {
+                folderName = folderMeta.data.name;
+            }
+        } catch (e) {
+            console.warn("Không lấy được metadata folder:", e.message);
+        }
+
+        // Lấy danh sách các tệp & thư mục con bên trong
+        const query = `'${folderId}' in parents and trashed=false`;
+        const response = await drive.files.list({
+            q: query,
+            fields: "files(id, name, mimeType, size, modifiedTime, webViewLink, iconLink, thumbnailLink)",
+            orderBy: "folder,name",
+            pageSize: 100,
+            spaces: "drive",
+            supportsAllDrives: true,
+            includeItemsFromAllDrives: true,
+        });
+
+        return res.status(200).json({
+            success: true,
+            folder: {
+                id: folderId,
+                name: folderName,
+            },
+            files: response.data.files || [],
+        });
+    } catch (error) {
+        console.error("Lỗi listFolderContents:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Lỗi khi đọc danh sách tệp trong thư mục Drive",
+            error: error.message,
+        });
+    }
+};
+
