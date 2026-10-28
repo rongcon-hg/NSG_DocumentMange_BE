@@ -100,27 +100,45 @@ const createUser = async (req,res)=>{
         res.status(500).json({ message: "Server Error!", error: error.message });
     }
 }
+function escapeRegex(text = "") {
+    return text.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&");
+}
+
 const signin = async (req, res) => {
-    const { email, password } = req.body;
+    let { email, password } = req.body;
 
     try {
-        const user = await User.findOne({ email });
-        if (user && (await user.comparePassword(password)))
-            {
-                if (user.role === null) {
-                    return res.status(403).json({ message: "Tài khoản đang bị vô hiệu hóa vui lòng liên hệ quản trị viên để được hỗ trợ, hướng dẫn, Xin cảm ơn!" });
-                  }
-                const { accessToken} = generateToken(user._id,user.role);
-                return res.status(200).json({
-                    accessToken:accessToken,
-                    name: user.name,
-                });            
-            }  
-        const message = "Invalid email or password";
+        if (!email || !password) {
+            return res.status(400).json({ message: "Vui lòng nhập tên đăng nhập/email và mật khẩu!" });
+        }
+
+        const inputStr = String(email).trim();
+        let query;
+
+        if (inputStr.includes("@")) {
+            // Đăng nhập bằng email đầy đủ
+            query = { email: { $regex: new RegExp(`^${escapeRegex(inputStr)}$`, "i") } };
+        } else {
+            // Đăng nhập bằng tên đăng nhập (phần trước dấu @ của email)
+            query = { email: { $regex: new RegExp(`^${escapeRegex(inputStr)}@`, "i") } };
+        }
+
+        const user = await User.findOne(query);
+        if (user && (await user.comparePassword(password))) {
+            if (user.role === null) {
+                return res.status(403).json({ message: "Tài khoản đang bị vô hiệu hóa vui lòng liên hệ quản trị viên để được hỗ trợ, hướng dẫn, Xin cảm ơn!" });
+            }
+            const { accessToken } = generateToken(user._id, user.role);
+            return res.status(200).json({
+                accessToken: accessToken,
+                name: user.name,
+            });            
+        }  
+        const message = "Tên đăng nhập, email hoặc mật khẩu không chính xác!";
         return res.status(400).json({ message });
     } catch (error) {
         console.log("Error in signin controller: ", error.message);
-        res.status(500).json({ message: "Server Error!", error: error.message });
+        res.status(500).json({ message: "Lỗi máy chủ! Vui lòng thử lại sau.", error: error.message });
     }
 }
 
