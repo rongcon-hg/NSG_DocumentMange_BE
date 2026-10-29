@@ -628,8 +628,23 @@ const updateTask = async (req, res) => {
         }
         
         updates.files = updatedFiles;
+        const sanitizeMissingReason = (val) => {
+            if (val === null || val === undefined) return '';
+            if (typeof val === 'string') {
+                const s = val.trim();
+                return (s === '[object Object]' || s === 'null' || s === 'undefined') ? '' : s;
+            }
+            if (typeof val === 'object') {
+                if (typeof val.target?.value === 'string') return sanitizeMissingReason(val.target.value);
+                if (typeof val.value === 'string') return sanitizeMissingReason(val.value);
+                return '';
+            }
+            const str = String(val).trim();
+            return (str === '[object Object]' || str === 'null' || str === 'undefined') ? '' : str;
+        };
+
         if (req.body.missingAttachmentReason !== undefined) {
-            updates.missingAttachmentReason = req.body.missingAttachmentReason ? String(req.body.missingAttachmentReason).trim() : '';
+            updates.missingAttachmentReason = sanitizeMissingReason(req.body.missingAttachmentReason);
         }
 
         const updaterId = (req.user?._id || req.user?.id || req.body?.updatedBy || existingTask.createdBy?._id || existingTask.createdBy || '').toString();
@@ -953,7 +968,7 @@ const updateTask = async (req, res) => {
 
                 // Kiểm tra nếu hoàn thành mà không có tệp đính kèm nào
                 const totalFilesCount = (Array.isArray(updatedFiles) ? updatedFiles.length : 0);
-                const missingReason = (req.body.missingAttachmentReason || updates.missingAttachmentReason || '').trim();
+                const missingReason = sanitizeMissingReason(req.body.missingAttachmentReason || updates.missingAttachmentReason || '');
                 if (totalFilesCount === 0) {
                     if (!missingReason) {
                         return res.status(400).json({
