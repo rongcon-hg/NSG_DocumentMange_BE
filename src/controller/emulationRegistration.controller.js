@@ -1091,19 +1091,23 @@ const getEmulationPendingCount = async (req, res) => {
       });
     }
 
-    // 3. Đếm hồ sơ bị REJECTED mà cá nhân người dùng là người đề nghị (user) hoặc người tạo (createdByUser)
-    // Cần chỉnh sửa nộp lại
+    // 3. Đếm hồ sơ bị REJECTED mà cá nhân người dùng là người đề nghị (user) hoặc người tạo (createdByUser) hoặc thuộc đơn vị
     const userPersonalConditions = [
       { user: currentUser._id },
       { createdByUser: currentUser._id },
     ];
+    if (currentUser.department?._id || currentUser.department) {
+      userPersonalConditions.push({
+        department: currentUser.department?._id || currentUser.department,
+      });
+    }
 
     rejectedForUser = await EmulationRegistration.countDocuments({
       status: "REJECTED",
       $or: userPersonalConditions,
     });
 
-    // 4. Đếm hồ sơ cá nhân đang gửi chờ duyệt (PENDING, SUBMITTED_TO_BGH) của chính người dùng
+    // 4. Đếm hồ sơ đang gửi chờ duyệt (PENDING, SUBMITTED_TO_BGH) của chính người dùng hoặc đơn vị mình
     const pendingForUser = await EmulationRegistration.countDocuments({
       status: { $in: ["PENDING", "SUBMITTED_TO_BGH"] },
       $or: userPersonalConditions,
@@ -1117,8 +1121,8 @@ const getEmulationPendingCount = async (req, res) => {
     } else if (isManager) {
       totalActionableCount = pendingForManager;
     } else {
-      // Người dùng thông thường: Chỉ hiển thị số thông báo khi có hồ sơ của chính mình cần sửa (bị từ chối)
-      totalActionableCount = rejectedForUser;
+      // Người dùng đơn vị: Hiển thị số hồ sơ đang gửi (chờ duyệt hoặc cần sửa)
+      totalActionableCount = pendingForUser > 0 ? pendingForUser : rejectedForUser;
     }
 
     res.status(200).json({
