@@ -277,8 +277,11 @@ const getMyRegistration = async (req, res) => {
       filter.user = currentUser._id;
     }
 
-    // Ưu tiên tìm hồ sơ PENDING đang chờ Quản lý duyệt để người dùng có thể tiếp tục chỉnh sửa
-    let reg = await EmulationRegistration.findOne({ ...filter, status: "PENDING" })
+    // Khi người dùng bấm trực tiếp vào menu "Đề nghị" để tạo đợt đề nghị mới:
+    // Hệ thống không tự động ép nạp hồ sơ PENDING cũ để tránh hiểu nhầm là không lập được đợt mới.
+    // Hồ sơ cũ chỉ nạp khi có yêu cầu chỉnh sửa rõ ràng (qua ?id=...).
+    // Ở đây trả về previousApprovedReg nếu có hồ sơ trước đó trong năm học để người dùng có thể tham khảo.
+    const latestReg = await EmulationRegistration.findOne(filter)
       .sort({ createdAt: -1 })
       .populate("department", "departmentName departmentCode")
       .populate("position", "positionName positionCode")
@@ -286,24 +289,14 @@ const getMyRegistration = async (req, res) => {
       .populate("members.titles")
       .populate("attachedFiles.documentType");
 
+    let reg = null;
     let previousApprovedReg = null;
-    // Nếu không còn hồ sơ PENDING, kiểm tra xem có hồ sơ đợt trước nào trong năm học đã được duyệt hay không
-    if (!reg) {
-      const latestReg = await EmulationRegistration.findOne(filter)
-        .sort({ createdAt: -1 })
-        .populate("department", "departmentName departmentCode")
-        .populate("position", "positionName positionCode")
-        .populate("titles")
-        .populate("members.titles")
-        .populate("attachedFiles.documentType");
 
-      if (latestReg) {
-        if (latestReg.status === "REJECTED") {
-          reg = latestReg; // Hồ sơ bị từ chối thì nạp lại để sửa
-        } else {
-          // Hồ sơ đã được duyệt / chuyển BGH -> để làm rỗng form cho đợt đề nghị mới
-          previousApprovedReg = latestReg;
-        }
+    if (latestReg) {
+      if (latestReg.status === "REJECTED") {
+        reg = latestReg; // Hồ sơ bị từ chối thì nạp lại để người dùng xem lý do và chỉnh sửa
+      } else {
+        previousApprovedReg = latestReg;
       }
     }
 
