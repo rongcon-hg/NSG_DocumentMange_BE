@@ -277,25 +277,31 @@ const getMyRegistration = async (req, res) => {
       filter.user = currentUser._id;
     }
 
-    // Khi người dùng bấm trực tiếp vào menu "Đề nghị" để tạo đợt đề nghị mới:
-    // Hệ thống không tự động ép nạp hồ sơ PENDING cũ để tránh hiểu nhầm là không lập được đợt mới.
-    // Hồ sơ cũ chỉ nạp khi có yêu cầu chỉnh sửa rõ ràng (qua ?id=...).
-    // Ở đây trả về previousApprovedReg nếu có hồ sơ trước đó trong năm học để người dùng có thể tham khảo.
-    const latestReg = await EmulationRegistration.findOne(filter)
-      .sort({ createdAt: -1 })
-      .populate("department", "departmentName departmentCode")
-      .populate("position", "positionName positionCode")
-      .populate("titles")
-      .populate("members.titles")
-      .populate("attachedFiles.documentType");
-
+    // Chỉ trả về hồ sơ cũ khi có tham số editRegistrationId hoặc người dùng cần tham khảo.
+    // Khi người dùng bấm vào tạo đề nghị mới (/emulation/register), FE không truyền editRegistrationId,
+    // BE sẽ trả data: null để FE luôn mở form mới tinh.
+    const { editRegistrationId } = req.query;
     let reg = null;
     let previousApprovedReg = null;
 
-    if (latestReg) {
-      if (latestReg.status === "REJECTED") {
-        reg = latestReg; // Hồ sơ bị từ chối thì nạp lại để người dùng xem lý do và chỉnh sửa
-      } else {
+    if (editRegistrationId) {
+      reg = await EmulationRegistration.findOne({ _id: editRegistrationId, ...filter })
+        .populate("department", "departmentName departmentCode")
+        .populate("position", "positionName positionCode")
+        .populate("titles")
+        .populate("members.titles")
+        .populate("attachedFiles.documentType");
+    } else {
+      // Tìm hồ sơ gần nhất để làm metadata tham khảo nếu người dùng muốn "Nạp lại danh sách đợt trước"
+      const latestReg = await EmulationRegistration.findOne(filter)
+        .sort({ createdAt: -1 })
+        .populate("department", "departmentName departmentCode")
+        .populate("position", "positionName positionCode")
+        .populate("titles")
+        .populate("members.titles")
+        .populate("attachedFiles.documentType");
+
+      if (latestReg) {
         previousApprovedReg = latestReg;
       }
     }
@@ -420,22 +426,8 @@ const createRegistration = async (req, res) => {
       }
     }
 
-    // Kiểm tra xem đơn vị hoặc user này đang có đơn đăng ký ở trạng thái PENDING (chờ duyệt) trong năm học này hay không
-    const pendingExisting = await EmulationRegistration.findOne({
-      $or: [
-        { user: regUser._id, schoolYear: schoolYear.trim() },
-        ...(regDepartment ? [{ department: regDepartment, schoolYear: schoolYear.trim() }] : []),
-      ],
-      status: "PENDING",
-    });
-
-    if (pendingExisting) {
-      return res.status(400).json({
-        success: false,
-        message: `Đơn vị hoặc cán bộ (${regDepartmentName || regUser.name}) đang có 1 hồ sơ đề nghị đang chờ Quản lý duyệt trong năm học ${schoolYear}. Vui lòng cập nhật hồ sơ đó hoặc chờ duyệt trước khi tạo đợt đề nghị mới.`,
-        data: pendingExisting,
-      });
-    }
+    // Cho phép một đơn vị / cán bộ nộp nhiều đợt đề nghị khác nhau trong năm học.
+    // Không chặn nộp đợt mới khi đã có hồ sơ PENDING.
 
     // Tổng hợp danh sách danh hiệu từ members nếu có
     let finalTitles = Array.isArray(titles) ? [...titles] : [];
