@@ -1083,6 +1083,7 @@ const getEmulationPendingCount = async (req, res) => {
     }
 
     const isBGH = isUserBGH(currentUser);
+    const isHT = isUserHieuTruong(currentUser);
     const isManager = currentUser.role === "manager";
     const isAdmin = currentUser.role === "admin";
     const isManagerOrAdmin = isManager || isAdmin;
@@ -1091,51 +1092,48 @@ const getEmulationPendingCount = async (req, res) => {
     let pendingForBGH = 0;
     let rejectedForUser = 0;
 
-    // 1. Đếm hồ sơ PENDING cho Manager và Admin
+    // 1. Đếm hồ sơ PENDING cho Manager và Admin (cấp xét duyệt hồ sơ cấp dưới)
     if (isManagerOrAdmin) {
       pendingForManager = await EmulationRegistration.countDocuments({
         status: "PENDING",
       });
     }
 
-    // 2. Đếm hồ sơ SUBMITTED_TO_BGH cho Ban Giám hiệu và Admin
-    if (isBGH || isAdmin) {
+    // 2. Đếm hồ sơ SUBMITTED_TO_BGH cho Hiệu trưởng / BGH / Admin xem xét phê duyệt
+    if (isHT || isAdmin) {
       pendingForBGH = await EmulationRegistration.countDocuments({
         status: "SUBMITTED_TO_BGH",
       });
     }
 
-    // 3. Đếm hồ sơ bị REJECTED của user hoặc đơn vị mình (cần chỉnh sửa nộp lại)
-    const userConditions = [
+    // 3. Đếm hồ sơ bị REJECTED mà cá nhân người dùng là người đề nghị (user) hoặc người tạo (createdByUser)
+    // Cần chỉnh sửa nộp lại
+    const userPersonalConditions = [
       { user: currentUser._id },
       { createdByUser: currentUser._id },
     ];
-    if (currentUser.department?._id || currentUser.department) {
-      userConditions.push({
-        department: currentUser.department?._id || currentUser.department,
-      });
-    }
 
     rejectedForUser = await EmulationRegistration.countDocuments({
       status: "REJECTED",
-      $or: userConditions,
+      $or: userPersonalConditions,
     });
 
-    // 4. Đếm hồ sơ đang chưa duyệt (PENDING, SUBMITTED_TO_BGH) của user hoặc đơn vị mình
+    // 4. Đếm hồ sơ cá nhân đang gửi chờ duyệt (PENDING, SUBMITTED_TO_BGH) của chính người dùng
     const pendingForUser = await EmulationRegistration.countDocuments({
       status: { $in: ["PENDING", "SUBMITTED_TO_BGH"] },
-      $or: userConditions,
+      $or: userPersonalConditions,
     });
 
     let totalActionableCount = 0;
     if (isAdmin) {
       totalActionableCount = pendingForManager + pendingForBGH;
+    } else if (isHT) {
+      totalActionableCount = pendingForBGH;
     } else if (isManager) {
       totalActionableCount = pendingForManager;
-    } else if (isBGH) {
-      totalActionableCount = pendingForBGH;
     } else {
-      totalActionableCount = pendingForUser > 0 ? pendingForUser : rejectedForUser;
+      // Người dùng thông thường: Chỉ hiển thị số thông báo khi có hồ sơ của chính mình cần sửa (bị từ chối)
+      totalActionableCount = rejectedForUser;
     }
 
     res.status(200).json({
