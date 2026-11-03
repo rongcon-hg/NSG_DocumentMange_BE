@@ -508,9 +508,24 @@ const sendEmulationRegistrationEmail = async (uniqueUsers, regData, creatorName 
         let titlesHtml = "";
         if (regData.titles && regData.titles.length > 0) {
             titlesHtml = regData.titles.map(t => {
-                const name = typeof t === "object" ? t.name : t;
+                const name = typeof t === "object" ? (t.name || t.titleName || t.title || t.code) : t;
                 return `<div style="margin: 3px 0; color: #b78103; font-weight: 600;">🏆 ${name}</div>`;
             }).join('');
+        } else if (regData.members && regData.members.length > 0) {
+            const memberTitlesSet = new Set();
+            regData.members.forEach(m => {
+                if (m.titles && Array.isArray(m.titles)) {
+                    m.titles.forEach(mt => {
+                        const titleText = typeof mt === "object" ? (mt.name || mt.titleName || mt.code) : mt;
+                        if (titleText) memberTitlesSet.add(titleText);
+                    });
+                }
+            });
+            if (memberTitlesSet.size > 0) {
+                titlesHtml = Array.from(memberTitlesSet).map(t => `<div style="margin: 3px 0; color: #b78103; font-weight: 600;">🏆 ${t}</div>`).join('');
+            } else {
+                titlesHtml = "<i>Chưa chọn danh hiệu</i>";
+            }
         } else {
             titlesHtml = "<i>Chưa chọn danh hiệu</i>";
         }
@@ -519,7 +534,7 @@ const sendEmulationRegistrationEmail = async (uniqueUsers, regData, creatorName 
         let membersBlockHtml = "";
         if (regData.members && regData.members.length > 0) {
             const rows = regData.members.map((m, idx) => {
-                const memTitles = (m.titles || []).map(t => typeof t === "object" ? t.name : t).join(', ') || "--";
+                const memTitles = (m.titles || []).map(t => typeof t === "object" ? (t.name || t.titleName || t.code) : t).join(', ') || "--";
                 return `
                     <tr style="border-bottom: 1px solid #eee;">
                         <td style="padding: 6px 8px; text-align: center;">${idx + 1}</td>
@@ -640,13 +655,33 @@ const sendEmulationStatusEmail = async (uniqueUsers, regData, actionType, note =
             headerBorderColor = "#f5222d";
         }
 
-        const targetName = regData.name || regData.departmentName || "Đơn vị";
+        const targetName = regData.name || regData.user?.name || regData.departmentName || regData.department?.departmentName || "Đơn vị";
+        const departmentName = regData.departmentName || regData.department?.departmentName || "Ban Giám hiệu / Nhà trường";
         const subject = `[${brandName} - Thi đua: ${actionName}] ${targetName}`;
         const actionTimeStr = formatVietnamDateTime();
 
         let titlesHtml = "";
         if (regData.titles && regData.titles.length > 0) {
-            titlesHtml = regData.titles.map(t => `<li style="margin: 4px 0; font-weight: 500;">🏆 ${t.titleName || t}</li>`).join('');
+            titlesHtml = regData.titles.map(t => {
+                const titleText = typeof t === "object" ? (t.name || t.titleName || t.title || t.code) : t;
+                return `<li style="margin: 4px 0; font-weight: 500;">🏆 ${titleText}</li>`;
+            }).join('');
+        } else if (regData.members && regData.members.length > 0) {
+            // Lấy danh hiệu từ các thành viên nếu ở cấp độ hồ sơ không có titles riêng
+            const memberTitlesSet = new Set();
+            regData.members.forEach(m => {
+                if (m.titles && Array.isArray(m.titles)) {
+                    m.titles.forEach(mt => {
+                        const titleText = typeof mt === "object" ? (mt.name || mt.titleName || mt.code) : mt;
+                        if (titleText) memberTitlesSet.add(titleText);
+                    });
+                }
+            });
+            if (memberTitlesSet.size > 0) {
+                titlesHtml = Array.from(memberTitlesSet).map(t => `<li style="margin: 4px 0; font-weight: 500;">🏆 ${t}</li>`).join('');
+            } else {
+                titlesHtml = "<li>Không có danh hiệu cụ thể</li>";
+            }
         } else {
             titlesHtml = "<li>Không có danh hiệu cụ thể</li>";
         }
@@ -654,6 +689,7 @@ const sendEmulationStatusEmail = async (uniqueUsers, regData, actionType, note =
         let htmlContent = EMULATION_STATUS_EMAIL_TEMPLATE
             .replace(/{actionName}/g, actionName)
             .replace(/{statusLabel}/g, statusLabel)
+            .replace(/{departmentName}/g, departmentName)
             .replace(/{targetName}/g, targetName)
             .replace(/{schoolYear}/g, regData.schoolYear || "N/A")
             .replace(/{actorName}/g, actorName)
