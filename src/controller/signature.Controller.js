@@ -246,8 +246,9 @@ const signPdf = async (req, res) => {
 
             const posX = parseFloat(sig.x);
             const posY = parseFloat(sig.y);
-            const posW = Math.max(parseFloat(sig.width), 150);
-            const posH = Math.max(parseFloat(sig.height), 65);
+            // Giữ đúng kích thước người dùng đã kéo thả thu phóng (tối thiểu 30px x 15px cho chữ ký nháy)
+            const posW = Math.max(parseFloat(sig.width) || 60, 30);
+            const posH = Math.max(parseFloat(sig.height) || 30, 15);
 
             if (signatureType === "DIGITAL_SIGNATURE") {
                 if (image) {
