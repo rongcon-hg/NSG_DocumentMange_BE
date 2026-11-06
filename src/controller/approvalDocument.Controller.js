@@ -186,7 +186,34 @@ const getApprovalDocuments = async (req, res) => {
         }
 
         const skip = (parseInt(page) - 1) * parseInt(limit);
-        const [docs, total] = await Promise.all([
+
+        // Tính toán số lượng hồ sơ đang xử lý (IN_PROGRESS) cho từng Tab để hiển thị Badge thông báo
+        const myActionInProgressQuery = {
+            status: "IN_PROGRESS",
+            signSteps: {
+                $elemMatch: {
+                    assignee: userId,
+                    action: "PENDING"
+                }
+            }
+        };
+
+        const mySubmittedInProgressQuery = {
+            creator: userId,
+            status: "IN_PROGRESS"
+        };
+
+        const allInProgressQuery = ["admin", "manager"].includes(userRole)
+            ? { status: "IN_PROGRESS" }
+            : {
+                status: "IN_PROGRESS",
+                $or: [
+                    { creator: userId },
+                    { "signSteps.assignee": userId }
+                ]
+            };
+
+        const [docs, total, pendingMyActionCount, mySubmittedPendingCount, allInProgressCount] = await Promise.all([
             ApprovalDocument.find(query)
                 .sort({ updatedAt: -1 })
                 .skip(skip)
@@ -195,12 +222,26 @@ const getApprovalDocuments = async (req, res) => {
                 .populate("department", "departmentName departmentCode")
                 .populate("signSteps.assignee", "name email avatar position")
                 .lean(),
-            ApprovalDocument.countDocuments(query)
+            ApprovalDocument.countDocuments(query),
+            ApprovalDocument.countDocuments(myActionInProgressQuery),
+            ApprovalDocument.countDocuments(mySubmittedInProgressQuery),
+            ApprovalDocument.countDocuments(allInProgressQuery)
         ]);
+
+        // Số lượng thông báo ưu tiên cho Sidebar: Nếu có hồ sơ cần ký duyệt trực tiếp thì ưu tiên hiển thị, hoặc tổng số hồ sơ đang xử lý liên quan/của đơn vị
+        const sidebarBadgeCount = ["admin", "manager"].includes(userRole)
+            ? allInProgressCount
+            : (pendingMyActionCount > 0 ? pendingMyActionCount : mySubmittedPendingCount);
 
         res.status(200).json({
             success: true,
             data: docs,
+            counts: {
+                pendingMyActionCount,
+                mySubmittedPendingCount,
+                allInProgressCount,
+                sidebarBadgeCount
+            },
             pagination: {
                 total,
                 page: parseInt(page),
