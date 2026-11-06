@@ -7,6 +7,7 @@ const {
   sendWorkScheduleRegistrationEmail,
   sendWorkScheduleStatusEmail,
 } = require("../service/NodeMailer.service/email");
+const zaloOAService = require("../services/zaloOA.service");
 
 /**
  * Helper: Lấy danh sách ID người dùng thuộc Ban Giám Hiệu và Manager/Admin
@@ -911,11 +912,18 @@ exports.approveWorkSchedule = async (req, res) => {
         });
 
         // Gửi email thông báo đã phê duyệt đến người đăng ký
-        User.findById(schedule.createdBy).select("name email").then((creatorUser) => {
+        User.findById(schedule.createdBy).select("name email zaloId zaloNotifications").then((creatorUser) => {
           if (creatorUser && creatorUser.email) {
             sendWorkScheduleStatusEmail(schedule, creatorUser, currentUser, "APPROVED").catch((e) =>
               console.warn("Lỗi gửi email phê duyệt lịch:", e.message)
             );
+          }
+          if (creatorUser) {
+            const dateStr = schedule.startDate ? new Date(schedule.startDate).toLocaleDateString("vi-VN") : "";
+            zaloOAService.notifyWorkSchedulePublished({
+              weekTitle: `${schedule.content} (${dateStr}${schedule.startTime ? ` - ${schedule.startTime}` : ""})`,
+              recipientUsers: [creatorUser],
+            }).catch((e) => console.warn("Lỗi gửi Zalo phê duyệt lịch:", e.message));
           }
         }).catch((e) => console.warn("Lỗi tìm creator để gửi email phê duyệt:", e.message));
       } catch (err) {
@@ -1221,6 +1229,12 @@ exports.importWorkSchedules = async (req, res) => {
     }
 
     const inserted = await WorkSchedule.insertMany(schedulesToInsert);
+
+    // Gửi thông báo Zalo ban hành lịch công tác tuần mới
+    zaloOAService.notifyWorkSchedulePublished({
+      weekTitle: `Lịch công tác tuần mới (${inserted.length} hoạt động công tác)`,
+      recipientUsers: [],
+    }).catch((e) => console.warn("Lỗi gửi Zalo import lịch công tác:", e.message));
 
     return res.status(200).json({
       success: true,

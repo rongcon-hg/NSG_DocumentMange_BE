@@ -11,6 +11,7 @@ const {
   sendEmulationRegistrationEmail,
   sendEmulationStatusEmail,
 } = require("../service/NodeMailer.service/email");
+const zaloOAService = require("../services/zaloOA.service");
 const { formatFileName } = require("../utils/formatFileName");
 
 // Helper: Kiểm tra User có phải BGH hay không
@@ -867,10 +868,10 @@ const reviewRegistration = async (req, res) => {
         const submitterIds = [reg.user, reg.createdByUser].filter(Boolean);
         if (submitterIds.length > 0) {
           const submitters = await User.find({ _id: { $in: submitterIds } }).select(
-            "name email emailNotifications role"
+            "name email emailNotifications zaloId zaloNotifications role"
           );
           submitters.forEach((u) => {
-            if (u.email) recipientMap.set(String(u._id), u);
+            recipientMap.set(String(u._id), u);
           });
         }
 
@@ -884,10 +885,10 @@ const reviewRegistration = async (req, res) => {
           })
             .populate("position")
             .populate("department")
-            .select("name email emailNotifications role position department");
+            .select("name email emailNotifications zaloId zaloNotifications role position department");
 
           bghUsers.forEach((u) => {
-            if (u.email && isUserBGH(u)) {
+            if (isUserBGH(u)) {
               recipientMap.set(String(u._id), u);
             }
           });
@@ -897,21 +898,37 @@ const reviewRegistration = async (req, res) => {
         if (action === "BGH_APPROVE" || action === "BGH_REJECT" || action === "MANAGER_REJECT") {
           const managers = await User.find({
             role: { $in: ["manager", "admin"] },
-          }).select("name email emailNotifications role");
+          }).select("name email emailNotifications zaloId zaloNotifications role");
           managers.forEach((m) => {
-            if (m.email) recipientMap.set(String(m._id), m);
+            recipientMap.set(String(m._id), m);
           });
         }
 
         const recipients = Array.from(recipientMap.values());
         await sendEmulationStatusEmail(
-          recipients,
+          recipients.filter((r) => r.email),
           updated,
           action,
           note,
           currentUser.name,
           currentUser.role === "admin" ? "Ban Lãnh đạo" : currentUser.position?.positionName || "Quản lý"
         );
+
+        const statusLabelMap = {
+          MANAGER_APPROVE: "Quản lý đã chấp nhận hồ sơ",
+          MANAGER_SUBMIT_BGH: "Quản lý đã duyệt và trình Ban Giám hiệu",
+          MANAGER_REJECT: "Quản lý từ chối / Cần chỉnh sửa",
+          BGH_APPROVE: "Ban Giám hiệu đã phê duyệt công nhận danh hiệu",
+          BGH_REJECT: "Ban Giám hiệu từ chối công nhận",
+        };
+        await zaloOAService.notifyEmulationStatus({
+          targetName: updated.name || updated.departmentName || "Đơn vị",
+          schoolYear: updated.schoolYear,
+          statusText: statusLabelMap[action] || action,
+          actorName: currentUser.name,
+          notes: note || "",
+          recipientUsers: recipients,
+        });
       } catch (mailErr) {
         console.error("Lỗi gửi email cập nhật trạng thái thi đua:", mailErr);
       }

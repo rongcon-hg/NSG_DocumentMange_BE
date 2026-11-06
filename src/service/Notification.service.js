@@ -37,9 +37,17 @@ const triggerDocumentNotifications = async (document) => {
             }
         }
 
-        // 1. Send Email notification
+        // 1. Send Email notification & Zalo notification
         if (uniqueUsers.length > 0) {
             sendNewDocumentEmail(uniqueUsers, document, senderName).catch(err => console.error("Email Notify Error:", err));
+            
+            // Gửi thông báo Zalo (Cá nhân & Nhóm Zalo)
+            try {
+                const zaloOAService = require("../services/zaloOA.service");
+                zaloOAService.notifyNewDocument(document, uniqueUsers).catch(err => console.error("Zalo Notify Error:", err));
+            } catch (zaloErr) {
+                console.error("Zalo Notify Invocation Error:", zaloErr);
+            }
             
             // Số hiệu văn bản đầy đủ bao gồm cả phần số và phần ký hiệu (vd: 123/TB-NSG)
             const fullDocCode = (document.docNum && document.docCode)

@@ -39,6 +39,12 @@ const userSchema = new mongoose.Schema({
         mention: { type: Boolean, default: true },
         urgentTask: { type: Boolean, default: true },
         urgentDoc: { type: Boolean, default: true },
+        docNew: { type: Boolean, default: true },
+        docReview: { type: Boolean, default: true },
+        taskAssign: { type: Boolean, default: true },
+        taskReminder: { type: Boolean, default: true },
+        workSchedule: { type: Boolean, default: true },
+        emulation: { type: Boolean, default: true },
     },
     position: {
         type: mongoose.Schema.Types.ObjectId,

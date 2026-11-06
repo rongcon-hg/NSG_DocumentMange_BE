@@ -3,7 +3,7 @@ const zaloOAService = require('../services/zaloOA.service');
 const User = require('../models/user.model');
 
 /**
- * Lấy cấu hình Zalo OA (Chỉ Admin)
+ * Lấy cấu hình Zalo OA & Group Bot (Chỉ Admin)
  */
 const getZaloConfig = async (req, res) => {
   try {
@@ -18,7 +18,11 @@ const getZaloConfig = async (req, res) => {
       hasSecretKey: !!config.secretKey,
       hasAccessToken: !!config.accessToken,
       hasRefreshToken: !!config.refreshToken,
-      templateIds: config.templateIds,
+      groupWebhookUrl: config.groupWebhookUrl || '',
+      groupChatId: config.groupChatId || '',
+      groupNotificationsEnabled: !!config.groupNotificationsEnabled,
+      notificationEvents: config.notificationEvents || {},
+      templateIds: config.templateIds || {},
       updatedAt: config.updatedAt,
     };
     return res.json({ success: true, data: safeConfig });
@@ -29,11 +33,23 @@ const getZaloConfig = async (req, res) => {
 };
 
 /**
- * Cập nhật cấu hình Zalo OA (Chỉ Admin)
+ * Cập nhật cấu hình Zalo OA & Group Bot (Chỉ Admin)
  */
 const updateZaloConfig = async (req, res) => {
   try {
-    const { oaId, appId, secretKey, refreshToken, isActive, templateIds } = req.body;
+    const { 
+      oaId, 
+      appId, 
+      secretKey, 
+      refreshToken, 
+      isActive, 
+      templateIds,
+      groupWebhookUrl,
+      groupChatId,
+      groupNotificationsEnabled,
+      notificationEvents
+    } = req.body;
+
     let config = await ZaloConfig.findOne();
     if (!config) {
       config = new ZaloConfig();
@@ -45,6 +61,10 @@ const updateZaloConfig = async (req, res) => {
     if (refreshToken) config.refreshToken = refreshToken;
     if (isActive !== undefined) config.isActive = isActive;
     if (templateIds) config.templateIds = { ...config.templateIds, ...templateIds };
+    if (groupWebhookUrl !== undefined) config.groupWebhookUrl = groupWebhookUrl;
+    if (groupChatId !== undefined) config.groupChatId = groupChatId;
+    if (groupNotificationsEnabled !== undefined) config.groupNotificationsEnabled = groupNotificationsEnabled;
+    if (notificationEvents) config.notificationEvents = { ...config.notificationEvents, ...notificationEvents };
 
     // Nếu người dùng nhập refresh token mới, thử refresh ngay để lấy access token
     if (refreshToken && config.appId && config.secretKey) {
@@ -59,17 +79,18 @@ const updateZaloConfig = async (req, res) => {
 
     return res.json({
       success: true,
-      message: 'Cập nhật cấu hình Zalo OA thành công',
+      message: 'Cập nhật cấu hình Zalo OA & Nhóm Zalo thành công',
       data: {
         oaId: config.oaId,
         appId: config.appId,
         isActive: config.isActive,
         tokenExpiresAt: config.tokenExpiresAt,
+        groupNotificationsEnabled: config.groupNotificationsEnabled,
       }
     });
   } catch (error) {
     console.error('Lỗi updateZaloConfig:', error);
-    return res.status(500).json({ success: false, message: 'Lỗi khi cập nhật cấu hình Zalo OA' });
+    return res.status(500).json({ success: false, message: 'Lỗi khi cập nhật cấu hình Zalo' });
   }
 };
 
@@ -94,13 +115,33 @@ const testSendMessage = async (req, res) => {
     );
 
     if (result.success) {
-      return res.json({ success: true, message: 'Gửi tin nhắn Zalo thành công', data: result.data });
+      return res.json({ success: true, message: 'Gửi tin nhắn Zalo cá nhân thành công', data: result.data });
     } else {
       return res.status(400).json({ success: false, message: 'Gửi tin nhắn Zalo thất bại', error: result });
     }
   } catch (error) {
     console.error('Lỗi testSendMessage Zalo:', error);
     return res.status(500).json({ success: false, message: 'Lỗi xử lý gửi tin Zalo', error: error.message });
+  }
+};
+
+/**
+ * Test gửi tin nhắn vào Nhóm Zalo (Group Webhook)
+ */
+const testSendGroupMessage = async (req, res) => {
+  try {
+    const { testMessage } = req.body;
+    const msg = testMessage || `[HỆ THỐNG VĂN PHÒNG SỐ]\n✅ Đây là tin nhắn kiểm tra kết nối tự động tới Nhóm Zalo từ hệ thống QLVB Nam Sài Gòn.`;
+    const result = await zaloOAService.sendMessageToGroup(msg);
+
+    if (result.success) {
+      return res.json({ success: true, message: 'Gửi tin nhắn vào Nhóm Zalo thành công!', data: result.data });
+    } else {
+      return res.status(400).json({ success: false, message: 'Gửi tin nhắn vào Nhóm Zalo thất bại: ' + (result.reason || result.error || 'Kiểm tra lại Webhook URL') });
+    }
+  } catch (error) {
+    console.error('Lỗi testSendGroupMessage:', error);
+    return res.status(500).json({ success: false, message: 'Lỗi gửi tin nhắn vào nhóm Zalo', error: error.message });
   }
 };
 
@@ -124,5 +165,6 @@ module.exports = {
   getZaloConfig,
   updateZaloConfig,
   testSendMessage,
+  testSendGroupMessage,
   handleZaloWebhook,
 };

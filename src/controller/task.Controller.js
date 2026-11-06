@@ -339,6 +339,15 @@ const createTask = async (req, res) => {
             if (uniqueUsers.length > 0) {
                 sendTaskNotificationEmail(uniqueUsers, populatedTask, 'create');
                 syncTaskToGoogleCalendar(populatedTask, uniqueUsers);
+
+                // Gửi thông báo Zalo khi giao việc mới (Cá nhân & Nhóm Zalo)
+                try {
+                    const zaloOAService = require('../services/zaloOA.service');
+                    const targetAssignees = uniqueUsers.filter(u => u._id.toString() !== createdBy.toString());
+                    zaloOAService.notifyTaskAssigned(populatedTask, targetAssignees).catch(zErr => console.error("Zalo Task Notify Error:", zErr));
+                } catch (zErr) {
+                    console.error("Zalo Task invocation error:", zErr);
+                }
             }
 
             // Gửi thông báo trong hệ thống (chuông & popup) + Web Push Notification cho người được phân công

@@ -10,6 +10,7 @@ const User = require("../models/user.model");
 const dotenv = require("dotenv");
 const { Readable } = require("stream");
 const { sendReviewNotificationEmail } = require("../service/NodeMailer.service/email");
+const zaloOAService = require("../services/zaloOA.service");
 dotenv.config();
 
 const DriveConfig = require('../models/driveConfig.model');
@@ -258,12 +259,12 @@ const updateReplyDocStatus = async (req, res) => {
       // GỬI EMAIL THÔNG BÁO CHO NGƯỜI SOẠN THẢO (DRAFTER)
       try {
         const fullDoc = await RepliedDoc.findById(repliedDocId)
-          .populate({ path: 'replyBy', select: 'name email emailNotifications' })
+          .populate({ path: 'replyBy', select: 'name email emailNotifications zaloId zaloNotifications' })
           .populate({ path: 'docVariant', select: 'docVariantName' })
           .populate({ 
             path: 'repliedDoc', 
             select: 'docCode docNum shortDescription',
-            populate: { path: 'sentBy', select: 'name email emailNotifications' }
+            populate: { path: 'sentBy', select: 'name email emailNotifications zaloId zaloNotifications' }
           });
         if (fullDoc) {
           const actionType = newStatus === 'approved' ? 'managerAccept' : 'managerReject';
@@ -279,6 +280,17 @@ const updateReplyDocStatus = async (req, res) => {
 
           if (recipients.length > 0) {
             await sendReviewNotificationEmail(recipients, fullDoc, actionType, notes, actorName);
+            const docCodeStr = fullDoc.repliedDoc
+              ? `${fullDoc.repliedDoc.docNum || ''}/${fullDoc.repliedDoc.docCode || ''}`.replace(/^\/|\/$/g, '')
+              : (fullDoc.docVariant?.docVariantName || 'Văn bản trình ký');
+            zaloOAService.notifyDocReview({
+              docTitle: fullDoc.shortDescription || fullDoc.repliedDoc?.shortDescription || 'Văn bản trình ký',
+              docCode: docCodeStr,
+              drafterName: fullDoc.replyBy?.name || 'Cán bộ',
+              status: newStatus === 'approved' ? `Quản lý đã tiếp nhận (${actorName})` : `Quản lý từ chối (${actorName})`,
+              notes: newStatus === 'rejected' ? notes : '',
+              recipientUsers: recipients
+            }).catch((zErr) => console.warn('Zalo notifyDocReview error:', zErr.message));
           }
         }
       } catch (err) {
@@ -838,17 +850,28 @@ const sentToReview = async (req, res) => {
     // GỬI EMAIL THÔNG BÁO CHO BGH
     try {
       const fullDoc = await RepliedDoc.findById(id)
-        .populate({ path: 'reviewer', select: 'name email emailNotifications' })
-        .populate({ path: 'replyBy', select: 'name email emailNotifications' })
+        .populate({ path: 'reviewer', select: 'name email emailNotifications zaloId zaloNotifications' })
+        .populate({ path: 'replyBy', select: 'name email emailNotifications zaloId zaloNotifications' })
         .populate({ path: 'docVariant', select: 'docVariantName' })
         .populate({ 
           path: 'repliedDoc', 
           select: 'docCode docNum shortDescription',
-          populate: { path: 'sentBy', select: 'name email emailNotifications' } 
+          populate: { path: 'sentBy', select: 'name email emailNotifications zaloId zaloNotifications' } 
         });
       if (fullDoc && fullDoc.reviewer) {
         const actorName = req.user ? req.user.name : "";
         await sendReviewNotificationEmail([fullDoc.reviewer], fullDoc, 'submitToBGH', '', actorName);
+        const docCodeStr = fullDoc.repliedDoc
+          ? `${fullDoc.repliedDoc.docNum || ''}/${fullDoc.repliedDoc.docCode || ''}`.replace(/^\/|\/$/g, '')
+          : (fullDoc.docVariant?.docVariantName || 'Văn bản trình ký');
+        zaloOAService.notifyDocReview({
+          docTitle: fullDoc.shortDescription || fullDoc.repliedDoc?.shortDescription || 'Văn bản trình ký',
+          docCode: docCodeStr,
+          drafterName: fullDoc.replyBy?.name || 'Cán bộ',
+          status: `Trình Ban Giám hiệu xét duyệt (${fullDoc.reviewer.name || 'BGH'})`,
+          notes: '',
+          recipientUsers: [fullDoc.reviewer]
+        }).catch((zErr) => console.warn('Zalo notifyDocReview error:', zErr.message));
       }
     } catch (err) {
       console.error("Error sending email on sentToReview:", err);
@@ -979,12 +1002,12 @@ const reviewerAction = async (req, res) => {
     if (action === "rejectedByReviewer" || action === "approvedByReviewer") {
       try {
         const fullDoc = await RepliedDoc.findById(id)
-          .populate({ path: 'replyBy', select: 'name email emailNotifications' })
+          .populate({ path: 'replyBy', select: 'name email emailNotifications zaloId zaloNotifications' })
           .populate({ path: 'docVariant', select: 'docVariantName' })
           .populate({ 
             path: 'repliedDoc', 
             select: 'docCode docNum shortDescription',
-            populate: { path: 'sentBy', select: 'name email emailNotifications' } 
+            populate: { path: 'sentBy', select: 'name email emailNotifications zaloId zaloNotifications' } 
           });
         if (fullDoc) {
           const recipients = [];
@@ -994,6 +1017,17 @@ const reviewerAction = async (req, res) => {
             const actorName = req.user ? req.user.name : "BGH";
             const emailAction = action === "rejectedByReviewer" ? 'bghReject' : 'bghApprove';
             await sendReviewNotificationEmail(recipients, fullDoc, emailAction, reviewerNotes, actorName);
+            const docCodeStr = fullDoc.repliedDoc
+              ? `${fullDoc.repliedDoc.docNum || ''}/${fullDoc.repliedDoc.docCode || ''}`.replace(/^\/|\/$/g, '')
+              : (fullDoc.docVariant?.docVariantName || 'Văn bản trình ký');
+            zaloOAService.notifyDocReview({
+              docTitle: fullDoc.shortDescription || fullDoc.repliedDoc?.shortDescription || 'Văn bản trình ký',
+              docCode: docCodeStr,
+              drafterName: fullDoc.replyBy?.name || 'Cán bộ',
+              status: action === "approvedByReviewer" ? `Ban Giám hiệu đã phê duyệt (${actorName})` : `Ban Giám hiệu từ chối (${actorName})`,
+              notes: reviewerNotes || '',
+              recipientUsers: recipients
+            }).catch((zErr) => console.warn('Zalo notifyDocReview error:', zErr.message));
           }
         }
       } catch (err) {
