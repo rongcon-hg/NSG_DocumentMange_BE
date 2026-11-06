@@ -163,6 +163,8 @@ app.use('/comments', commentRoutes);
 const zaloOARoutes = require('./src/routes/zaloOA.routes');
 app.use('/api/zalo', zaloOARoutes);
 app.use('/zalo', zaloOARoutes);
+const zaloOAService = require('./src/services/zaloOA.service');
+zaloOAService.startBotPolling();
 
 // Digital Archiving (e-Archive) routes
 const archiveRoutes = require('./src/routes/archive.routes');

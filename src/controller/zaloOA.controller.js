@@ -172,11 +172,21 @@ const detectBotGroupChats = async (req, res) => {
     const { botToken } = req.body || {};
     const result = await zaloOAService.detectBotGroupChats(botToken);
     if (result.success) {
+      const linkedCount = result.linkedUsers?.length || 0;
+      const groupCount = result.detectedChats?.length || 0;
+      let msg = 'Đã đồng bộ dữ liệu từ Bot NSG-Office!';
+      if (linkedCount > 0 && groupCount > 0) {
+        msg = `Đã tự động liên kết Zalo ID cho ${linkedCount} cán bộ và tìm thấy ${groupCount} nhóm Zalo!`;
+      } else if (linkedCount > 0) {
+        msg = `Đã tự động liên kết Zalo ID thành công cho ${linkedCount} cán bộ (${result.linkedUsers.map(u => u.name).join(', ')})!`;
+      } else if (groupCount > 0) {
+        msg = `Đã tìm thấy ${groupCount} nhóm/cuộc trò chuyện Zalo!`;
+      } else {
+        msg = 'Bot NSG-Office đang hoạt động! Cán bộ chỉ cần nhắn Số điện thoại vào nhóm Zalo có Bot là hệ thống sẽ tự động gắn Zalo ID.';
+      }
       return res.json({
         success: true,
-        message: result.detectedChats?.length > 0
-          ? `Đã tìm thấy ${result.detectedChats.length} nhóm/cuộc trò chuyện Zalo!`
-          : 'Đã kết nối Bot thành công! Vui lòng gửi 1 tin nhắn bất kỳ vào nhóm Zalo có mặt Bot rồi bấm dò tìm lại.',
+        message: msg,
         data: result,
       });
     } else {
@@ -196,27 +206,9 @@ const handleZaloWebhook = async (req, res) => {
     const event = req.body;
     console.log('[Zalo Webhook Event]:', JSON.stringify(event));
 
-    // Tự động lưu chat_id nếu có tin nhắn từ nhóm gửi đến webhook
-    const msg = event?.message || event?.result?.message || event;
-    const chatObj = msg?.chat || event?.chat;
-    if (chatObj && chatObj.id) {
-      const config = await zaloOAService.getConfig();
-      const cId = String(chatObj.id);
-      const title = chatObj.title || chatObj.display_name || `Nhóm Zalo (${cId})`;
-      const foundChats = [...(config.detectedChats || [])];
-      const idx = foundChats.findIndex((c) => c.chatId === cId);
-      if (idx >= 0) {
-        foundChats[idx].title = title;
-        foundChats[idx].updatedAt = new Date();
-      } else {
-        foundChats.unshift({ chatId: cId, title, type: chatObj.chat_type || 'GROUP', updatedAt: new Date() });
-      }
-      config.detectedChats = foundChats.slice(0, 20);
-      if (!config.groupChatId) {
-        config.groupChatId = cId;
-      }
-      await config.save();
-    }
+    const config = await zaloOAService.getConfig();
+    await zaloOAService.processBotUpdateItem(event, config);
+    await config.save();
 
     // Phản hồi ngay 200 OK cho Zalo Platform
     res.status(200).json({ error: 0, message: 'Success' });

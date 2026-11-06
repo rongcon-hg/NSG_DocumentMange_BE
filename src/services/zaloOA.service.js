@@ -104,81 +104,101 @@ class ZaloOAService {
   }
 
   /**
-   * Gửi tin nhắn trực tiếp qua Zalo OA đến người dùng (qua user_id hoặc số điện thoại)
+   * Chuẩn hóa số điện thoại sang định dạng 09xxx (10 số) để đối chiếu DB
+   */
+  normalizeLocalPhone(phone) {
+    if (!phone) return '';
+    let cleaned = String(phone).replace(/[^0-9]/g, '');
+    if (cleaned.startsWith('84') && cleaned.length >= 11) {
+      cleaned = '0' + cleaned.slice(2);
+    }
+    return cleaned;
+  }
+
+  /**
+   * Gửi tin nhắn trực tiếp qua Zalo Bot (Bot NSG-Office) hoặc Zalo OA đến người dùng
    * @param {string|object} target zaloUserId hoặc user object { zaloId, mobile, name }
    * @param {string} text Nội dung tin nhắn văn bản
    */
   async sendMessageToUser(target, text) {
     try {
-      const token = await this.getValidToken();
-      if (!token) return { success: false, reason: 'Zalo OA chưa được kích hoạt hoặc chưa cấu hình Access Token / Refresh Token' };
-
+      const config = await this.getConfig();
       const zaloId = typeof target === 'object' ? (target.zaloId || '').trim() : String(target || '').trim();
       const mobile = typeof target === 'object' ? (target.mobile || '').trim() : '';
 
-      // Nếu truyền vào chuỗi có dạng số điện thoại Việt Nam (09xxx, 84xxx) mà không phải Zalo ID dài
-      const isPhoneString = !mobile && /^(0|84|\+84)[0-9]{8,10}$/.test(zaloId);
-      const phoneToUse = mobile || (isPhoneString ? zaloId : '');
+      // Kiểm tra xem zaloId có phải là mã Zalo Chat ID thực sự hay đang lưu nhầm SĐT (09xxx)
+      const isPhoneInZaloId = /^(0[35789][0-9]{8}|84[35789][0-9]{8})$/.test(zaloId);
+      const realZaloChatId = (zaloId && !isPhoneInZaloId) ? zaloId : '';
+      const phoneToUse = mobile || (isPhoneInZaloId ? zaloId : '');
 
-      // 1. Ưu tiên gửi qua user_id trên Zalo OA nếu có zaloId thực sự
-      if (zaloId && !isPhoneString) {
-        const response = await fetch('https://openapi.zalo.me/v3.0/oa/message/cs', {
-          method: 'POST',
-          headers: {
-            access_token: token,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            recipient: {
-              user_id: zaloId,
-            },
-            message: {
+      // 1. ƯU TIÊN SỐ 1: Gửi qua Zalo Bot (Bot NSG-Office) bằng realZaloChatId (Miễn phí 100%, không cần OA Secret/Refresh Token)
+      if (realZaloChatId && config.botToken) {
+        try {
+          const botRes = await fetch(`https://bot-api.zaloplatforms.com/bot${config.botToken}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: realZaloChatId,
               text: text,
-            },
-          }),
-        });
-
-        const resData = await response.json();
-        if (resData?.error === 0) {
-          return { success: true, data: resData };
-        }
-        // Nếu gửi bằng zaloId lỗi và có SĐT thì thử tiếp bằng SĐT bên dưới
-        if (!phoneToUse) {
-          return { success: false, reason: resData?.message || 'Lỗi từ Zalo OA', data: resData };
+            }),
+          });
+          const botData = await botRes.json();
+          if (botRes.ok && botData?.ok !== false) {
+            return { success: true, channel: 'ZALO_BOT', data: botData };
+          }
+        } catch (botErr) {
+          console.warn('Gửi qua Zalo Bot không thành công, thử tiếp qua Zalo OA:', botErr.message);
         }
       }
 
-      // 2. Gửi dựa theo số điện thoại của người dùng (tra cứu/gửi qua phone trên Zalo OA)
-      if (phoneToUse) {
-        const formattedPhone = this.normalizePhone(phoneToUse);
-        const response = await fetch('https://openapi.zalo.me/v3.0/oa/message/cs', {
-          method: 'POST',
-          headers: {
-            access_token: token,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            recipient: {
-              user_id: formattedPhone,
-              phone: formattedPhone,
+      // 2. ƯU TIÊN SỐ 2: Gửi qua Zalo Official Account (OA) nếu có cấu hình Token OA
+      const token = await this.getValidToken();
+      if (token) {
+        if (realZaloChatId) {
+          const response = await fetch('https://openapi.zalo.me/v3.0/oa/message/cs', {
+            method: 'POST',
+            headers: {
+              access_token: token,
+              'Content-Type': 'application/json',
             },
-            message: {
-              text: text,
-            },
-          }),
-        });
+            body: JSON.stringify({
+              recipient: { user_id: realZaloChatId },
+              message: { text },
+            }),
+          });
+          const resData = await response.json();
+          if (resData?.error === 0) {
+            return { success: true, channel: 'ZALO_OA', data: resData };
+          }
+        }
 
-        const resData = await response.json();
-        return {
-          success: resData?.error === 0,
-          reason: resData?.message || (resData?.error !== 0 ? `Zalo OA trả về mã lỗi ${resData?.error}: ${resData?.message || 'Cán bộ cần quan tâm (Follow) Zalo OA hoặc cấu hình Token OA hợp lệ'}` : undefined),
-          data: resData,
-        };
+        if (phoneToUse) {
+          const formattedPhone = this.normalizePhone(phoneToUse);
+          const response = await fetch('https://openapi.zalo.me/v3.0/oa/message/cs', {
+            method: 'POST',
+            headers: {
+              access_token: token,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              recipient: { user_id: formattedPhone, phone: formattedPhone },
+              message: { text },
+            }),
+          });
+          const resData = await response.json();
+          if (resData?.error === 0) {
+            return { success: true, channel: 'ZALO_OA_PHONE', data: resData };
+          }
+        }
       }
 
-      return { success: false, reason: 'Cán bộ chưa có Số điện thoại hoặc Zalo ID' };
+      // 3. Nếu cán bộ chỉ mới có SĐT (hoặc ô Zalo ID đang điền SĐT) mà chưa nhắn SĐT cho Bot NSG-Office
+      return {
+        success: false,
+        reason: `Cán bộ chưa liên kết Zalo với Bot NSG-Office. Hướng dẫn: Cán bộ mở Zalo nhắn số điện thoại "${this.normalizeLocalPhone(phoneToUse) || '09xxxxxxxx'}" gửi cho Bot NSG-Office (hoặc vào nhóm có Bot) để hệ thống tự động liên kết 100%!`,
+      };
     } catch (error) {
-      console.error('Lỗi gửi tin nhắn Zalo OA:', error.message);
+      console.error('Lỗi gửi tin nhắn Zalo cá nhân:', error.message);
       return { success: false, error: error.message };
     }
   }
@@ -226,7 +246,101 @@ class ZaloOAService {
   }
 
   /**
-   * Tự động dò tìm Group Chat ID từ Zalo Bot API (getUpdates)
+   * Xử lý 1 tin nhắn từ Zalo Bot (cả từ Webhook hoặc getUpdates) để:
+   * 1. Tự động lưu Group Chat ID nếu là tin nhắn trong nhóm
+   * 2. Tự động khớp Số điện thoại (09xxx) hoặc Email trong tin nhắn với tài khoản cán bộ để gắn Zalo User ID (chat_id)
+   */
+  async processBotUpdateItem(item, config) {
+    if (!item) return null;
+    const msg = item.message || item.channel_post || item.my_chat_member || item.result?.message || item;
+    const chatObj = msg?.chat || item?.chat;
+    const fromUser = msg?.from || item?.from;
+    const textContent = String(msg?.text || msg?.content || '').trim();
+
+    let linkedUser = null;
+
+    // A. Lưu thông tin Chat / Group vào danh sách phát hiện
+    if (chatObj && chatObj.id) {
+      const cId = String(chatObj.id);
+      const chatType = (chatObj.chat_type || chatObj.type || 'GROUP').toUpperCase();
+      const title = chatObj.title || chatObj.display_name || fromUser?.display_name || `Chat (${cId})`;
+
+      if (chatType.includes('GROUP')) {
+        const foundChats = [...(config.detectedChats || [])];
+        const idx = foundChats.findIndex((c) => c.chatId === cId);
+        if (idx >= 0) {
+          foundChats[idx].title = title;
+          foundChats[idx].updatedAt = new Date();
+        } else {
+          foundChats.unshift({ chatId: cId, title, type: 'GROUP', updatedAt: new Date() });
+        }
+        config.detectedChats = foundChats.slice(0, 20);
+        if (!config.groupChatId) {
+          config.groupChatId = cId;
+        }
+      }
+    }
+
+    // B. Tự động nhận diện Số điện thoại (ví dụ 0917919522) trong tin nhắn để gắn Zalo ID cho Cán bộ
+    const senderZaloId = String(fromUser?.id || (chatObj?.chat_type === 'PRIVATE' ? chatObj?.id : '') || chatObj?.id || '');
+    const senderName = fromUser?.display_name || chatObj?.display_name || '';
+
+    if (senderZaloId && textContent) {
+      const phoneMatch = textContent.match(/(?:0|\+84|84)([35789][0-9]{8})\b/);
+      if (phoneMatch) {
+        const localPhone = '0' + phoneMatch[1]; // Ví dụ: 0917919522
+        const intlPhone = '84' + phoneMatch[1]; // Ví dụ: 84917919522
+
+        // Tìm cán bộ trong DB có số điện thoại này (ở trường mobile hoặc đang điền SĐT ở trường zaloId)
+        const matchedUser = await User.findOne({
+          $or: [
+            { mobile: { $regex: new RegExp(phoneMatch[1] + '$') } },
+            { zaloId: localPhone },
+            { zaloId: intlPhone },
+          ],
+        });
+
+        if (matchedUser) {
+          matchedUser.zaloId = senderZaloId;
+          if (!matchedUser.mobile) matchedUser.mobile = localPhone;
+          await matchedUser.save();
+          linkedUser = matchedUser;
+
+          // Gửi tin nhắn phản hồi xác nhận ngay trên Zalo cho cán bộ
+          if (config.botToken) {
+            const replyChatId = String(chatObj?.id || senderZaloId);
+            fetch(`https://bot-api.zaloplatforms.com/bot${config.botToken}/sendMessage`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                chat_id: replyChatId,
+                text: `✅ [HỆ THỐNG VĂN PHÒNG SỐ - NSG]\nĐã liên kết thành công tài khoản Zalo "${senderName || matchedUser.name}" (Zalo ID: ${senderZaloId}) với cán bộ:\n👤 Họ và tên: ${matchedUser.name}\n📱 SĐT: ${localPhone}\nTừ bây giờ Thầy/Cô sẽ nhận được thông báo tự động từ hệ thống!`,
+              }),
+            }).catch(() => {});
+          }
+        }
+      } else if (senderName) {
+        // Nếu người dùng nhắn tin trực tiếp cho Bot mà không gõ SĐT, thử đối chiếu chính xác theo Họ và Tên duy nhất
+        const matchedByName = await User.find({
+          name: { $regex: new RegExp('^' + senderName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') },
+        });
+        if (matchedByName.length === 1) {
+          const u = matchedByName[0];
+          const isOldPhone = !u.zaloId || /^(0|84)[0-9]{8,10}$/.test(u.zaloId);
+          if (isOldPhone) {
+            u.zaloId = senderZaloId;
+            await u.save();
+            linkedUser = u;
+          }
+        }
+      }
+    }
+
+    return linkedUser;
+  }
+
+  /**
+   * Tự động dò tìm Group Chat ID & Liên kết Zalo ID cán bộ từ Zalo Bot API (getUpdates)
    */
   async detectBotGroupChats(customBotToken = null) {
     try {
@@ -245,7 +359,7 @@ class ZaloOAService {
         config.groupWebhookUrl = `https://bot-api.zaloplatforms.com/bot${token}/sendMessage`;
       }
 
-      // 2. Gọi getUpdates với timeout ngắn (3 giây) để lấy tin nhắn gần nhất trong nhóm
+      // 2. Gọi getUpdates với timeout ngắn (3 giây) để lấy tin nhắn gần nhất
       const upRes = await fetch(`https://bot-api.zaloplatforms.com/bot${token}/getUpdates`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -253,34 +367,15 @@ class ZaloOAService {
       });
       const upJson = await upRes.json();
 
-      const foundChats = [...(config.detectedChats || [])];
-      const addChat = (chatObj) => {
-        if (!chatObj || !chatObj.id) return;
-        const cId = String(chatObj.id);
-        const title = chatObj.title || chatObj.display_name || chatObj.name || `Nhóm/Chat (${cId})`;
-        const type = chatObj.chat_type || chatObj.type || 'GROUP';
-        const idx = foundChats.findIndex((c) => c.chatId === cId);
-        if (idx >= 0) {
-          foundChats[idx].title = title;
-          foundChats[idx].updatedAt = new Date();
-        } else {
-          foundChats.unshift({ chatId: cId, title, type, updatedAt: new Date() });
-        }
-      };
-
+      const linkedUsers = [];
       if (upJson?.ok && upJson?.result) {
         const results = Array.isArray(upJson.result) ? upJson.result : [upJson.result];
-        results.forEach((item) => {
-          const msg = item.message || item.channel_post || item.my_chat_member || item;
-          if (msg?.chat) addChat(msg.chat);
-          if (item?.chat) addChat(item.chat);
-        });
+        for (const item of results) {
+          const linked = await this.processBotUpdateItem(item, config);
+          if (linked) linkedUsers.push({ _id: linked._id, name: linked.name, mobile: linked.mobile, zaloId: linked.zaloId });
+        }
       }
 
-      config.detectedChats = foundChats.slice(0, 20);
-      if (!config.groupChatId && foundChats.length > 0) {
-        config.groupChatId = foundChats[0].chatId;
-      }
       await config.save();
 
       return {
@@ -289,12 +384,54 @@ class ZaloOAService {
         detectedChats: config.detectedChats,
         groupChatId: config.groupChatId,
         groupWebhookUrl: config.groupWebhookUrl,
+        linkedUsers,
         rawUpdate: upJson,
       };
     } catch (error) {
       console.error('Lỗi detectBotGroupChats:', error.message);
       return { success: false, message: error.message };
     }
+  }
+
+  /**
+   * Vòng lặp ngầm (Background Polling) tự động lắng nghe tin nhắn gửi tới Bot NSG-Office trên VPS
+   * để tự động lấy Group Chat ID và tự động liên kết Số điện thoại -> Zalo User ID
+   */
+  startBotPolling() {
+    if (this._pollingStarted) return;
+    this._pollingStarted = true;
+
+    const pollLoop = async () => {
+      try {
+        const config = await this.getConfig();
+        const token = (config?.botToken || '').trim();
+        if (token) {
+          const upRes = await fetch(`https://bot-api.zaloplatforms.com/bot${token}/getUpdates`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ timeout: 20 }),
+          });
+          const upJson = await upRes.json();
+          if (upJson?.ok && upJson?.result) {
+            const results = Array.isArray(upJson.result) ? upJson.result : [upJson.result];
+            let changed = false;
+            for (const item of results) {
+              await this.processBotUpdateItem(item, config);
+              changed = true;
+            }
+            if (changed) {
+              await config.save();
+            }
+          }
+        }
+      } catch (_) {
+        // Ignore network/timeout errors in background polling
+      } finally {
+        setTimeout(pollLoop, 5000);
+      }
+    };
+
+    setTimeout(pollLoop, 3000);
   }
 
   /**
@@ -309,8 +446,8 @@ class ZaloOAService {
         return;
       }
 
-      // 2. Gửi tin nhắn cá nhân đến từng cán bộ có Số điện thoại hoặc Zalo ID
-      if (config.isActive && Array.isArray(recipients) && recipients.length > 0) {
+      // 2. Gửi tin nhắn cá nhân đến từng cán bộ (hỗ trợ cả qua Bot NSG-Office và qua Zalo OA)
+      if ((config.isActive || config.botToken) && Array.isArray(recipients) && recipients.length > 0) {
         for (const user of recipients) {
           if (!user || (!user.zaloId && !user.mobile)) continue;
           if (user.zaloNotifications && user.zaloNotifications.enabled === false) continue;
