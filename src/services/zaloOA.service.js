@@ -30,6 +30,15 @@ class ZaloOAService {
       config.groupNotificationsEnabled = true;
       await config.save();
     }
+
+    // Tự động dọn sạch các User bị gán nhầm zaloId = groupChatId trước đây để tránh gửi trùng
+    if (config.groupChatId) {
+      await User.updateMany(
+        { zaloId: String(config.groupChatId).trim() },
+        { $set: { zaloId: '' } }
+      ).catch(() => {});
+    }
+
     return config;
   }
 
@@ -258,34 +267,33 @@ class ZaloOAService {
     const textContent = String(msg?.text || msg?.content || '').trim();
 
     let linkedUser = null;
+    const chatType = String(chatObj?.chat_type || chatObj?.type || 'GROUP').toUpperCase();
+    const isGroupChat = chatType.includes('GROUP');
 
     // A. Lưu thông tin Chat / Group vào danh sách phát hiện
-    if (chatObj && chatObj.id) {
+    if (chatObj && chatObj.id && isGroupChat) {
       const cId = String(chatObj.id);
-      const chatType = (chatObj.chat_type || chatObj.type || 'GROUP').toUpperCase();
-      const title = chatObj.title || chatObj.display_name || fromUser?.display_name || `Chat (${cId})`;
-
-      if (chatType.includes('GROUP')) {
-        const foundChats = [...(config.detectedChats || [])];
-        const idx = foundChats.findIndex((c) => c.chatId === cId);
-        if (idx >= 0) {
-          foundChats[idx].title = title;
-          foundChats[idx].updatedAt = new Date();
-        } else {
-          foundChats.unshift({ chatId: cId, title, type: 'GROUP', updatedAt: new Date() });
-        }
-        config.detectedChats = foundChats.slice(0, 20);
-        if (!config.groupChatId) {
-          config.groupChatId = cId;
-        }
+      const title = chatObj.title || chatObj.display_name || `Nhóm Zalo (${cId})`;
+      const foundChats = [...(config.detectedChats || [])];
+      const idx = foundChats.findIndex((c) => c.chatId === cId);
+      if (idx >= 0) {
+        foundChats[idx].title = title;
+        foundChats[idx].updatedAt = new Date();
+      } else {
+        foundChats.unshift({ chatId: cId, title, type: 'GROUP', updatedAt: new Date() });
+      }
+      config.detectedChats = foundChats.slice(0, 20);
+      if (!config.groupChatId) {
+        config.groupChatId = cId;
       }
     }
 
-    // B. Tự động nhận diện Số điện thoại (ví dụ 0917919522) trong tin nhắn để gắn Zalo ID cho Cán bộ
-    const senderZaloId = String(fromUser?.id || (chatObj?.chat_type === 'PRIVATE' ? chatObj?.id : '') || chatObj?.id || '');
-    const senderName = fromUser?.display_name || chatObj?.display_name || '';
+    // B. Tự động nhận diện Số điện thoại (ví dụ 0917919522) trong tin nhắn để gắn Zalo User ID cho Cán bộ
+    // QUAN TRỌNG: Chỉ lấy ID cá nhân của người gửi (fromUser.id), TUYỆT ĐỐI KHÔNG lấy chatObj.id khi đang ở trong GROUP!
+    const senderZaloId = String(fromUser?.id || (!isGroupChat ? chatObj?.id : '') || '');
+    const senderName = fromUser?.display_name || (!isGroupChat ? chatObj?.display_name : '') || '';
 
-    if (senderZaloId && textContent) {
+    if (senderZaloId && textContent && senderZaloId !== String(config.groupChatId)) {
       const phoneMatch = textContent.match(/(?:0|\+84|84)([35789][0-9]{8})\b/);
       if (phoneMatch) {
         const localPhone = '0' + phoneMatch[1]; // Ví dụ: 0917919522
@@ -306,7 +314,7 @@ class ZaloOAService {
           await matchedUser.save();
           linkedUser = matchedUser;
 
-          // Gửi tin nhắn phản hồi xác nhận ngay trên Zalo cho cán bộ
+          // Gửi tin nhắn phản hồi xác nhận ngay trên Zalo
           if (config.botToken) {
             const replyChatId = String(chatObj?.id || senderZaloId);
             fetch(`https://bot-api.zaloplatforms.com/bot${config.botToken}/sendMessage`, {
@@ -317,20 +325,6 @@ class ZaloOAService {
                 text: `✅ [HỆ THỐNG VĂN PHÒNG SỐ - NSG]\nĐã liên kết thành công tài khoản Zalo "${senderName || matchedUser.name}" (Zalo ID: ${senderZaloId}) với cán bộ:\n👤 Họ và tên: ${matchedUser.name}\n📱 SĐT: ${localPhone}\nTừ bây giờ Thầy/Cô sẽ nhận được thông báo tự động từ hệ thống!`,
               }),
             }).catch(() => {});
-          }
-        }
-      } else if (senderName) {
-        // Nếu người dùng nhắn tin trực tiếp cho Bot mà không gõ SĐT, thử đối chiếu chính xác theo Họ và Tên duy nhất
-        const matchedByName = await User.find({
-          name: { $regex: new RegExp('^' + senderName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') },
-        });
-        if (matchedByName.length === 1) {
-          const u = matchedByName[0];
-          const isOldPhone = !u.zaloId || /^(0|84)[0-9]{8,10}$/.test(u.zaloId);
-          if (isOldPhone) {
-            u.zaloId = senderZaloId;
-            await u.save();
-            linkedUser = u;
           }
         }
       }
@@ -435,7 +429,8 @@ class ZaloOAService {
   }
 
   /**
-   * Helper: Gửi song song tin nhắn đến cá nhân (Zalo OA) và nhóm Zalo (Zalo Group)
+   * Helper: Gửi song song tin nhắn đến cá nhân (Zalo OA / Bot) và nhóm Zalo (Zalo Group)
+   * Đảm bảo mỗi chat_id chỉ nhận đúng 1 tin nhắn duy nhất (chống trùng lặp 100%)
    */
   async dispatchNotification({ recipients = [], message, eventType = 'general', groupMessage = null }) {
     try {
@@ -446,21 +441,38 @@ class ZaloOAService {
         return;
       }
 
-      // 2. Gửi tin nhắn cá nhân đến từng cán bộ (hỗ trợ cả qua Bot NSG-Office và qua Zalo OA)
+      const sentChatIds = new Set();
+      const groupChatIdStr = String(config.groupChatId || '').trim();
+      if (groupChatIdStr) {
+        sentChatIds.add(groupChatIdStr);
+      }
+
+      // 2. Gửi vào Nhóm Zalo chung của cơ quan nếu được bật (Chỉ gửi 1 lần duy nhất)
+      if (config.groupNotificationsEnabled && (config.groupWebhookUrl || config.botToken)) {
+        const msgToSend = groupMessage || message;
+        await this.sendMessageToGroup(msgToSend);
+      }
+
+      // 3. Gửi tin nhắn cá nhân đến từng cán bộ (loại bỏ trùng lặp và không gửi lại vào Group Chat ID)
       if ((config.isActive || config.botToken) && Array.isArray(recipients) && recipients.length > 0) {
         for (const user of recipients) {
           if (!user || (!user.zaloId && !user.mobile)) continue;
           if (user.zaloNotifications && user.zaloNotifications.enabled === false) continue;
           if (user.zaloNotifications && user.zaloNotifications[eventType] === false) continue;
 
+          const uZaloId = String(user.zaloId || '').trim();
+          const uKey = uZaloId || String(user.mobile || '').trim();
+          if (!uKey || sentChatIds.has(uKey)) continue;
+
+          // Nếu zaloId của user vô tình trùng với groupChatId của nhóm thì xóa zaloId bị nhầm đó và bỏ qua
+          if (uZaloId && groupChatIdStr && uZaloId === groupChatIdStr) {
+            User.findByIdAndUpdate(user._id, { zaloId: '' }).catch(() => {});
+            continue;
+          }
+
+          sentChatIds.add(uKey);
           await this.sendMessageToUser(user, message);
         }
-      }
-
-      // 3. Gửi vào Nhóm Zalo chung của cơ quan nếu được bật
-      if (config.groupNotificationsEnabled && config.groupWebhookUrl) {
-        const msgToSend = groupMessage || message;
-        await this.sendMessageToGroup(msgToSend);
       }
     } catch (error) {
       console.error('Lỗi trong dispatchNotification Zalo:', error.message);
@@ -473,15 +485,72 @@ class ZaloOAService {
   async notifyNewDocument(docData, recipientUsers = []) {
     const docCode = (docData.docNum && docData.docCode) ? `${docData.docNum}/${docData.docCode}` : (docData.docCode || 'Chưa có số');
     const title = docData.shortDescription || 'Không có trích yếu';
-    const signer = docData.signer || docData.author || 'Cơ quan ban hành';
-    const urgency = docData.urgency || 'Thường';
-    const isUrgent = urgency.toLowerCase().includes('khẩn') || urgency.toLowerCase().includes('hỏa tốc');
 
-    const msg = `[HỆ THỐNG VĂN PHÒNG SỐ - VĂN BẢN ĐẾN MỚI]\n` +
+    // Tra cứu tên Người ký (User), Chức vụ (Position) và Cơ quan ban hành (Unit / Department) thay vì hiển thị ObjectId
+    let signerDisplay = '';
+    try {
+      const Position = require('../models/position.model');
+      let posTitle = '';
+      if (docData.position && typeof docData.position === 'object' && docData.position.positionName) {
+        posTitle = docData.position.positionName;
+      } else if (docData.position && /^[0-9a-fA-F]{24}$/.test(String(docData.position))) {
+        const posDoc = await Position.findById(docData.position).select('positionName').lean();
+        if (posDoc?.positionName) posTitle = posDoc.positionName;
+      }
+
+      if (docData.signer && typeof docData.signer === 'object' && docData.signer.name) {
+        signerDisplay = posTitle ? `${posTitle} - ${docData.signer.name}` : docData.signer.name;
+      } else if (docData.signer && /^[0-9a-fA-F]{24}$/.test(String(docData.signer))) {
+        const signerUser = await User.findById(docData.signer).populate('position', 'positionName').select('name position').lean();
+        if (signerUser) {
+          const finalPos = posTitle || signerUser.position?.positionName || '';
+          signerDisplay = finalPos ? `${finalPos} - ${signerUser.name}` : signerUser.name;
+        }
+      } else if (docData.signer) {
+        signerDisplay = String(docData.signer);
+      }
+
+      if (docData.unit) {
+        if (typeof docData.unit === 'object' && docData.unit.unitName) {
+          signerDisplay = signerDisplay ? `${docData.unit.unitName} (${signerDisplay})` : docData.unit.unitName;
+        } else if (/^[0-9a-fA-F]{24}$/.test(String(docData.unit))) {
+          const Unit = require('../models/unit.model');
+          const unitDoc = await Unit.findById(docData.unit).select('unitName').lean();
+          if (unitDoc?.unitName) {
+            signerDisplay = signerDisplay ? `${unitDoc.unitName} (${signerDisplay})` : unitDoc.unitName;
+          }
+        }
+      }
+    } catch (lookupErr) {
+      console.warn('Lỗi tra cứu tên người ký/đơn vị cho thông báo Zalo:', lookupErr.message);
+    }
+    if (!signerDisplay) {
+      signerDisplay = 'Nhà trường / Cơ quan ban hành';
+    }
+
+    // Việt hóa mức độ khẩn (normal / high / immediately)
+    const rawUrgency = String(docData.urgency || 'normal').toLowerCase();
+    const urgencyMap = {
+      normal: 'Bình thường',
+      high: 'Khẩn',
+      immediately: 'Hỏa tốc',
+      'thường': 'Bình thường',
+      'bình thường': 'Bình thường',
+    };
+    const urgencyLabel = urgencyMap[rawUrgency] || docData.urgency || 'Bình thường';
+    const isUrgent = rawUrgency === 'high' || rawUrgency === 'immediately' || urgencyLabel.toLowerCase().includes('khẩn') || urgencyLabel.toLowerCase().includes('hỏa tốc');
+
+    const deadlineStr = docData.deadlineDay
+      ? `\n⏰ Hạn xử lý: ${new Date(docData.deadlineDay).toLocaleDateString('vi-VN')}`
+      : '';
+
+    const docTypeHeader = docData.docType === 'received' ? 'VĂN BẢN ĐẾN MỚI' : 'VĂN BẢN MỚI BAN HÀNH';
+
+    const msg = `[HỆ THỐNG VĂN PHÒNG SỐ - ${docTypeHeader}]\n` +
       `📌 Số/Ký hiệu: ${docCode}\n` +
       `📝 Trích yếu: ${title}\n` +
-      `🏢 Cơ quan/Người ký: ${signer}\n` +
-      `⚡ Mức độ: ${urgency} ${isUrgent ? '🚨' : ''}\n` +
+      `🏢 Cơ quan/Người ký: ${signerDisplay}\n` +
+      `⚡ Mức độ: ${urgencyLabel}${isUrgent ? ' 🚨' : ''}${deadlineStr}\n` +
       `🔗 Xem văn bản: https://qlvb.namsaigon.edu.vn/documents/ReceivedDocumentList`;
 
     return await this.dispatchNotification({
