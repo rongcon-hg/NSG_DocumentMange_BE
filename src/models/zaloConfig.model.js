@@ -11,9 +11,18 @@ const zaloConfigSchema = new mongoose.Schema({
   webhookSecret: { type: String, default: '' },
 
   // Cấu hình gửi thông báo vào Nhóm Zalo (Group Bot / Webhook)
-  groupWebhookUrl: { type: String, default: '' },      // Webhook URL hoặc Bot Chat URL của Nhóm Zalo
+  botToken: { type: String, default: '4045703669582412985:XsqkbXxIySfPqICvghIIFSSAPvFhlrTsahrkuxMZIJdTwtAjwSnAizZvWXvZdSns' },
+  botName: { type: String, default: 'Bot NSG-Office' },
+  botInviteLink: { type: String, default: 'https://bot.zaloplatforms.com/groups/invite/bot.jrRZbwgC' },
+  groupWebhookUrl: { type: String, default: 'https://bot-api.zaloplatforms.com/bot4045703669582412985:XsqkbXxIySfPqICvghIIFSSAPvFhlrTsahrkuxMZIJdTwtAjwSnAizZvWXvZdSns/sendMessage' },      // Webhook URL hoặc Bot Chat URL của Nhóm Zalo
   groupChatId: { type: String, default: '' },          // Group Chat ID / Thread ID Zalo
-  groupNotificationsEnabled: { type: Boolean, default: false },
+  groupNotificationsEnabled: { type: Boolean, default: true },
+  detectedChats: [{
+    chatId: { type: String },
+    title: { type: String },
+    type: { type: String },
+    updatedAt: { type: Date, default: Date.now }
+  }],
 
   // Bật/tắt các loại thông báo gửi qua Zalo
   notificationEvents: {

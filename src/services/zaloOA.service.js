@@ -10,11 +10,25 @@ class ZaloOAService {
    */
   async getConfig() {
     let config = await ZaloConfig.findOne();
+    const defaultToken = '4045703669582412985:XsqkbXxIySfPqICvghIIFSSAPvFhlrTsahrkuxMZIJdTwtAjwSnAizZvWXvZdSns';
+    const defaultWebhook = `https://bot-api.zaloplatforms.com/bot${defaultToken}/sendMessage`;
     if (!config) {
       config = await ZaloConfig.create({
         oaId: process.env.ZALO_OA_ID || '785749141891313000',
-        isActive: false
+        isActive: false,
+        botToken: defaultToken,
+        botName: 'Bot NSG-Office',
+        botInviteLink: 'https://bot.zaloplatforms.com/groups/invite/bot.jrRZbwgC',
+        groupWebhookUrl: defaultWebhook,
+        groupNotificationsEnabled: true,
       });
+    } else if (!config.botToken && !config.groupWebhookUrl) {
+      config.botToken = defaultToken;
+      config.botName = 'Bot NSG-Office';
+      config.botInviteLink = 'https://bot.zaloplatforms.com/groups/invite/bot.jrRZbwgC';
+      config.groupWebhookUrl = defaultWebhook;
+      config.groupNotificationsEnabled = true;
+      await config.save();
     }
     return config;
   }
@@ -118,12 +132,17 @@ class ZaloOAService {
   async sendMessageToGroup(text) {
     try {
       const config = await this.getConfig();
-      if (!config.groupNotificationsEnabled || !config.groupWebhookUrl) {
-        return { success: false, reason: 'Thông báo nhóm Zalo chưa được bật hoặc chưa cấu hình Webhook URL' };
+      const targetUrl = config.groupWebhookUrl || (config.botToken ? `https://bot-api.zaloplatforms.com/bot${config.botToken}/sendMessage` : '');
+      if (!config.groupNotificationsEnabled || !targetUrl) {
+        return { success: false, reason: 'Thông báo nhóm Zalo chưa được bật hoặc chưa cấu hình Webhook URL / Bot Token' };
       }
 
-      // Hỗ trợ cả Zalo Webhook chuẩn, Chat Bot URL hoặc webhook chuyển tiếp
-      const response = await fetch(config.groupWebhookUrl, {
+      if (targetUrl.includes('bot-api.zaloplatforms.com') && !config.groupChatId) {
+        return { success: false, reason: 'Chưa có Group Chat ID. Vui lòng mời Bot vào nhóm Zalo, gõ 1 tin nhắn trong nhóm rồi bấm "Tự động dò tìm Group Chat ID"!' };
+      }
+
+      // Hỗ trợ cả Zalo Bot Platform chuẩn, Chat Bot URL hoặc webhook chuyển tiếp
+      const response = await fetch(targetUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -140,10 +159,83 @@ class ZaloOAService {
       let resJson = null;
       try { resJson = JSON.parse(resText); } catch (_) { resJson = resText; }
 
-      return { success: response.ok, data: resJson };
+      const isOk = response.ok && (resJson?.ok !== false);
+      return { success: isOk, data: resJson, reason: resJson?.description || undefined };
     } catch (error) {
       console.error('Lỗi gửi tin nhắn vào nhóm Zalo:', error.message);
       return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Tự động dò tìm Group Chat ID từ Zalo Bot API (getUpdates)
+   */
+  async detectBotGroupChats(customBotToken = null) {
+    try {
+      const config = await this.getConfig();
+      const token = (customBotToken || config.botToken || '').trim();
+      if (!token) {
+        return { success: false, message: 'Chưa có Bot Token để dò tìm nhóm' };
+      }
+
+      // 1. Kiểm tra thông tin Bot qua getMe
+      const meRes = await fetch(`https://bot-api.zaloplatforms.com/bot${token}/getMe`);
+      const meJson = await meRes.json();
+      if (meJson?.ok && meJson?.result) {
+        config.botToken = token;
+        config.botName = meJson.result.display_name || meJson.result.account_name || 'Bot NSG-Office';
+        config.groupWebhookUrl = `https://bot-api.zaloplatforms.com/bot${token}/sendMessage`;
+      }
+
+      // 2. Gọi getUpdates với timeout ngắn (3 giây) để lấy tin nhắn gần nhất trong nhóm
+      const upRes = await fetch(`https://bot-api.zaloplatforms.com/bot${token}/getUpdates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timeout: 3 }),
+      });
+      const upJson = await upRes.json();
+
+      const foundChats = [...(config.detectedChats || [])];
+      const addChat = (chatObj) => {
+        if (!chatObj || !chatObj.id) return;
+        const cId = String(chatObj.id);
+        const title = chatObj.title || chatObj.display_name || chatObj.name || `Nhóm/Chat (${cId})`;
+        const type = chatObj.chat_type || chatObj.type || 'GROUP';
+        const idx = foundChats.findIndex((c) => c.chatId === cId);
+        if (idx >= 0) {
+          foundChats[idx].title = title;
+          foundChats[idx].updatedAt = new Date();
+        } else {
+          foundChats.unshift({ chatId: cId, title, type, updatedAt: new Date() });
+        }
+      };
+
+      if (upJson?.ok && upJson?.result) {
+        const results = Array.isArray(upJson.result) ? upJson.result : [upJson.result];
+        results.forEach((item) => {
+          const msg = item.message || item.channel_post || item.my_chat_member || item;
+          if (msg?.chat) addChat(msg.chat);
+          if (item?.chat) addChat(item.chat);
+        });
+      }
+
+      config.detectedChats = foundChats.slice(0, 20);
+      if (!config.groupChatId && foundChats.length > 0) {
+        config.groupChatId = foundChats[0].chatId;
+      }
+      await config.save();
+
+      return {
+        success: true,
+        botInfo: meJson?.result || null,
+        detectedChats: config.detectedChats,
+        groupChatId: config.groupChatId,
+        groupWebhookUrl: config.groupWebhookUrl,
+        rawUpdate: upJson,
+      };
+    } catch (error) {
+      console.error('Lỗi detectBotGroupChats:', error.message);
+      return { success: false, message: error.message };
     }
   }
 

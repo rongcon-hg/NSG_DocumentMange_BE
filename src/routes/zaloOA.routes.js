@@ -8,6 +8,7 @@ router.get('/config', verifyToken, verifyManager, zaloController.getZaloConfig);
 router.put('/config', verifyToken, verifyManager, zaloController.updateZaloConfig);
 router.post('/test-send', verifyToken, verifyManager, zaloController.testSendMessage);
 router.post('/test-send-group', verifyToken, verifyManager, zaloController.testSendGroupMessage);
+router.post('/detect-group', verifyToken, verifyManager, zaloController.detectBotGroupChats);
 
 // Webhook từ Zalo Platform
 router.post('/webhook', zaloController.handleZaloWebhook);

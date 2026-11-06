@@ -18,9 +18,13 @@ const getZaloConfig = async (req, res) => {
       hasSecretKey: !!config.secretKey,
       hasAccessToken: !!config.accessToken,
       hasRefreshToken: !!config.refreshToken,
+      botToken: config.botToken || '',
+      botName: config.botName || 'Bot NSG-Office',
+      botInviteLink: config.botInviteLink || 'https://bot.zaloplatforms.com/groups/invite/bot.jrRZbwgC',
       groupWebhookUrl: config.groupWebhookUrl || '',
       groupChatId: config.groupChatId || '',
       groupNotificationsEnabled: !!config.groupNotificationsEnabled,
+      detectedChats: config.detectedChats || [],
       notificationEvents: config.notificationEvents || {},
       templateIds: config.templateIds || {},
       updatedAt: config.updatedAt,
@@ -44,6 +48,9 @@ const updateZaloConfig = async (req, res) => {
       refreshToken, 
       isActive, 
       templateIds,
+      botToken,
+      botName,
+      botInviteLink,
       groupWebhookUrl,
       groupChatId,
       groupNotificationsEnabled,
@@ -61,6 +68,14 @@ const updateZaloConfig = async (req, res) => {
     if (refreshToken) config.refreshToken = refreshToken;
     if (isActive !== undefined) config.isActive = isActive;
     if (templateIds) config.templateIds = { ...config.templateIds, ...templateIds };
+    if (botToken !== undefined) {
+      config.botToken = botToken.trim();
+      if (config.botToken && !groupWebhookUrl) {
+        config.groupWebhookUrl = `https://bot-api.zaloplatforms.com/bot${config.botToken}/sendMessage`;
+      }
+    }
+    if (botName !== undefined) config.botName = botName;
+    if (botInviteLink !== undefined) config.botInviteLink = botInviteLink;
     if (groupWebhookUrl !== undefined) config.groupWebhookUrl = groupWebhookUrl;
     if (groupChatId !== undefined) config.groupChatId = groupChatId;
     if (groupNotificationsEnabled !== undefined) config.groupNotificationsEnabled = groupNotificationsEnabled;
@@ -146,12 +161,58 @@ const testSendGroupMessage = async (req, res) => {
 };
 
 /**
- * Webhook tiếp nhận sự kiện từ Zalo OA (Follow, gửi tin nhắn, lấy Zalo User ID)
+ * Tự động dò tìm Group Chat ID từ Zalo Bot API (getUpdates)
+ */
+const detectBotGroupChats = async (req, res) => {
+  try {
+    const { botToken } = req.body || {};
+    const result = await zaloOAService.detectBotGroupChats(botToken);
+    if (result.success) {
+      return res.json({
+        success: true,
+        message: result.detectedChats?.length > 0
+          ? `Đã tìm thấy ${result.detectedChats.length} nhóm/cuộc trò chuyện Zalo!`
+          : 'Đã kết nối Bot thành công! Vui lòng gửi 1 tin nhắn bất kỳ vào nhóm Zalo có mặt Bot rồi bấm dò tìm lại.',
+        data: result,
+      });
+    } else {
+      return res.status(400).json({ success: false, message: result.message || 'Không thể dò tìm nhóm' });
+    }
+  } catch (error) {
+    console.error('Lỗi detectBotGroupChats:', error);
+    return res.status(500).json({ success: false, message: 'Lỗi khi dò tìm Group Chat ID', error: error.message });
+  }
+};
+
+/**
+ * Webhook tiếp nhận sự kiện từ Zalo OA / Zalo Bot
  */
 const handleZaloWebhook = async (req, res) => {
   try {
     const event = req.body;
-    console.log('[Zalo OA Webhook Event]:', JSON.stringify(event));
+    console.log('[Zalo Webhook Event]:', JSON.stringify(event));
+
+    // Tự động lưu chat_id nếu có tin nhắn từ nhóm gửi đến webhook
+    const msg = event?.message || event?.result?.message || event;
+    const chatObj = msg?.chat || event?.chat;
+    if (chatObj && chatObj.id) {
+      const config = await zaloOAService.getConfig();
+      const cId = String(chatObj.id);
+      const title = chatObj.title || chatObj.display_name || `Nhóm Zalo (${cId})`;
+      const foundChats = [...(config.detectedChats || [])];
+      const idx = foundChats.findIndex((c) => c.chatId === cId);
+      if (idx >= 0) {
+        foundChats[idx].title = title;
+        foundChats[idx].updatedAt = new Date();
+      } else {
+        foundChats.unshift({ chatId: cId, title, type: chatObj.chat_type || 'GROUP', updatedAt: new Date() });
+      }
+      config.detectedChats = foundChats.slice(0, 20);
+      if (!config.groupChatId) {
+        config.groupChatId = cId;
+      }
+      await config.save();
+    }
 
     // Phản hồi ngay 200 OK cho Zalo Platform
     res.status(200).json({ error: 0, message: 'Success' });
@@ -166,5 +227,6 @@ module.exports = {
   updateZaloConfig,
   testSendMessage,
   testSendGroupMessage,
+  detectBotGroupChats,
   handleZaloWebhook,
 };
