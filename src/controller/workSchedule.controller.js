@@ -912,7 +912,7 @@ exports.approveWorkSchedule = async (req, res) => {
         });
 
         // Gửi email thông báo đã phê duyệt đến người đăng ký
-        User.findById(schedule.createdBy).select("name email zaloId zaloNotifications").then((creatorUser) => {
+        User.findById(schedule.createdBy).select("name email mobile zaloId zaloNotifications").then((creatorUser) => {
           if (creatorUser && creatorUser.email) {
             sendWorkScheduleStatusEmail(schedule, creatorUser, currentUser, "APPROVED").catch((e) =>
               console.warn("Lỗi gửi email phê duyệt lịch:", e.message)

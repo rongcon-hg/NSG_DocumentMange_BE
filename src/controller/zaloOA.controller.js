@@ -120,19 +120,23 @@ const testSendMessage = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Không tìm thấy người dùng' });
     }
 
-    if (!user.zaloId) {
-      return res.status(400).json({ success: false, message: 'Cán bộ này chưa liên kết Zalo ID (User ID trên Zalo OA)' });
+    if (!user.mobile && !user.zaloId) {
+      return res.status(400).json({ success: false, message: 'Cán bộ này chưa cập nhật Số điện thoại hoặc Zalo ID trên hệ thống' });
     }
 
     const result = await zaloOAService.sendMessageToUser(
-      user.zaloId,
+      user,
       testMessage || `[QLVB] Xin chào ${user.name}, đây là tin nhắn kiểm tra kết nối từ hệ thống QLVB Nam Sài Gòn.`
     );
 
     if (result.success) {
-      return res.json({ success: true, message: 'Gửi tin nhắn Zalo cá nhân thành công', data: result.data });
+      return res.json({ success: true, message: `Đã gửi tin nhắn Zalo tới ${user.name} (${user.mobile || user.zaloId}) thành công!`, data: result.data });
     } else {
-      return res.status(400).json({ success: false, message: 'Gửi tin nhắn Zalo thất bại', error: result });
+      return res.status(400).json({
+        success: false,
+        message: 'Gửi tin nhắn Zalo cá nhân thất bại: ' + (result.reason || result.error || 'Vui lòng kiểm tra cấu hình Zalo OA'),
+        error: result,
+      });
     }
   } catch (error) {
     console.error('Lỗi testSendMessage Zalo:', error);

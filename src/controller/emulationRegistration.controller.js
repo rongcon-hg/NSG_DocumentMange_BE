@@ -868,7 +868,7 @@ const reviewRegistration = async (req, res) => {
         const submitterIds = [reg.user, reg.createdByUser].filter(Boolean);
         if (submitterIds.length > 0) {
           const submitters = await User.find({ _id: { $in: submitterIds } }).select(
-            "name email emailNotifications zaloId zaloNotifications role"
+            "name email mobile emailNotifications zaloId zaloNotifications role"
           );
           submitters.forEach((u) => {
             recipientMap.set(String(u._id), u);
@@ -885,7 +885,7 @@ const reviewRegistration = async (req, res) => {
           })
             .populate("position")
             .populate("department")
-            .select("name email emailNotifications zaloId zaloNotifications role position department");
+            .select("name email mobile emailNotifications zaloId zaloNotifications role position department");
 
           bghUsers.forEach((u) => {
             if (isUserBGH(u)) {
@@ -898,7 +898,7 @@ const reviewRegistration = async (req, res) => {
         if (action === "BGH_APPROVE" || action === "BGH_REJECT" || action === "MANAGER_REJECT") {
           const managers = await User.find({
             role: { $in: ["manager", "admin"] },
-          }).select("name email emailNotifications zaloId zaloNotifications role");
+          }).select("name email mobile emailNotifications zaloId zaloNotifications role");
           managers.forEach((m) => {
             recipientMap.set(String(m._id), m);
           });

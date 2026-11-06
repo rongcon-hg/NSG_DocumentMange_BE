@@ -259,12 +259,12 @@ const updateReplyDocStatus = async (req, res) => {
       // GỬI EMAIL THÔNG BÁO CHO NGƯỜI SOẠN THẢO (DRAFTER)
       try {
         const fullDoc = await RepliedDoc.findById(repliedDocId)
-          .populate({ path: 'replyBy', select: 'name email emailNotifications zaloId zaloNotifications' })
+          .populate({ path: 'replyBy', select: 'name email mobile emailNotifications zaloId zaloNotifications' })
           .populate({ path: 'docVariant', select: 'docVariantName' })
           .populate({ 
             path: 'repliedDoc', 
             select: 'docCode docNum shortDescription',
-            populate: { path: 'sentBy', select: 'name email emailNotifications zaloId zaloNotifications' }
+            populate: { path: 'sentBy', select: 'name email mobile emailNotifications zaloId zaloNotifications' }
           });
         if (fullDoc) {
           const actionType = newStatus === 'approved' ? 'managerAccept' : 'managerReject';
@@ -850,13 +850,13 @@ const sentToReview = async (req, res) => {
     // GỬI EMAIL THÔNG BÁO CHO BGH
     try {
       const fullDoc = await RepliedDoc.findById(id)
-        .populate({ path: 'reviewer', select: 'name email emailNotifications zaloId zaloNotifications' })
-        .populate({ path: 'replyBy', select: 'name email emailNotifications zaloId zaloNotifications' })
+        .populate({ path: 'reviewer', select: 'name email mobile emailNotifications zaloId zaloNotifications' })
+        .populate({ path: 'replyBy', select: 'name email mobile emailNotifications zaloId zaloNotifications' })
         .populate({ path: 'docVariant', select: 'docVariantName' })
         .populate({ 
           path: 'repliedDoc', 
           select: 'docCode docNum shortDescription',
-          populate: { path: 'sentBy', select: 'name email emailNotifications zaloId zaloNotifications' } 
+          populate: { path: 'sentBy', select: 'name email mobile emailNotifications zaloId zaloNotifications' } 
         });
       if (fullDoc && fullDoc.reviewer) {
         const actorName = req.user ? req.user.name : "";
@@ -1002,12 +1002,12 @@ const reviewerAction = async (req, res) => {
     if (action === "rejectedByReviewer" || action === "approvedByReviewer") {
       try {
         const fullDoc = await RepliedDoc.findById(id)
-          .populate({ path: 'replyBy', select: 'name email emailNotifications zaloId zaloNotifications' })
+          .populate({ path: 'replyBy', select: 'name email mobile emailNotifications zaloId zaloNotifications' })
           .populate({ path: 'docVariant', select: 'docVariantName' })
           .populate({ 
             path: 'repliedDoc', 
             select: 'docCode docNum shortDescription',
-            populate: { path: 'sentBy', select: 'name email emailNotifications zaloId zaloNotifications' } 
+            populate: { path: 'sentBy', select: 'name email mobile emailNotifications zaloId zaloNotifications' } 
           });
         if (fullDoc) {
           const recipients = [];

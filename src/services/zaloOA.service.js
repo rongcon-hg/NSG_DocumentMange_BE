@@ -92,33 +92,91 @@ class ZaloOAService {
   }
 
   /**
-   * Gửi tin nhắn trực tiếp qua Zalo OA đến người dùng (qua user_id trên Zalo OA)
-   * @param {string} zaloUserId ID người dùng trên Zalo OA
+   * Chuẩn hóa số điện thoại sang định dạng 84xxx
+   */
+  normalizePhone(phone) {
+    if (!phone) return '';
+    let cleaned = String(phone).replace(/[^0-9]/g, '');
+    if (cleaned.startsWith('0')) {
+      cleaned = '84' + cleaned.slice(1);
+    }
+    return cleaned;
+  }
+
+  /**
+   * Gửi tin nhắn trực tiếp qua Zalo OA đến người dùng (qua user_id hoặc số điện thoại)
+   * @param {string|object} target zaloUserId hoặc user object { zaloId, mobile, name }
    * @param {string} text Nội dung tin nhắn văn bản
    */
-  async sendMessageToUser(zaloUserId, text) {
+  async sendMessageToUser(target, text) {
     try {
       const token = await this.getValidToken();
-      if (!token) return { success: false, reason: 'Zalo OA chưa được kích hoạt hoặc token không khả dụng' };
+      if (!token) return { success: false, reason: 'Zalo OA chưa được kích hoạt hoặc chưa cấu hình Access Token / Refresh Token' };
 
-      const response = await fetch('https://openapi.zalo.me/v3.0/oa/message/cs', {
-        method: 'POST',
-        headers: {
-          access_token: token,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          recipient: {
-            user_id: zaloUserId,
-          },
-          message: {
-            text: text,
-          },
-        }),
-      });
+      const zaloId = typeof target === 'object' ? (target.zaloId || '').trim() : String(target || '').trim();
+      const mobile = typeof target === 'object' ? (target.mobile || '').trim() : '';
 
-      const resData = await response.json();
-      return { success: resData?.error === 0, data: resData };
+      // Nếu truyền vào chuỗi có dạng số điện thoại Việt Nam (09xxx, 84xxx) mà không phải Zalo ID dài
+      const isPhoneString = !mobile && /^(0|84|\+84)[0-9]{8,10}$/.test(zaloId);
+      const phoneToUse = mobile || (isPhoneString ? zaloId : '');
+
+      // 1. Ưu tiên gửi qua user_id trên Zalo OA nếu có zaloId thực sự
+      if (zaloId && !isPhoneString) {
+        const response = await fetch('https://openapi.zalo.me/v3.0/oa/message/cs', {
+          method: 'POST',
+          headers: {
+            access_token: token,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            recipient: {
+              user_id: zaloId,
+            },
+            message: {
+              text: text,
+            },
+          }),
+        });
+
+        const resData = await response.json();
+        if (resData?.error === 0) {
+          return { success: true, data: resData };
+        }
+        // Nếu gửi bằng zaloId lỗi và có SĐT thì thử tiếp bằng SĐT bên dưới
+        if (!phoneToUse) {
+          return { success: false, reason: resData?.message || 'Lỗi từ Zalo OA', data: resData };
+        }
+      }
+
+      // 2. Gửi dựa theo số điện thoại của người dùng (tra cứu/gửi qua phone trên Zalo OA)
+      if (phoneToUse) {
+        const formattedPhone = this.normalizePhone(phoneToUse);
+        const response = await fetch('https://openapi.zalo.me/v3.0/oa/message/cs', {
+          method: 'POST',
+          headers: {
+            access_token: token,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            recipient: {
+              user_id: formattedPhone,
+              phone: formattedPhone,
+            },
+            message: {
+              text: text,
+            },
+          }),
+        });
+
+        const resData = await response.json();
+        return {
+          success: resData?.error === 0,
+          reason: resData?.message || (resData?.error !== 0 ? `Zalo OA trả về mã lỗi ${resData?.error}: ${resData?.message || 'Cán bộ cần quan tâm (Follow) Zalo OA hoặc cấu hình Token OA hợp lệ'}` : undefined),
+          data: resData,
+        };
+      }
+
+      return { success: false, reason: 'Cán bộ chưa có Số điện thoại hoặc Zalo ID' };
     } catch (error) {
       console.error('Lỗi gửi tin nhắn Zalo OA:', error.message);
       return { success: false, error: error.message };
@@ -251,14 +309,14 @@ class ZaloOAService {
         return;
       }
 
-      // 2. Gửi tin nhắn cá nhân đến từng cán bộ có liên kết Zalo ID
+      // 2. Gửi tin nhắn cá nhân đến từng cán bộ có Số điện thoại hoặc Zalo ID
       if (config.isActive && Array.isArray(recipients) && recipients.length > 0) {
         for (const user of recipients) {
-          if (!user || !user.zaloId) continue;
+          if (!user || (!user.zaloId && !user.mobile)) continue;
           if (user.zaloNotifications && user.zaloNotifications.enabled === false) continue;
           if (user.zaloNotifications && user.zaloNotifications[eventType] === false) continue;
 
-          await this.sendMessageToUser(user.zaloId, message);
+          await this.sendMessageToUser(user, message);
         }
       }
 

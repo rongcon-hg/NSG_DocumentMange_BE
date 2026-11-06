@@ -317,8 +317,8 @@ const createTask = async (req, res) => {
         
         try {
             const populatedTask = await Task.findById(newTask._id)
-                .populate("assignees", "name email emailNotifications")
-                .populate("collaborators", "name email emailNotifications");
+                .populate("assignees", "name email mobile zaloId zaloNotifications emailNotifications")
+                .populate("collaborators", "name email mobile zaloId zaloNotifications emailNotifications");
                 
             const uniqueUsersMap = new Map();
             if (populatedTask.assignees) populatedTask.assignees.forEach(u => uniqueUsersMap.set(u._id.toString(), u));
