@@ -9,6 +9,8 @@ class ZaloOAService {
    * Lấy cấu hình Zalo OA hiện tại
    */
   async getConfig() {
+    const connectDB = require('../config/db');
+    await connectDB();
     let config = await ZaloConfig.findOne();
     const defaultToken = '4045703669582412985:XsqkbXxIySfPqICvghIIFSSAPvFhlrTsahrkuxMZIJdTwtAjwSnAizZvWXvZdSns';
     const defaultWebhook = `https://bot-api.zaloplatforms.com/bot${defaultToken}/sendMessage`;
@@ -288,10 +290,13 @@ class ZaloOAService {
     const msg = item.message || item.channel_post || item.my_chat_member || item.result?.message || item;
     const chatObj = msg?.chat || item?.chat;
     const fromUser = msg?.from || item?.from;
+    const contactObj = msg?.contact || item?.contact || msg?.attachment?.payload || {};
+    const rawText = String(msg?.text || msg?.content || contactObj?.phone || contactObj?.phone_number || JSON.stringify(msg) || '').trim();
     const textContent = String(msg?.text || msg?.content || '').trim();
 
     let linkedUser = null;
-    const chatType = String(chatObj?.chat_type || chatObj?.type || 'GROUP').toUpperCase();
+    // Nếu có title nhóm thì mới là GROUP, còn chat 1-1 với Bot thì là PRIVATE
+    const chatType = String(chatObj?.chat_type || chatObj?.type || (chatObj?.title ? 'GROUP' : 'PRIVATE')).toUpperCase();
     const isGroupChat = chatType.includes('GROUP');
 
     // A. Lưu thông tin Chat / Group vào danh sách phát hiện
@@ -312,15 +317,19 @@ class ZaloOAService {
       }
     }
 
-    // B. Tự động nhận diện Số điện thoại (ví dụ 0917919522 hoặc 0917.919.522) trong tin nhắn để gắn Zalo User ID cho Cán bộ
-    // QUAN TRỌNG: Chỉ lấy ID cá nhân của người gửi (fromUser.id), TUYỆT ĐỐI KHÔNG lấy chatObj.id khi đang ở trong GROUP!
-    const senderZaloId = String(fromUser?.id || (!isGroupChat ? chatObj?.id : '') || '');
-    const senderName = fromUser?.display_name || (!isGroupChat ? chatObj?.display_name : '') || '';
+    // B. Tự động nhận diện Số điện thoại (gõ chữ hoặc gửi Danh thiếp Zalo) hoặc Họ tên hiển thị Zalo để gắn Zalo User ID cho Cán bộ
+    // Khi chat 1-1 với Bot (!isGroupChat), chatObj.id chính là chat_id cá nhân để gửi tin nhắn cho người dùng
+    const senderZaloId = String(
+      (!isGroupChat && chatObj?.id)
+        ? chatObj.id
+        : (fromUser?.id || (!isGroupChat ? chatObj?.id : '') || '')
+    );
+    const senderName = fromUser?.display_name || fromUser?.name || contactObj?.name || contactObj?.display_name || (!isGroupChat ? chatObj?.display_name : '') || '';
 
     if (senderZaloId && senderZaloId !== String(config.groupChatId)) {
-      // Chuẩn hóa chuỗi để bắt số điện thoại dù có dấu cách, dấu chấm hay dấu gạch ngang
-      const cleanedDigits = textContent.replace(/[\s.\-()]/g, '');
-      const phoneMatch = cleanedDigits.match(/(?:0|\+84|84)([35789][0-9]{8})\b/);
+      // Chuẩn hóa chuỗi để bắt số điện thoại dù gõ văn bản hay gửi Danh thiếp (091 791 9522)
+      const cleanedDigits = rawText.replace(/[\s.\-()]/g, '');
+      const phoneMatch = cleanedDigits.match(/(?:0|\+84|84)([35789][0-9]{8})/);
       let matchedUser = null;
 
       if (phoneMatch) {
@@ -345,16 +354,18 @@ class ZaloOAService {
         matchedUser = matchedUsers.find(u => u.email !== 'qlvb@nsgpc.edu.vn') || matchedUsers[0] || null;
       }
 
-      // Nếu không gõ SĐT nhưng Họ tên hiển thị Zalo trùng khớp chính xác với Họ tên cán bộ trong hệ thống (và chỉ có 1 người trùng tên)
+      // Nếu không có SĐT nhưng Họ tên hiển thị Zalo trùng khớp với Họ tên cán bộ trong hệ thống
       if (!matchedUser && senderName) {
         const cleanSenderName = senderName.trim();
         const nameMatches = await User.find({
           name: { $regex: new RegExp(`^${cleanSenderName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }
         });
-        if (nameMatches.length === 1) {
-          matchedUser = nameMatches[0];
-          matchedUser.zaloId = senderZaloId;
-          await matchedUser.save();
+        if (nameMatches.length >= 1) {
+          for (const u of nameMatches) {
+            u.zaloId = senderZaloId;
+            await u.save();
+          }
+          matchedUser = nameMatches.find(u => u.email !== 'qlvb@nsgpc.edu.vn') || nameMatches[0];
           // Nếu cán bộ này có SĐT trùng với tài khoản khác (như NSG Office), gắn luôn cho đồng bộ
           if (matchedUser.mobile) {
             const digits = String(matchedUser.mobile).replace(/\D/g, '').slice(-9);
@@ -371,18 +382,30 @@ class ZaloOAService {
       if (matchedUser) {
         linkedUser = matchedUser;
 
-        // Gửi tin nhắn phản hồi xác nhận ngay trên Zalo
+        // Gửi tin nhắn phản hồi xác nhận ngay trên Zalo (gửi cả vào chatObj.id và senderZaloId nếu khác nhau)
         if (config.botToken) {
           const replyChatId = String(chatObj?.id || senderZaloId);
+          const confirmText = `✅ [HỆ THỐNG VĂN PHÒNG SỐ - NSG]\nĐã liên kết thành công tài khoản Zalo "${senderName || matchedUser.name}" (Zalo ID: ${senderZaloId}) với cán bộ:\n👤 Họ và tên: ${matchedUser.name}\n📱 SĐT: ${matchedUser.mobile || 'Đã cập nhật'}\nTừ bây giờ Thầy/Cô sẽ nhận được thông báo tự động từ hệ thống!`;
           fetch(`https://bot-api.zaloplatforms.com/bot${config.botToken}/sendMessage`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               chat_id: replyChatId,
-              text: `✅ [HỆ THỐNG VĂN PHÒNG SỐ - NSG]\nĐã liên kết thành công tài khoản Zalo "${senderName || matchedUser.name}" (Zalo ID: ${senderZaloId}) với cán bộ:\n👤 Họ và tên: ${matchedUser.name}\n📱 SĐT: ${matchedUser.mobile || 'Đã cập nhật'}\nTừ bây giờ Thầy/Cô sẽ nhận được thông báo tự động từ hệ thống!`,
+              text: confirmText,
             }),
           }).catch(() => {});
         }
+      } else if (!isGroupChat && config.botToken) {
+        // Nếu người dùng nhắn riêng cho Bot nhưng chưa tìm thấy SĐT khớp, phản hồi hướng dẫn kèm Zalo ID của họ
+        const replyChatId = String(chatObj?.id || senderZaloId);
+        fetch(`https://bot-api.zaloplatforms.com/bot${config.botToken}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: replyChatId,
+            text: `👋 [HỆ THỐNG VĂN PHÒNG SỐ - NSG]\nXin chào ${senderName || 'Thầy/Cô'} (Mã Zalo ID của bạn: ${senderZaloId}).\nVui lòng gõ trực tiếp 10 chữ số điện thoại của bạn bằng bàn phím (ví dụ: 0917919522) và gửi vào đây để hệ thống tự động liên kết tài khoản!`,
+          }),
+        }).catch(() => {});
       }
     }
 

@@ -164,7 +164,6 @@ const zaloOARoutes = require('./src/routes/zaloOA.routes');
 app.use('/api/zalo', zaloOARoutes);
 app.use('/zalo', zaloOARoutes);
 const zaloOAService = require('./src/services/zaloOA.service');
-zaloOAService.startBotPolling();
 
 // Digital Archiving (e-Archive) routes
 const archiveRoutes = require('./src/routes/archive.routes');
@@ -221,6 +220,7 @@ app.get("/test", (req, res) => {
 (async () => {
     try {
       await connection();
+      zaloOAService.startBotPolling();
 
       if (process.env.NODE_ENV !== 'production') {
         app.listen(port, () => {

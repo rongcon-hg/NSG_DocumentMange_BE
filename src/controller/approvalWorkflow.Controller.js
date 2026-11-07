@@ -52,11 +52,10 @@ const ensureDefaultWorkflow = async () => {
     }
 };
 
-ensureDefaultWorkflow();
-
 // 1. Lấy danh sách quy trình tuyến ký duyệt
 const getWorkflows = async (req, res) => {
     try {
+        await ensureDefaultWorkflow();
         const workflows = await ApprovalWorkflowConfig.find().populate("steps.defaultAssignee", "name email role position department").sort({ isDefault: -1, createdAt: -1 });
         res.status(200).json({ success: true, data: workflows });
     } catch (error) {
