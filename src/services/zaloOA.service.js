@@ -33,14 +33,6 @@ class ZaloOAService {
       await config.save();
     }
 
-    // Tự động dọn sạch các User bị gán nhầm zaloId = groupChatId trước đây để tránh gửi trùng
-    if (config.groupChatId) {
-      await User.updateMany(
-        { zaloId: String(config.groupChatId).trim() },
-        { $set: { zaloId: '' } }
-      ).catch(() => {});
-    }
-
     return config;
   }
 
@@ -326,7 +318,13 @@ class ZaloOAService {
     );
     const senderName = fromUser?.display_name || fromUser?.name || contactObj?.name || contactObj?.display_name || (!isGroupChat ? chatObj?.display_name : '') || '';
 
-    if (senderZaloId && senderZaloId !== String(config.groupChatId)) {
+    // Nếu trước đó người dùng đã gắn nhầm ID cá nhân của mình vào ô Group Chat ID thì khi họ nhắn riêng (PRIVATE), tự động giải phóng groupChatId
+    if (!isGroupChat && senderZaloId && String(config.groupChatId) === senderZaloId) {
+      const realGroup = (config.detectedChats || []).find(c => c.type === 'GROUP' && c.chatId !== senderZaloId);
+      config.groupChatId = realGroup ? realGroup.chatId : '';
+    }
+
+    if (senderZaloId && (!isGroupChat || senderZaloId !== String(config.groupChatId))) {
       // Chuẩn hóa chuỗi để bắt số điện thoại dù gõ văn bản hay gửi Danh thiếp (091 791 9522)
       const cleanedDigits = rawText.replace(/[\s.\-()]/g, '');
       const phoneMatch = cleanedDigits.match(/(?:0|\+84|84)([35789][0-9]{8})/);
@@ -543,12 +541,6 @@ class ZaloOAService {
           const uZaloId = String(user.zaloId || '').trim();
           const uKey = uZaloId || String(user.mobile || '').trim();
           if (!uKey || sentChatIds.has(uKey)) continue;
-
-          // Nếu zaloId của user vô tình trùng với groupChatId của nhóm thì xóa zaloId bị nhầm đó và bỏ qua
-          if (uZaloId && groupChatIdStr && uZaloId === groupChatIdStr) {
-            User.findByIdAndUpdate(user._id, { zaloId: '' }).catch(() => {});
-            continue;
-          }
 
           sentChatIds.add(uKey);
           await this.sendMessageToUser(user, message);
