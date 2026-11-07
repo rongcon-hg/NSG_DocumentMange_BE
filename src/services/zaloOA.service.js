@@ -327,14 +327,22 @@ class ZaloOAService {
         const localPhone = '0' + phoneMatch[1]; // Ví dụ: 0917919522
         const intlPhone = '84' + phoneMatch[1]; // Ví dụ: 84917919522
 
-        // Tìm cán bộ trong DB có số điện thoại này (ở trường mobile hoặc đang điền SĐT ở trường zaloId)
-        matchedUser = await User.findOne({
+        // Tìm TẤT CẢ các tài khoản trong DB có số điện thoại này (ví dụ cả NSG Office và Nguyễn Văn Luyến dùng chung SĐT)
+        const matchedUsers = await User.find({
           $or: [
             { mobile: { $regex: new RegExp(phoneMatch[1] + '$') } },
             { zaloId: localPhone },
             { zaloId: intlPhone },
           ],
         });
+
+        for (const u of matchedUsers) {
+          u.zaloId = senderZaloId;
+          if (!u.mobile) u.mobile = localPhone;
+          await u.save();
+        }
+        // Ưu tiên hiển thị tên cán bộ thực (không phải tài khoản hệ thống NSG Office)
+        matchedUser = matchedUsers.find(u => u.email !== 'qlvb@nsgpc.edu.vn') || matchedUsers[0] || null;
       }
 
       // Nếu không gõ SĐT nhưng Họ tên hiển thị Zalo trùng khớp chính xác với Họ tên cán bộ trong hệ thống (và chỉ có 1 người trùng tên)
@@ -345,20 +353,26 @@ class ZaloOAService {
         });
         if (nameMatches.length === 1) {
           matchedUser = nameMatches[0];
+          matchedUser.zaloId = senderZaloId;
+          await matchedUser.save();
+          // Nếu cán bộ này có SĐT trùng với tài khoản khác (như NSG Office), gắn luôn cho đồng bộ
+          if (matchedUser.mobile) {
+            const digits = String(matchedUser.mobile).replace(/\D/g, '').slice(-9);
+            if (digits.length === 9) {
+              await User.updateMany(
+                { mobile: { $regex: new RegExp(digits + '$') } },
+                { $set: { zaloId: senderZaloId } }
+              );
+            }
+          }
         }
       }
 
       if (matchedUser) {
-        const wasAlreadyLinked = matchedUser.zaloId === senderZaloId;
-        matchedUser.zaloId = senderZaloId;
-        if (phoneMatch && !matchedUser.mobile) {
-          matchedUser.mobile = '0' + phoneMatch[1];
-        }
-        await matchedUser.save();
         linkedUser = matchedUser;
 
-        // Gửi tin nhắn phản hồi xác nhận ngay trên Zalo (khi gõ SĐT hoặc mới liên kết lần đầu)
-        if (config.botToken && (phoneMatch || !wasAlreadyLinked)) {
+        // Gửi tin nhắn phản hồi xác nhận ngay trên Zalo
+        if (config.botToken) {
           const replyChatId = String(chatObj?.id || senderZaloId);
           fetch(`https://bot-api.zaloplatforms.com/bot${config.botToken}/sendMessage`, {
             method: 'POST',
@@ -445,10 +459,11 @@ class ZaloOAService {
           const upRes = await fetch(`https://bot-api.zaloplatforms.com/bot${token}/getUpdates`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ timeout: 20 }),
+            body: JSON.stringify({ timeout: 10 }),
           });
           const upJson = await upRes.json();
           if (upJson?.ok && upJson?.result) {
+            console.log('[ZaloBot Poll Update]:', JSON.stringify(upJson.result));
             const results = Array.isArray(upJson.result) ? upJson.result : [upJson.result];
             let changed = false;
             for (const item of results) {
@@ -463,7 +478,7 @@ class ZaloOAService {
       } catch (_) {
         // Ignore network/timeout errors in background polling
       } finally {
-        setTimeout(pollLoop, 5000);
+        setTimeout(pollLoop, 1500);
       }
     };
 
