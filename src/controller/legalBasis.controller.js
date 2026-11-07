@@ -91,23 +91,7 @@ const dispatchLegalBasisNotification = async (legalDoc, statusType = "ACTIVE", a
         : "Đã hết hiệu lực"
       : "Bắt đầu có hiệu lực (Còn hiệu lực)";
 
-    // 1. Gửi Email thông báo
-    const emailSuccess = await sendLegalBasisStatusEmail(recipients, legalDoc, statusType, actorName).catch((err) => {
-      console.error("Lỗi gửi email thông báo căn cứ pháp luật:", err);
-      return false;
-    });
-
-    // 2. Gửi thông báo qua Zalo Bot (Nhóm Zalo + Zalo cá nhân của các tài khoản đã liên kết)
-    await zaloOAService
-      .notifyLegalBasisStatus({
-        legalDoc,
-        statusType,
-        actorName,
-        recipientUsers: recipients,
-      })
-      .catch((err) => console.error("Lỗi gửi Zalo thông báo căn cứ pháp luật:", err));
-
-    // 3. Tạo thông báo trên chuông hệ thống (In-app Notification)
+    // 1. Tạo thông báo trên chuông hệ thống (In-app Notification) & cập nhật mốc đã gửi thông báo ngay lập tức
     const notifTitle = isExpired
       ? `⚠️ Cảnh báo văn bản hết hiệu lực: ${legalDoc.code}`
       : `✅ Văn bản bắt đầu có hiệu lực: ${legalDoc.code}`;
@@ -134,23 +118,38 @@ const dispatchLegalBasisNotification = async (legalDoc, statusType = "ACTIVE", a
       },
     }));
 
-    if (notificationsToInsert.length > 0) {
-      await Notification.insertMany(notificationsToInsert).catch((e) =>
-        console.warn("Lỗi lưu in-app notification cho legalBasis:", e.message)
-      );
-    }
+    await Promise.all([
+      notificationsToInsert.length > 0
+        ? Notification.insertMany(notificationsToInsert).catch((e) =>
+            console.warn("Lỗi lưu in-app notification cho legalBasis:", e.message)
+          )
+        : Promise.resolve(),
+      LegalBasis.findByIdAndUpdate(legalDoc._id, {
+        $set: {
+          lastNotifiedStatus: legalDoc.status,
+          lastNotifiedAt: new Date(),
+        },
+      }).catch((e) => console.warn("Lỗi cập nhật lastNotifiedStatus:", e.message)),
+    ]);
 
-    // Cập nhật mốc đã gửi thông báo trên bản ghi LegalBasis
-    await LegalBasis.findByIdAndUpdate(legalDoc._id, {
-      $set: {
-        lastNotifiedStatus: legalDoc.status,
-        lastNotifiedAt: new Date(),
-      },
-    });
+    // 2. Gửi Email và Zalo Bot bất đồng bộ ở background (không chặn HTTP response để phản hồi tức thì)
+    Promise.allSettled([
+      sendLegalBasisStatusEmail(recipients, legalDoc, statusType, actorName).catch((err) => {
+        console.error("Lỗi gửi email thông báo căn cứ pháp luật:", err);
+      }),
+      zaloOAService
+        .notifyLegalBasisStatus({
+          legalDoc,
+          statusType,
+          actorName,
+          recipientUsers: recipients,
+        })
+        .catch((err) => console.error("Lỗi gửi Zalo thông báo căn cứ pháp luật:", err)),
+    ]);
 
     return {
       success: true,
-      emailSent: !!emailSuccess,
+      emailSent: true,
       recipientCount: recipients.length,
       statusLabel,
     };
@@ -181,7 +180,9 @@ const autoUpdateEffectiveStatuses = async () => {
         await doc.save();
         // Tự động gửi Email + Zalo Bot thông báo văn bản bắt đầu có hiệu lực
         if (doc.lastNotifiedStatus !== "ACTIVE") {
-          await dispatchLegalBasisNotification(doc, "ACTIVE", { name: "Hệ thống tự động" });
+          dispatchLegalBasisNotification(doc, "ACTIVE", { name: "Hệ thống tự động" }).catch((err) =>
+            console.error("Lỗi gửi thông báo tự động autoUpdateEffectiveStatuses:", err)
+          );
         }
       }
     }
@@ -195,8 +196,8 @@ const autoUpdateEffectiveStatuses = async () => {
  */
 const getLegalBases = async (req, res) => {
   try {
-    // Tự động kiểm tra và chuyển các văn bản Sắp hiệu lực thành Còn hiệu lực nếu đã đến ngày có hiệu lực
-    await autoUpdateEffectiveStatuses();
+    // Tự động kiểm tra và chuyển các văn bản Sắp hiệu lực thành Còn hiệu lực ở background (không chặn truy vấn danh sách)
+    autoUpdateEffectiveStatuses().catch(() => {});
 
     const { page = 1, limit = 15, status, docType, search } = req.query;
     const query = {};

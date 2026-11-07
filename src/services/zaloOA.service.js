@@ -127,8 +127,9 @@ class ZaloOAService {
    * Gửi tin nhắn trực tiếp qua Zalo Bot (Bot NSG-Office) hoặc Zalo OA đến người dùng
    * @param {string|object} target zaloUserId hoặc user object { zaloId, mobile, name }
    * @param {string} text Nội dung tin nhắn văn bản
+   * @param {object} options { skipSync: boolean } - Nếu skipSync=true (gửi hàng loạt) thì không gọi detectBotGroupChats tránh làm chậm
    */
-  async sendMessageToUser(target, text) {
+  async sendMessageToUser(target, text, options = {}) {
     try {
       const config = await this.getConfig();
       const zaloId = typeof target === 'object' ? (target.zaloId || '').trim() : String(target || '').trim();
@@ -140,8 +141,9 @@ class ZaloOAService {
       let realZaloChatId = (zaloId && !isPhoneInZaloId && !isEmailInZaloId) ? zaloId : '';
       const phoneToUse = mobile || (isPhoneInZaloId ? zaloId : '');
 
-      // Nếu cán bộ chưa có realZaloChatId, tự động quét nhanh tin nhắn mới nhất từ Bot NSG-Office xem cán bộ vừa nhắn SĐT hoặc nhắn tin chưa
-      if (!realZaloChatId && config.botToken && typeof target === 'object' && target._id) {
+      // Nếu cán bộ chưa có realZaloChatId và không phải đang gửi hàng loạt (skipSync !== true),
+      // tự động quét nhanh tin nhắn mới nhất từ Bot NSG-Office xem cán bộ vừa nhắn SĐT hoặc nhắn tin chưa
+      if (!realZaloChatId && !options.skipSync && config.botToken && typeof target === 'object' && target._id) {
         try {
           await this.detectBotGroupChats(config.botToken);
           const refreshedUser = await User.findById(target._id).lean();
@@ -534,17 +536,32 @@ class ZaloOAService {
 
       // 3. Gửi tin nhắn cá nhân đến từng cán bộ (loại bỏ trùng lặp và không gửi lại vào Group Chat ID)
       if ((config.isActive || config.botToken) && Array.isArray(recipients) && recipients.length > 0) {
+        const sendTasks = [];
         for (const user of recipients) {
           if (!user || (!user.zaloId && !user.mobile)) continue;
           if (user.zaloNotifications && user.zaloNotifications.enabled === false) continue;
           if (user.zaloNotifications && user.zaloNotifications[eventType] === false) continue;
 
           const uZaloId = String(user.zaloId || '').trim();
-          const uKey = uZaloId || String(user.mobile || '').trim();
+          const isPhoneInZaloId = /^(0[35789][0-9]{8}|84[35789][0-9]{8})$/.test(uZaloId);
+          const isEmailInZaloId = uZaloId.includes('@');
+          const realZaloChatId = (uZaloId && !isPhoneInZaloId && !isEmailInZaloId) ? uZaloId : '';
+
+          // Nếu không bật Zalo OA ZNS (chỉ dùng Bot NSG-Office) thì chỉ gửi tin cá nhân cho người đã có realZaloChatId
+          if (!config.isActive && !realZaloChatId) continue;
+
+          const uKey = realZaloChatId || String(user.mobile || '').trim();
           if (!uKey || sentChatIds.has(uKey)) continue;
 
           sentChatIds.add(uKey);
-          await this.sendMessageToUser(user, message);
+          sendTasks.push(
+            this.sendMessageToUser(user, message, { skipSync: true }).catch((err) =>
+              console.warn('Lỗi gửi Zalo cá nhân trong dispatchNotification:', err?.message)
+            )
+          );
+        }
+        if (sendTasks.length > 0) {
+          await Promise.allSettled(sendTasks);
         }
       }
     } catch (error) {
