@@ -1089,6 +1089,9 @@ const getEmulationPendingCount = async (req, res) => {
     const isManager = currentUser.role === "manager";
     const isAdmin = currentUser.role === "admin";
     const isManagerOrAdmin = isManager || isAdmin;
+    const posName = (currentUser.position?.positionName || "").toLowerCase();
+    const isCapTruongOrPho = ["captruong", "cappho", "staff"].includes(currentUser.role) || posName.includes("trưởng") || posName.includes("phó");
+    const isChuyenVien = !isManagerOrAdmin && !isBGH && !isCapTruongOrPho;
 
     let pendingForManager = 0;
     let pendingForBGH = 0;
@@ -1108,27 +1111,29 @@ const getEmulationPendingCount = async (req, res) => {
       });
     }
 
-    // 3. Đếm hồ sơ bị REJECTED mà cá nhân người dùng là người đề nghị (user) hoặc người tạo (createdByUser) hoặc thuộc đơn vị
-    const userPersonalConditions = [
-      { user: currentUser._id },
-      { createdByUser: currentUser._id },
-    ];
-    if (currentUser.department?._id || currentUser.department) {
-      userPersonalConditions.push({
-        department: currentUser.department?._id || currentUser.department,
+    // 3. Đếm hồ sơ bị REJECTED hoặc đang chờ duyệt của đơn vị (Chỉ áp dụng cho Cấp trưởng / Cấp phó, không hiển thị cho Chuyên viên vì Chuyên viên không có menu Danh sách đề nghị)
+    let pendingForUser = 0;
+    if (!isChuyenVien) {
+      const userPersonalConditions = [
+        { user: currentUser._id },
+        { createdByUser: currentUser._id },
+      ];
+      if (currentUser.department?._id || currentUser.department) {
+        userPersonalConditions.push({
+          department: currentUser.department?._id || currentUser.department,
+        });
+      }
+
+      rejectedForUser = await EmulationRegistration.countDocuments({
+        status: "REJECTED",
+        $or: userPersonalConditions,
+      });
+
+      pendingForUser = await EmulationRegistration.countDocuments({
+        status: { $in: ["PENDING", "SUBMITTED_TO_BGH"] },
+        $or: userPersonalConditions,
       });
     }
-
-    rejectedForUser = await EmulationRegistration.countDocuments({
-      status: "REJECTED",
-      $or: userPersonalConditions,
-    });
-
-    // 4. Đếm hồ sơ đang gửi chờ duyệt (PENDING, SUBMITTED_TO_BGH) của chính người dùng hoặc đơn vị mình
-    const pendingForUser = await EmulationRegistration.countDocuments({
-      status: { $in: ["PENDING", "SUBMITTED_TO_BGH"] },
-      $or: userPersonalConditions,
-    });
 
     let totalActionableCount = 0;
     if (isAdmin) {
