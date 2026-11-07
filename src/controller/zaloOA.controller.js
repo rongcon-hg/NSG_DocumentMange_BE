@@ -46,6 +46,7 @@ const updateZaloConfig = async (req, res) => {
       appId, 
       secretKey, 
       refreshToken, 
+      accessToken,
       isActive, 
       templateIds,
       botToken,
@@ -62,10 +63,15 @@ const updateZaloConfig = async (req, res) => {
       config = new ZaloConfig();
     }
 
-    if (oaId !== undefined) config.oaId = oaId;
-    if (appId !== undefined) config.appId = appId;
-    if (secretKey) config.secretKey = secretKey;
-    if (refreshToken) config.refreshToken = refreshToken;
+    if (oaId !== undefined) config.oaId = oaId.trim();
+    if (appId !== undefined) config.appId = appId.trim();
+    if (secretKey) config.secretKey = secretKey.trim();
+    if (refreshToken) config.refreshToken = refreshToken.trim();
+    if (accessToken && accessToken.trim() && accessToken.trim() !== 'Access token') {
+      config.accessToken = accessToken.trim();
+      // Mặc định Access Token của Zalo OA có hạn 25 giờ (90.000 giây)
+      config.tokenExpiresAt = new Date(Date.now() + 90000 * 1000);
+    }
     if (isActive !== undefined) config.isActive = isActive;
     if (templateIds) config.templateIds = { ...config.templateIds, ...templateIds };
     if (botToken !== undefined) {
@@ -81,11 +87,13 @@ const updateZaloConfig = async (req, res) => {
     if (groupNotificationsEnabled !== undefined) config.groupNotificationsEnabled = groupNotificationsEnabled;
     if (notificationEvents) config.notificationEvents = { ...config.notificationEvents, ...notificationEvents };
 
-    // Nếu người dùng nhập refresh token mới, thử refresh ngay để lấy access token
-    if (refreshToken && config.appId && config.secretKey) {
+    let tokenWarning = null;
+    // Nếu người dùng nhập refresh token mới nhưng không nhập kèm accessToken trực tiếp, thử refresh ngay để lấy access token
+    if (refreshToken && !accessToken && config.appId && config.secretKey) {
       try {
         await zaloOAService.refreshAccessToken(config);
       } catch (err) {
+        tokenWarning = err.message;
         console.warn('Không thể refresh token Zalo ngay:', err.message);
       }
     }
@@ -94,7 +102,10 @@ const updateZaloConfig = async (req, res) => {
 
     return res.json({
       success: true,
-      message: 'Cập nhật cấu hình Zalo OA & Nhóm Zalo thành công',
+      message: tokenWarning
+        ? `Đã lưu cấu hình, nhưng Refresh Token vừa nhập đã được dùng hoặc hết hạn (${tokenWarning}). Vui lòng dán trực tiếp cả Access Token và Refresh Token mới từ Zalo API Explorer!`
+        : 'Cập nhật cấu hình Zalo OA & Nhóm Zalo thành công!',
+      tokenWarning,
       data: {
         oaId: config.oaId,
         appId: config.appId,
