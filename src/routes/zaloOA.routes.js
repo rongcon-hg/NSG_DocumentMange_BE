@@ -10,6 +10,9 @@ router.post('/test-send', verifyToken, verifyManager, zaloController.testSendMes
 router.post('/test-send-group', verifyToken, verifyManager, zaloController.testSendGroupMessage);
 router.post('/detect-group', verifyToken, verifyManager, zaloController.detectBotGroupChats);
 
+// Routes dành cho mọi Cán bộ tự kiểm tra liên kết và gửi thử Zalo cá nhân của mình
+router.post('/sync-my-zalo', verifyToken, zaloController.syncMyZaloAccount);
+
 // Webhook từ Zalo Platform
 router.post('/webhook', zaloController.handleZaloWebhook);
 

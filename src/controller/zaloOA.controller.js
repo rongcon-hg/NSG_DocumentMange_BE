@@ -229,11 +229,73 @@ const handleZaloWebhook = async (req, res) => {
   }
 };
 
+/**
+ * Cán bộ tự đồng bộ / kiểm tra liên kết và gửi thử thông báo Zalo cá nhân tại trang Thông tin cá nhân (/members)
+ */
+const syncMyZaloAccount = async (req, res) => {
+  try {
+    const userId = req.user?._id || req.user?.userId || req.user?.id;
+    const { sendTest = false } = req.body || {};
+
+    let user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy thông tin tài khoản' });
+    }
+
+    // Quét nhanh tin nhắn mới nhất từ Bot NSG-Office
+    await zaloOAService.detectBotGroupChats();
+    user = await User.findById(userId);
+
+    const zaloId = String(user.zaloId || '').trim();
+    const isLinkedBot = Boolean(zaloId && !/^(0|84|\+84)[0-9]{8,10}$/.test(zaloId) && !zaloId.includes('@'));
+
+    if (!isLinkedBot) {
+      return res.status(400).json({
+        success: false,
+        linked: false,
+        message: `Chưa tìm thấy liên kết Zalo! Vui lòng mở ứng dụng Zalo trên điện thoại, nhắn cú pháp ". ${user.mobile || '09xxxxxxxx'}" gửi cho Bot NSG-Office rồi bấm lại nút này!`,
+      });
+    }
+
+    if (sendTest) {
+      const testRes = await zaloOAService.sendMessageToUser(
+        user,
+        `✅ [HỆ THỐNG VĂN PHÒNG SỐ - NSG]\nXin chào ${user.name}, tài khoản của Thầy/Cô đã được liên kết thành công với Bot NSG-Office (Mã Zalo ID: ${zaloId}). Hệ thống sẽ tự động gửi thông báo văn bản và công việc về Zalo này!`
+      );
+      if (!testRes.success) {
+        return res.status(400).json({
+          success: false,
+          linked: true,
+          zaloId,
+          message: testRes.reason || 'Đã liên kết nhưng chưa gửi được tin nhắn thử',
+        });
+      }
+      return res.json({
+        success: true,
+        linked: true,
+        zaloId,
+        message: `Đã liên kết và gửi tin nhắn kiểm tra về Zalo cá nhân của ${user.name} thành công!`,
+      });
+    }
+
+    return res.json({
+      success: true,
+      linked: true,
+      zaloId,
+      message: `Tài khoản của bạn đã liên kết thành công với Bot NSG-Office (Mã Zalo ID: ${zaloId})!`,
+    });
+  } catch (error) {
+    console.error('Lỗi syncMyZaloAccount:', error);
+    return res.status(500).json({ success: false, message: 'Lỗi khi kiểm tra liên kết Zalo', error: error.message });
+  }
+};
+
 module.exports = {
   getZaloConfig,
   updateZaloConfig,
   testSendMessage,
   testSendGroupMessage,
   detectBotGroupChats,
+  syncMyZaloAccount,
   handleZaloWebhook,
 };
