@@ -1105,7 +1105,7 @@ const getEmulationPendingCount = async (req, res) => {
     }
 
     // 2. Đếm hồ sơ SUBMITTED_TO_BGH cho Hiệu trưởng / BGH / Admin xem xét phê duyệt
-    if (isHT || isAdmin) {
+    if (isHT || isBGH || isAdmin) {
       pendingForBGH = await EmulationRegistration.countDocuments({
         status: "SUBMITTED_TO_BGH",
       });
@@ -1113,7 +1113,7 @@ const getEmulationPendingCount = async (req, res) => {
 
     // 3. Đếm hồ sơ bị REJECTED hoặc đang chờ duyệt của đơn vị (Chỉ áp dụng cho Cấp trưởng / Cấp phó, không hiển thị cho Chuyên viên vì Chuyên viên không có menu Danh sách đề nghị)
     let pendingForUser = 0;
-    if (!isChuyenVien) {
+    if (!isChuyenVien && !isBGH && !isManagerOrAdmin) {
       const userPersonalConditions = [
         { user: currentUser._id },
         { createdByUser: currentUser._id },
@@ -1138,7 +1138,7 @@ const getEmulationPendingCount = async (req, res) => {
     let totalActionableCount = 0;
     if (isAdmin) {
       totalActionableCount = pendingForManager + pendingForBGH;
-    } else if (isHT) {
+    } else if (isHT || isBGH) {
       totalActionableCount = pendingForBGH;
     } else if (isManager) {
       totalActionableCount = pendingForManager;

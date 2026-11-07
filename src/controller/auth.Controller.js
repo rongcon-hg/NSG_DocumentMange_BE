@@ -337,7 +337,11 @@ const upadteInfo = async (req, res) => {
       }
 
       if (updatedData.zaloId !== undefined) {
-        user.zaloId = typeof updatedData.zaloId === 'string' ? updatedData.zaloId.trim() : String(updatedData.zaloId || '');
+        const cleanZaloId = typeof updatedData.zaloId === 'string' ? updatedData.zaloId.trim() : String(updatedData.zaloId || '');
+        // Bỏ qua nếu trình duyệt tự động điền nhầm email (chứa ký tự '@') vào trường zaloId
+        if (!cleanZaloId.includes('@')) {
+          user.zaloId = cleanZaloId;
+        }
       }
 
       if (updatedData.zaloNotifications && typeof updatedData.zaloNotifications === 'object') {

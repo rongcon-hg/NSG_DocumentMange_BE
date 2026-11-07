@@ -134,9 +134,10 @@ class ZaloOAService {
       const zaloId = typeof target === 'object' ? (target.zaloId || '').trim() : String(target || '').trim();
       const mobile = typeof target === 'object' ? (target.mobile || '').trim() : '';
 
-      // Kiểm tra xem zaloId có phải là mã Zalo Chat ID thực sự hay đang lưu nhầm SĐT (09xxx)
+      // Kiểm tra xem zaloId có phải là mã Zalo Chat ID thực sự hay đang lưu nhầm SĐT (09xxx) hoặc Email (@)
       const isPhoneInZaloId = /^(0[35789][0-9]{8}|84[35789][0-9]{8})$/.test(zaloId);
-      let realZaloChatId = (zaloId && !isPhoneInZaloId) ? zaloId : '';
+      const isEmailInZaloId = zaloId.includes('@');
+      let realZaloChatId = (zaloId && !isPhoneInZaloId && !isEmailInZaloId) ? zaloId : '';
       const phoneToUse = mobile || (isPhoneInZaloId ? zaloId : '');
 
       // Nếu cán bộ chưa có realZaloChatId, tự động quét nhanh tin nhắn mới nhất từ Bot NSG-Office xem cán bộ vừa nhắn SĐT hoặc nhắn tin chưa
@@ -145,7 +146,7 @@ class ZaloOAService {
           await this.detectBotGroupChats(config.botToken);
           const refreshedUser = await User.findById(target._id).lean();
           const newZId = String(refreshedUser?.zaloId || '').trim();
-          if (newZId && !/^(0[35789][0-9]{8}|84[35789][0-9]{8})$/.test(newZId)) {
+          if (newZId && !/^(0[35789][0-9]{8}|84[35789][0-9]{8})$/.test(newZId) && !newZId.includes('@')) {
             realZaloChatId = newZId;
           }
         } catch (_) {

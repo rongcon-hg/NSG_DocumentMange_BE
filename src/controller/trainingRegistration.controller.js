@@ -2382,7 +2382,7 @@ const getTrainingPendingCount = async (req, res) => {
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
-    const { isAdminOrManager, isMaiAnhThy, isBGH, userDeptId } = getUserRoleInfo(currentUser);
+    const { isAdminOrManager, isMaiAnhThy, isBGH, isChuyenVien, userDeptId } = getUserRoleInfo(currentUser);
 
     let pendingCount = 0;
 
@@ -2391,8 +2391,17 @@ const getTrainingPendingCount = async (req, res) => {
       pendingCount = await TrainingRegistration.countDocuments({
         status: "PENDING",
       });
+    } else if (isChuyenVien) {
+      // Chuyên viên / Giáo viên: chỉ đếm hồ sơ PENDING của chính cá nhân mình (khớp với danh sách được xem ở getRegistrations)
+      pendingCount = await TrainingRegistration.countDocuments({
+        status: "PENDING",
+        $or: [
+          { user: currentUser._id },
+          { createdByUser: currentUser._id },
+        ],
+      });
     } else {
-      // Các cấp khác (Trưởng/Phó đơn vị, GV-CV): đếm hồ sơ PENDING thuộc đơn vị hoặc do mình tạo/được đăng ký
+      // Cấp trưởng / Cấp phó đơn vị: đếm hồ sơ PENDING thuộc đơn vị hoặc do mình tạo/được đăng ký
       const userConditions = [
         { user: currentUser._id },
         { createdByUser: currentUser._id },
