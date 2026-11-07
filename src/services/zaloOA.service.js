@@ -86,7 +86,7 @@ class ZaloOAService {
   }
 
   /**
-   * Lấy access token hợp lệ
+   * Lấy access token hợp lệ (trả về null nếu chưa có token hoặc không thể làm mới, không quăng lỗi làm gián đoạn luồng Bot)
    */
   async getValidToken() {
     const config = await this.getConfig();
@@ -95,9 +95,14 @@ class ZaloOAService {
     // Kiểm tra thời hạn token (dự phòng hết hạn trước 5 phút)
     const isExpired = !config.tokenExpiresAt || new Date(config.tokenExpiresAt).getTime() - Date.now() < 5 * 60 * 1000;
     if (isExpired && config.refreshToken) {
-      return await this.refreshAccessToken(config);
+      try {
+        return await this.refreshAccessToken(config);
+      } catch (err) {
+        console.warn('Bỏ qua Zalo OA token không hợp lệ, ưu tiên dùng Bot NSG-Office:', err.message);
+        return null;
+      }
     }
-    return config.accessToken;
+    return config.accessToken || null;
   }
 
   /**
@@ -137,8 +142,22 @@ class ZaloOAService {
 
       // Kiểm tra xem zaloId có phải là mã Zalo Chat ID thực sự hay đang lưu nhầm SĐT (09xxx)
       const isPhoneInZaloId = /^(0[35789][0-9]{8}|84[35789][0-9]{8})$/.test(zaloId);
-      const realZaloChatId = (zaloId && !isPhoneInZaloId) ? zaloId : '';
+      let realZaloChatId = (zaloId && !isPhoneInZaloId) ? zaloId : '';
       const phoneToUse = mobile || (isPhoneInZaloId ? zaloId : '');
+
+      // Nếu cán bộ chưa có realZaloChatId, tự động quét nhanh tin nhắn mới nhất từ Bot NSG-Office xem cán bộ vừa nhắn SĐT hoặc nhắn tin chưa
+      if (!realZaloChatId && config.botToken && typeof target === 'object' && target._id) {
+        try {
+          await this.detectBotGroupChats(config.botToken);
+          const refreshedUser = await User.findById(target._id).lean();
+          const newZId = String(refreshedUser?.zaloId || '').trim();
+          if (newZId && !/^(0[35789][0-9]{8}|84[35789][0-9]{8})$/.test(newZId)) {
+            realZaloChatId = newZId;
+          }
+        } catch (_) {
+          // Ignore sync error
+        }
+      }
 
       // 1. ƯU TIÊN SỐ 1: Gửi qua Zalo Bot (Bot NSG-Office) bằng realZaloChatId (Miễn phí 100%, không cần OA Secret/Refresh Token)
       if (realZaloChatId && config.botToken) {
@@ -154,6 +173,11 @@ class ZaloOAService {
           const botData = await botRes.json();
           if (botRes.ok && botData?.ok !== false) {
             return { success: true, channel: 'ZALO_BOT', data: botData };
+          } else {
+            return {
+              success: false,
+              reason: `Cán bộ đã liên kết Zalo ID (${realZaloChatId}) nhưng chưa mở khung chat riêng với Bot NSG-Office. Hướng dẫn: Cán bộ bấm vào Bot NSG-Office trong nhóm Zalo (hoặc mở https://bot.zaloplatforms.com/bots/1371050577415650488) và nhắn 1 tin bất kỳ trực tiếp cho Bot để nhận tin nhắn riêng!`,
+            };
           }
         } catch (botErr) {
           console.warn('Gửi qua Zalo Bot không thành công, thử tiếp qua Zalo OA:', botErr.message);
@@ -288,44 +312,62 @@ class ZaloOAService {
       }
     }
 
-    // B. Tự động nhận diện Số điện thoại (ví dụ 0917919522) trong tin nhắn để gắn Zalo User ID cho Cán bộ
+    // B. Tự động nhận diện Số điện thoại (ví dụ 0917919522 hoặc 0917.919.522) trong tin nhắn để gắn Zalo User ID cho Cán bộ
     // QUAN TRỌNG: Chỉ lấy ID cá nhân của người gửi (fromUser.id), TUYỆT ĐỐI KHÔNG lấy chatObj.id khi đang ở trong GROUP!
     const senderZaloId = String(fromUser?.id || (!isGroupChat ? chatObj?.id : '') || '');
     const senderName = fromUser?.display_name || (!isGroupChat ? chatObj?.display_name : '') || '';
 
-    if (senderZaloId && textContent && senderZaloId !== String(config.groupChatId)) {
-      const phoneMatch = textContent.match(/(?:0|\+84|84)([35789][0-9]{8})\b/);
+    if (senderZaloId && senderZaloId !== String(config.groupChatId)) {
+      // Chuẩn hóa chuỗi để bắt số điện thoại dù có dấu cách, dấu chấm hay dấu gạch ngang
+      const cleanedDigits = textContent.replace(/[\s.\-()]/g, '');
+      const phoneMatch = cleanedDigits.match(/(?:0|\+84|84)([35789][0-9]{8})\b/);
+      let matchedUser = null;
+
       if (phoneMatch) {
         const localPhone = '0' + phoneMatch[1]; // Ví dụ: 0917919522
         const intlPhone = '84' + phoneMatch[1]; // Ví dụ: 84917919522
 
         // Tìm cán bộ trong DB có số điện thoại này (ở trường mobile hoặc đang điền SĐT ở trường zaloId)
-        const matchedUser = await User.findOne({
+        matchedUser = await User.findOne({
           $or: [
             { mobile: { $regex: new RegExp(phoneMatch[1] + '$') } },
             { zaloId: localPhone },
             { zaloId: intlPhone },
           ],
         });
+      }
 
-        if (matchedUser) {
-          matchedUser.zaloId = senderZaloId;
-          if (!matchedUser.mobile) matchedUser.mobile = localPhone;
-          await matchedUser.save();
-          linkedUser = matchedUser;
+      // Nếu không gõ SĐT nhưng Họ tên hiển thị Zalo trùng khớp chính xác với Họ tên cán bộ trong hệ thống (và chỉ có 1 người trùng tên)
+      if (!matchedUser && senderName) {
+        const cleanSenderName = senderName.trim();
+        const nameMatches = await User.find({
+          name: { $regex: new RegExp(`^${cleanSenderName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }
+        });
+        if (nameMatches.length === 1) {
+          matchedUser = nameMatches[0];
+        }
+      }
 
-          // Gửi tin nhắn phản hồi xác nhận ngay trên Zalo
-          if (config.botToken) {
-            const replyChatId = String(chatObj?.id || senderZaloId);
-            fetch(`https://bot-api.zaloplatforms.com/bot${config.botToken}/sendMessage`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                chat_id: replyChatId,
-                text: `✅ [HỆ THỐNG VĂN PHÒNG SỐ - NSG]\nĐã liên kết thành công tài khoản Zalo "${senderName || matchedUser.name}" (Zalo ID: ${senderZaloId}) với cán bộ:\n👤 Họ và tên: ${matchedUser.name}\n📱 SĐT: ${localPhone}\nTừ bây giờ Thầy/Cô sẽ nhận được thông báo tự động từ hệ thống!`,
-              }),
-            }).catch(() => {});
-          }
+      if (matchedUser) {
+        const wasAlreadyLinked = matchedUser.zaloId === senderZaloId;
+        matchedUser.zaloId = senderZaloId;
+        if (phoneMatch && !matchedUser.mobile) {
+          matchedUser.mobile = '0' + phoneMatch[1];
+        }
+        await matchedUser.save();
+        linkedUser = matchedUser;
+
+        // Gửi tin nhắn phản hồi xác nhận ngay trên Zalo (khi gõ SĐT hoặc mới liên kết lần đầu)
+        if (config.botToken && (phoneMatch || !wasAlreadyLinked)) {
+          const replyChatId = String(chatObj?.id || senderZaloId);
+          fetch(`https://bot-api.zaloplatforms.com/bot${config.botToken}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: replyChatId,
+              text: `✅ [HỆ THỐNG VĂN PHÒNG SỐ - NSG]\nĐã liên kết thành công tài khoản Zalo "${senderName || matchedUser.name}" (Zalo ID: ${senderZaloId}) với cán bộ:\n👤 Họ và tên: ${matchedUser.name}\n📱 SĐT: ${matchedUser.mobile || 'Đã cập nhật'}\nTừ bây giờ Thầy/Cô sẽ nhận được thông báo tự động từ hệ thống!`,
+            }),
+          }).catch(() => {});
         }
       }
     }

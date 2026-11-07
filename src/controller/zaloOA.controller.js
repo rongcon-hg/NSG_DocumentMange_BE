@@ -134,7 +134,7 @@ const testSendMessage = async (req, res) => {
     } else {
       return res.status(400).json({
         success: false,
-        message: 'Gửi tin nhắn Zalo cá nhân thất bại: ' + (result.reason || result.error || 'Vui lòng kiểm tra cấu hình Zalo OA'),
+        message: result.reason || result.error || 'Gửi tin nhắn Zalo cá nhân thất bại',
         error: result,
       });
     }
