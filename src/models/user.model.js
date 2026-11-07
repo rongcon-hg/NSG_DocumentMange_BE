@@ -45,6 +45,7 @@ const userSchema = new mongoose.Schema({
         taskReminder: { type: Boolean, default: true },
         workSchedule: { type: Boolean, default: true },
         emulation: { type: Boolean, default: true },
+        legalBasis: { type: Boolean, default: true },
     },
     position: {
         type: mongoose.Schema.Types.ObjectId,

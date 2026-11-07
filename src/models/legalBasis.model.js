@@ -52,6 +52,14 @@ const legalBasisSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
     },
+    lastNotifiedStatus: {
+      type: String,
+      default: "",
+    }, // Trạng thái hiệu lực gần nhất đã gửi thông báo tự động (ACTIVE, EXPIRED, PARTIALLY_EXPIRED)
+    lastNotifiedAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,

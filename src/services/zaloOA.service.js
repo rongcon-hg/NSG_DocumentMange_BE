@@ -727,6 +727,51 @@ class ZaloOAService {
   }
 
   /**
+   * 7. Thông báo Căn cứ pháp luật Bắt đầu có hiệu lực hoặc Hết hiệu lực
+   */
+  async notifyLegalBasisStatus({ legalDoc, statusType = 'ACTIVE', actorName = 'Hệ thống', recipientUsers = [] }) {
+    if (!legalDoc) return;
+    const docTypeMap = {
+      LUAT: 'Luật',
+      NGHI_DINH: 'Nghị định',
+      THONG_TU: 'Thông tư',
+      QUYET_DINH: 'Quyết định',
+      CHI_THI: 'Chỉ thị',
+      KHAC: 'Văn bản quy phạm',
+    };
+    const typeLabel = docTypeMap[legalDoc.docType] || legalDoc.docType || 'Văn bản pháp luật';
+    const effDateStr = legalDoc.effectiveDate
+      ? new Date(legalDoc.effectiveDate).toLocaleDateString('vi-VN')
+      : 'Theo quy định';
+
+    const isExpired = statusType === 'EXPIRED' || statusType === 'PARTIALLY_EXPIRED' || legalDoc.status === 'EXPIRED' || legalDoc.status === 'PARTIALLY_EXPIRED';
+    const headerTitle = isExpired
+      ? (legalDoc.status === 'PARTIALLY_EXPIRED' ? '⚠️ CẢNH BÁO CĂN CỨ PHÁP LUẬT HẾT HIỆU LỰC MỘT PHẦN' : '🚨 CẢNH BÁO CĂN CỨ PHÁP LUẬT ĐÃ HẾT HIỆU LỰC')
+      : '✅ THÔNG BÁO CĂN CỨ PHÁP LUẬT BẮT ĐẦU CÓ HIỆU LỰC';
+
+    const statusBadge = isExpired
+      ? (legalDoc.status === 'PARTIALLY_EXPIRED' ? 'Hết hiệu lực một phần' : 'Đã hết hiệu lực')
+      : 'Bắt đầu có hiệu lực (Còn hiệu lực)';
+
+    const msg = `[HỆ THỐNG VĂN PHÒNG SỐ - CĂN CỨ PHÁP LUẬT]\n` +
+      `${headerTitle}\n` +
+      `📌 Số/Ký hiệu: ${legalDoc.code} (${typeLabel})\n` +
+      `📝 Tên văn bản: ${legalDoc.title}\n` +
+      (legalDoc.issuingAuthority ? `🏢 Cơ quan ban hành: ${legalDoc.issuingAuthority}\n` : '') +
+      `📅 Ngày hiệu lực: ${effDateStr}\n` +
+      `📋 Tình trạng: ${statusBadge}\n` +
+      (legalDoc.replacedBy ? `👉 Văn bản thay thế: ${legalDoc.replacedBy}\n` : '') +
+      (legalDoc.notes ? `💡 Ghi chú áp dụng: ${legalDoc.notes}\n` : '') +
+      `🔗 Tra cứu tại: https://qlvb.namsaigon.edu.vn/legal-bases`;
+
+    return await this.dispatchNotification({
+      recipients: recipientUsers,
+      message: msg,
+      eventType: 'legalBasis',
+    });
+  }
+
+  /**
    * Gửi thông báo khi người dùng được nhắc tên (@mention) trong thảo luận
    */
   async notifyMention({ senderName, recipientUser, targetType, targetTitle, contentPreview }) {

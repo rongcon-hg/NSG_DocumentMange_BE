@@ -32,6 +32,7 @@ const zaloConfigSchema = new mongoose.Schema({
     taskDeadline: { type: Boolean, default: true },    // Cảnh báo công việc sắp hết hạn / quá hạn
     workSchedule: { type: Boolean, default: true },    // Ban hành lịch công tác tuần mới
     emulation: { type: Boolean, default: true },       // Đề nghị & xét duyệt thi đua khen thưởng
+    legalBasis: { type: Boolean, default: true },      // Thông báo căn cứ pháp luật có hiệu lực / hết hiệu lực
     mention: { type: Boolean, default: true },         // Nhắc tên @mention trong thảo luận
   },
 

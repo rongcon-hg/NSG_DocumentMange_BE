@@ -1826,6 +1826,137 @@ const sendVehicleDispatchedEmail = async (booking) => {
     }
 };
 
+/**
+ * Gửi email thông báo Căn cứ pháp luật Bắt đầu có hiệu lực hoặc Hết hiệu lực
+ * tới nhóm tài khoản Manager, Ban Giám hiệu, Cấp trưởng và Cấp phó
+ */
+const sendLegalBasisStatusEmail = async (recipients, legalDoc, statusType = "ACTIVE", actorName = "Hệ thống") => {
+    try {
+        if (!recipients || recipients.length === 0 || !legalDoc) return false;
+        const allowedUsers = recipients.filter(u => u && u.email && (!u.emailNotifications || u.emailNotifications.docNew !== false));
+        const bccList = Array.from(new Set(allowedUsers.map(u => u.email.trim()).filter(Boolean)));
+        if (bccList.length === 0) return false;
+
+        const { transporter, sender, brandName } = await getTransporterAndSender();
+
+        const docTypeMap = {
+            LUAT: "Luật",
+            NGHI_DINH: "Nghị định",
+            THONG_TU: "Thông tư",
+            QUYET_DINH: "Quyết định",
+            CHI_THI: "Chỉ thị",
+            KHAC: "Văn bản khác",
+        };
+        const typeLabel = docTypeMap[legalDoc.docType] || legalDoc.docType || "Văn bản quy phạm pháp luật";
+        const issuedDateStr = legalDoc.issuedDate ? formatVietnamDate(legalDoc.issuedDate) : "Chưa cập nhật";
+        const effectiveDateStr = legalDoc.effectiveDate ? formatVietnamDate(legalDoc.effectiveDate) : "Theo quy định";
+
+        const isExpired = statusType === "EXPIRED" || statusType === "PARTIALLY_EXPIRED" || legalDoc.status === "EXPIRED" || legalDoc.status === "PARTIALLY_EXPIRED";
+        const isPartial = statusType === "PARTIALLY_EXPIRED" || legalDoc.status === "PARTIALLY_EXPIRED";
+
+        const headerBg = isExpired
+            ? (isPartial ? "linear-gradient(135deg, #d97706 0%, #ea580c 100%)" : "linear-gradient(135deg, #be123c 0%, #e11d48 100%)")
+            : "linear-gradient(135deg, #059669 0%, #10b981 100%)";
+
+        const headerTitle = isExpired
+            ? (isPartial ? "CẢNH BÁO CĂN CỨ PHÁP LUẬT HẾT HIỆU LỰC MỘT PHẦN" : "CẢNH BÁO CĂN CỨ PHÁP LUẬT ĐÃ HẾT HIỆU LỰC")
+            : "THÔNG BÁO CĂN CỨ PHÁP LUẬT BẮT ĐẦU CÓ HIỆU LỰC";
+
+        const statusBadgeText = isExpired
+            ? (isPartial ? "Hết hiệu lực một phần" : "Đã hết hiệu lực")
+            : "Bắt đầu có hiệu lực (Còn hiệu lực)";
+
+        const statusBadgeColor = isExpired ? (isPartial ? "#d97706" : "#e11d48") : "#059669";
+
+        const subject = isExpired
+            ? `[${brandName} - Cảnh báo hiệu lực] Văn bản ${legalDoc.code} (${statusBadgeText})`
+            : `[${brandName} - Căn cứ pháp luật] Văn bản ${legalDoc.code} bắt đầu có hiệu lực`;
+
+        const htmlContent = `
+        <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #1e293b; max-width: 680px; margin: 0 auto; border: 1px solid #cbd5e1; border-radius: 10px; overflow: hidden;">
+            <div style="background: ${headerBg}; padding: 22px 24px; text-align: center; color: white;">
+                <h2 style="margin: 0; font-size: 20px; text-transform: uppercase;">${headerTitle}</h2>
+                <p style="margin: 6px 0 0; opacity: 0.95; font-size: 13.5px;">Số / Ký hiệu: <strong>${legalDoc.code}</strong> (${typeLabel})</p>
+            </div>
+            <div style="padding: 24px; background-color: #ffffff;">
+                <p style="font-size: 15px;">Kính gửi <strong>Ban Giám hiệu, Quản lý và Lãnh đạo các đơn vị (Cấp trưởng / Cấp phó)</strong>,</p>
+                <p style="font-size: 14px; color: #475569;">
+                    ${isExpired
+                        ? `Hệ thống Quản lý Căn cứ Pháp luật xin thông báo: Văn bản quy phạm pháp luật <strong>${legalDoc.code}</strong> hiện đang ở trạng thái <strong style="color: ${statusBadgeColor};">${statusBadgeText}</strong>. Quý Lãnh đạo và các đơn vị lưu ý không sử dụng các quy định đã hết hiệu lực khi soạn thảo, thẩm định văn bản.`
+                        : `Hệ thống Quản lý Căn cứ Pháp luật xin thông báo: Văn bản quy phạm pháp luật <strong>${legalDoc.code}</strong> đã <strong style="color: ${statusBadgeColor};">Bắt đầu có hiệu lực thi hành</strong>. Kính mời Quý Lãnh đạo và các đơn vị cập nhật để áp dụng trong công tác chuyên môn và soạn thảo văn bản.`
+                    }
+                </p>
+
+                <table style="width: 100%; border-collapse: collapse; margin: 18px 0; font-size: 14px; background-color: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
+                    <tr>
+                        <td style="padding: 10px 14px; border-bottom: 1px solid #e2e8f0; font-weight: bold; width: 34%; color: #64748b;">Số / Ký hiệu:</td>
+                        <td style="padding: 10px 14px; border-bottom: 1px solid #e2e8f0; font-weight: bold; color: #1d4ed8;">${legalDoc.code}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 10px 14px; border-bottom: 1px solid #e2e8f0; font-weight: bold; color: #64748b;">Loại văn bản:</td>
+                        <td style="padding: 10px 14px; border-bottom: 1px solid #e2e8f0;">${typeLabel}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 10px 14px; border-bottom: 1px solid #e2e8f0; font-weight: bold; color: #64748b;">Tên / Trích yếu:</td>
+                        <td style="padding: 10px 14px; border-bottom: 1px solid #e2e8f0; font-weight: bold;">${legalDoc.title}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 10px 14px; border-bottom: 1px solid #e2e8f0; font-weight: bold; color: #64748b;">Cơ quan ban hành:</td>
+                        <td style="padding: 10px 14px; border-bottom: 1px solid #e2e8f0;">${legalDoc.issuingAuthority || "Chưa cập nhật"}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 10px 14px; border-bottom: 1px solid #e2e8f0; font-weight: bold; color: #64748b;">Ngày ban hành:</td>
+                        <td style="padding: 10px 14px; border-bottom: 1px solid #e2e8f0;">${issuedDateStr}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 10px 14px; border-bottom: 1px solid #e2e8f0; font-weight: bold; color: #64748b;">Ngày có hiệu lực:</td>
+                        <td style="padding: 10px 14px; border-bottom: 1px solid #e2e8f0; font-weight: bold; color: #2563eb;">${effectiveDateStr}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 10px 14px; border-bottom: 1px solid #e2e8f0; font-weight: bold; color: #64748b;">Tình trạng hiệu lực:</td>
+                        <td style="padding: 10px 14px; border-bottom: 1px solid #e2e8f0; font-weight: bold; color: ${statusBadgeColor};">${statusBadgeText}</td>
+                    </tr>
+                    ${legalDoc.replacedBy ? `
+                    <tr>
+                        <td style="padding: 10px 14px; border-bottom: 1px solid #e2e8f0; font-weight: bold; color: #be123c;">Văn bản thay thế:</td>
+                        <td style="padding: 10px 14px; border-bottom: 1px solid #e2e8f0; font-weight: bold; color: #be123c;">👉 ${legalDoc.replacedBy}</td>
+                    </tr>` : ""}
+                    ${legalDoc.notes ? `
+                    <tr>
+                        <td style="padding: 10px 14px; border-bottom: 1px solid #e2e8f0; font-weight: bold; color: #64748b;">Ghi chú áp dụng:</td>
+                        <td style="padding: 10px 14px; border-bottom: 1px solid #e2e8f0;">${legalDoc.notes}</td>
+                    </tr>` : ""}
+                    <tr>
+                        <td style="padding: 10px 14px; font-weight: bold; color: #64748b;">Người cập nhật / Gửi:</td>
+                        <td style="padding: 10px 14px;">${actorName} (${formatVietnamDateTime()})</td>
+                    </tr>
+                </table>
+
+                <div style="text-align: center; margin-top: 24px;">
+                    <a href="https://qlvb.namsaigon.edu.vn/legal-bases" style="background-color: #2563eb; color: white; padding: 12px 26px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block; margin: 4px;">Tra cứu CSDL Căn cứ pháp luật</a>
+                    ${legalDoc.documentUrl ? `<a href="${legalDoc.documentUrl}" target="_blank" style="background-color: #059669; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block; margin: 4px;">Xem toàn văn văn bản</a>` : ""}
+                </div>
+            </div>
+            <div style="background-color: #f1f5f9; padding: 14px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #e2e8f0;">
+                Email được gửi tự động từ ${brandName} - Trường Cao đẳng Bách khoa Nam Sài Gòn.
+            </div>
+        </div>
+        `;
+
+        await transporter.sendMail({
+            from: sender,
+            to: bccList.join(", "),
+            subject,
+            html: applySystemBranding(htmlContent, brandName),
+        });
+        console.log(`[Email] Đã gửi thông báo Căn cứ pháp luật "${legalDoc.code}" (${statusBadgeText}) tới ${bccList.length} lãnh đạo/quản lý.`);
+        return true;
+    } catch (error) {
+        console.error("Error in sendLegalBasisStatusEmail:", error);
+        return false;
+    }
+};
+
 module.exports = {
     sentTempPassword,
     sendRestoreOtpEmail,
@@ -1846,4 +1977,5 @@ module.exports = {
     sendVehicleBookingNotificationEmail,
     sendVehicleBookingStatusEmail,
     sendVehicleDispatchedEmail,
+    sendLegalBasisStatusEmail,
 };

@@ -7,6 +7,7 @@ router.use(verifyToken);
 
 router.get("/", legalBasisController.getLegalBases);
 router.post("/check-status", legalBasisController.checkLegalBasesStatus);
+router.post("/:id/notify", verifyManager, legalBasisController.notifyLegalBasis);
 router.get("/:id", legalBasisController.getLegalBasisById);
 router.post("/", verifyManager, legalBasisController.createLegalBasis);
 router.put("/:id", verifyManager, legalBasisController.updateLegalBasis);
