@@ -157,6 +157,11 @@ class ZaloOAService {
       }
 
       // 1. ƯU TIÊN SỐ 1: Gửi qua Zalo Bot (Bot NSG-Office) bằng realZaloChatId (Miễn phí 100%, không cần OA Secret/Refresh Token)
+      // Lưu ý: Zalo Bot Platform giới hạn tối đa 2000 ký tự mỗi tin nhắn
+      const safeBotText = String(text || '').length > 1900
+        ? String(text).slice(0, 1890) + '...\n(Xem chi tiết trên hệ thống)'
+        : String(text || '');
+
       if (realZaloChatId && config.botToken) {
         try {
           const botRes = await fetch(`https://bot-api.zaloplatforms.com/bot${config.botToken}/sendMessage`, {
@@ -164,7 +169,7 @@ class ZaloOAService {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               chat_id: realZaloChatId,
-              text: text,
+              text: safeBotText,
             }),
           });
           const botData = await botRes.json();
@@ -173,7 +178,7 @@ class ZaloOAService {
           } else {
             return {
               success: false,
-              reason: `Cán bộ đã liên kết Zalo ID (${realZaloChatId}) nhưng chưa mở khung chat riêng với Bot NSG-Office. Hướng dẫn: Cán bộ bấm vào Bot NSG-Office trong nhóm Zalo (hoặc mở https://bot.zaloplatforms.com/bots/1371050577415650488) và nhắn 1 tin bất kỳ trực tiếp cho Bot để nhận tin nhắn riêng!`,
+              reason: botData?.description || `Cán bộ đã liên kết Zalo ID (${realZaloChatId}) nhưng chưa mở khung chat riêng với Bot NSG-Office. Hướng dẫn: Cán bộ bấm vào Bot NSG-Office trong nhóm Zalo (hoặc mở https://bot.zaloplatforms.com/bots/1371050577415650488) và nhắn 1 tin bất kỳ trực tiếp cho Bot để nhận tin nhắn riêng!`,
             };
           }
         } catch (botErr) {
@@ -249,16 +254,20 @@ class ZaloOAService {
         return { success: false, reason: 'Chưa có Group Chat ID. Vui lòng mời Bot vào nhóm Zalo, gõ 1 tin nhắn trong nhóm rồi bấm "Tự động dò tìm Group Chat ID"!' };
       }
 
-      // Hỗ trợ cả Zalo Bot Platform chuẩn, Chat Bot URL hoặc webhook chuyển tiếp
+      // Hỗ trợ cả Zalo Bot Platform chuẩn, Chat Bot URL hoặc webhook chuyển tiếp (giới hạn 2000 ký tự của Zalo Bot API)
+      const safeGroupText = String(text || '').length > 1900
+        ? String(text).slice(0, 1890) + '...\n(Xem chi tiết trên hệ thống)'
+        : String(text || '');
+
       const response = await fetch(targetUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          text: text,
-          content: text,
-          message: text,
+          text: safeGroupText,
+          content: safeGroupText,
+          message: safeGroupText,
           chat_id: config.groupChatId || undefined,
         }),
       });
@@ -770,6 +779,11 @@ class ZaloOAService {
       ? (legalDoc.status === 'PARTIALLY_EXPIRED' ? 'Hết hiệu lực một phần' : 'Đã hết hiệu lực')
       : 'Bắt đầu có hiệu lực (Còn hiệu lực)';
 
+    const cleanNotes = String(legalDoc.notes || '').trim();
+    const shortNotes = cleanNotes.length > 700
+      ? cleanNotes.slice(0, 700).trim() + '... (xem đầy đủ trên hệ thống)'
+      : cleanNotes;
+
     const msg = `[HỆ THỐNG VĂN PHÒNG SỐ - CĂN CỨ PHÁP LUẬT]\n` +
       `${headerTitle}\n` +
       `📌 Số/Ký hiệu: ${legalDoc.code} (${typeLabel})\n` +
@@ -778,7 +792,7 @@ class ZaloOAService {
       `📅 Ngày hiệu lực: ${effDateStr}\n` +
       `📋 Tình trạng: ${statusBadge}\n` +
       (legalDoc.replacedBy ? `👉 Văn bản thay thế: ${legalDoc.replacedBy}\n` : '') +
-      (legalDoc.notes ? `💡 Ghi chú áp dụng: ${legalDoc.notes}\n` : '') +
+      (shortNotes ? `💡 Ghi chú áp dụng: ${shortNotes}\n` : '') +
       `🔗 Tra cứu tại: https://qlvb.namsaigon.edu.vn/legal-bases`;
 
     return await this.dispatchNotification({
