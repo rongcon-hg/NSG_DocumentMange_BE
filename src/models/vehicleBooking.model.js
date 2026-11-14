@@ -41,6 +41,21 @@ const vehicleBookingSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    // Người tạo đơn thực tế (nếu Manager/Admin đăng ký hộ cho Cấp trưởng)
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+      index: true,
+    },
+    createdByName: {
+      type: String,
+      default: "",
+    },
+    onBehalfOf: {
+      type: Boolean,
+      default: false,
+    },
 
     // Thông tin công tác
     purpose: {

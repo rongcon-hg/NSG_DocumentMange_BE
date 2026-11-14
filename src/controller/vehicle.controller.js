@@ -223,10 +223,12 @@ const deleteDriver = async (req, res) => {
 const createBooking = async (req, res) => {
   try {
     const userId = req.user?.id || req.user?._id;
+    const userRole = (req.user?.role || "").toLowerCase();
     const user = await User.findById(userId).populate("department");
     if (!user) return res.status(401).json({ success: false, message: "Không tìm thấy thông tin người dùng" });
 
     const {
+      onBehalfOfUser,
       contactPhone,
       passengersCount,
       passengerNames,
@@ -255,12 +257,35 @@ const createBooking = async (req, res) => {
       return res.status(400).json({ success: false, message: "Người duyệt (BGH) được chọn không tồn tại" });
     }
 
+    // Nếu tài khoản Manager/Admin đăng ký hộ cho Cấp trưởng
+    let effectiveRequesterId = userId;
+    let effectiveRequesterName = user.name || user.fullName || user.userName || "";
+    let effectiveDeptId = user.department?._id || user.department;
+    let effectiveDeptName = user.department?.departmentName || user.department?.name || "";
+    let effectivePhone = contactPhone || user.mobile || user.phone || "";
+    let isRegisteredOnBehalf = false;
+
+    if (onBehalfOfUser && ["manager", "admin"].includes(userRole)) {
+      const targetUser = await User.findById(onBehalfOfUser).populate("department");
+      if (targetUser) {
+        effectiveRequesterId = targetUser._id;
+        effectiveRequesterName = targetUser.name || targetUser.fullName || targetUser.userName || "";
+        effectiveDeptId = targetUser.department?._id || targetUser.department;
+        effectiveDeptName = targetUser.department?.departmentName || targetUser.department?.name || "";
+        effectivePhone = contactPhone || targetUser.mobile || targetUser.phone || "";
+        isRegisteredOnBehalf = true;
+      }
+    }
+
     const booking = new VehicleBooking({
-      requester: userId,
-      requesterName: user.name || user.fullName || user.userName || "",
-      department: user.department?._id || user.department,
-      departmentName: user.department?.departmentName || user.department?.name || "",
-      contactPhone: contactPhone || user.mobile || user.phone || "",
+      requester: effectiveRequesterId,
+      requesterName: effectiveRequesterName,
+      department: effectiveDeptId,
+      departmentName: effectiveDeptName,
+      contactPhone: effectivePhone,
+      createdBy: userId,
+      createdByName: user.name || "",
+      onBehalfOf: isRegisteredOnBehalf,
       passengersCount: Number(passengersCount) || 1,
       passengerNames: passengerNames || "",
       purpose: purpose.trim(),
@@ -300,6 +325,121 @@ const createBooking = async (req, res) => {
   }
 };
 
+// Cập nhật phiếu đăng ký xe (Chỉ cho phép khi BGH chưa duyệt - PENDING)
+const updateBooking = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.id || req.user?._id;
+    const userRole = (req.user?.role || "").toLowerCase();
+    const isAdminOrManager = ["admin", "manager"].includes(userRole);
+
+    const booking = await VehicleBooking.findById(id);
+    if (!booking) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy đơn đăng ký xe" });
+    }
+
+    // Kiểm tra trạng thái: Chỉ cho phép chỉnh sửa khi BGH chưa duyệt (PENDING)
+    if (booking.approvalStatus !== "PENDING") {
+      return res.status(400).json({
+        success: false,
+        message: "Phiếu đăng ký này đã được Ban Giám Hiệu xử lý hoặc không ở trạng thái chờ duyệt, không thể chỉnh sửa!",
+      });
+    }
+
+    // Kiểm tra quyền: Người tạo phiếu (requester hoặc createdBy) hoặc Admin/Manager
+    const isOwner =
+      booking.requester?.toString() === userId.toString() ||
+      booking.createdBy?.toString() === userId.toString();
+
+    if (!isOwner && !isAdminOrManager) {
+      return res.status(403).json({
+        success: false,
+        message: "Bạn không có quyền chỉnh sửa phiếu đăng ký này",
+      });
+    }
+
+    const {
+      onBehalfOfUser,
+      contactPhone,
+      passengersCount,
+      passengerNames,
+      purpose,
+      route,
+      departureLocation,
+      destination,
+      departureTime,
+      departureHour,
+      estimatedReturnTime,
+      vehicleType,
+      requiredSeats,
+      notes,
+      targetApprover,
+    } = req.body;
+
+    if (!purpose || !route || !departureTime || !estimatedReturnTime || !targetApprover) {
+      return res.status(400).json({
+        success: false,
+        message: "Vui lòng điền đầy đủ các thông tin bắt buộc: Mục đích, Lộ trình, Ngày xuất phát, Ngày về và BGH duyệt",
+      });
+    }
+
+    const approver = await User.findById(targetApprover);
+    if (!approver) {
+      return res.status(400).json({ success: false, message: "Người duyệt (BGH) được chọn không tồn tại" });
+    }
+
+    // Nếu là Manager/Admin cập nhật lại Cấp trưởng được đăng ký hộ
+    if (isAdminOrManager) {
+      if (onBehalfOfUser) {
+        const targetUser = await User.findById(onBehalfOfUser).populate("department");
+        if (targetUser) {
+          booking.requester = targetUser._id;
+          booking.requesterName = targetUser.name || targetUser.fullName || targetUser.userName || "";
+          booking.department = targetUser.department?._id || targetUser.department;
+          booking.departmentName = targetUser.department?.departmentName || targetUser.department?.name || "";
+          booking.onBehalfOf = true;
+        }
+      } else if (onBehalfOfUser === "" || onBehalfOfUser === null) {
+        // Đổi lại thành tự đăng ký
+        const user = await User.findById(userId).populate("department");
+        if (user) {
+          booking.requester = user._id;
+          booking.requesterName = user.name || user.fullName || user.userName || "";
+          booking.department = user.department?._id || user.department;
+          booking.departmentName = user.department?.departmentName || user.department?.name || "";
+          booking.onBehalfOf = false;
+        }
+      }
+    }
+
+    booking.contactPhone = contactPhone || booking.contactPhone;
+    booking.passengersCount = Number(passengersCount) || 1;
+    booking.passengerNames = passengerNames !== undefined ? passengerNames : booking.passengerNames;
+    booking.purpose = purpose.trim();
+    booking.route = route.trim();
+    booking.departureLocation = departureLocation || booking.departureLocation;
+    booking.destination = destination !== undefined ? destination : booking.destination;
+    booking.departureTime = new Date(departureTime);
+    booking.departureHour = departureHour || booking.departureHour;
+    booking.estimatedReturnTime = new Date(estimatedReturnTime);
+    booking.vehicleType = vehicleType || booking.vehicleType;
+    booking.requiredSeats = Number(requiredSeats) || booking.requiredSeats;
+    booking.notes = notes !== undefined ? notes : booking.notes;
+    booking.targetApprover = targetApprover;
+
+    await booking.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Cập nhật phiếu đăng ký xe thành công!",
+      data: booking,
+    });
+  } catch (error) {
+    console.error("Lỗi cập nhật phiếu đăng ký xe:", error);
+    return res.status(500).json({ success: false, message: error.message || "Lỗi cập nhật phiếu đăng ký xe" });
+  }
+};
+
 // Lấy danh sách đơn đăng ký xe (phân quyền theo vai trò và bộ lọc tab)
 const getBookings = async (req, res) => {
   try {
@@ -310,9 +450,9 @@ const getBookings = async (req, res) => {
     const query = {};
 
     // 1. Phân quyền lọc theo tab:
-    // Tab "my": Các đơn do chính user tạo
+    // Tab "my": Các đơn do chính user tạo hoặc được đăng ký hộ
     if (tab === "my") {
-      query.requester = userId;
+      query.$or = [{ requester: userId }, { createdBy: userId }];
     }
     // Tab "pending_approval": Dành cho BGH duyệt (Admin/Manager xem được tất cả đơn PENDING, còn BGH xem các đơn gửi đích danh mình hoặc toàn bộ đơn chờ duyệt)
     else if (tab === "pending_approval") {
@@ -859,6 +999,7 @@ module.exports = {
 
   // Booking & Dispatch
   createBooking,
+  updateBooking,
   getBookings,
   getBookingById,
   reviewBookingByBGH,
