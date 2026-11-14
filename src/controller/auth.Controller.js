@@ -12,7 +12,7 @@ const { Readable } = require("stream");
 const { authorize, getOrCreateMonthFolder, sanitizeFileName } = require("./uploadfile.Controller");
 dotenv.config();
 const characters = process.env.CHARACTERS;
-const VALID_ROLES = ["staff", "manager", "cappho", "chuyenvien"];
+const VALID_ROLES = ["staff", "manager", "cappho", "chuyenvien", "admin"];
 
 /**
  * Tự động xác định vai trò (role) chính xác dựa trên Chức vụ (Position)
@@ -76,13 +76,13 @@ const createUser = async (req,res)=>{
         if (userExists) {
             return res.status(400).json({ message: "User already exists" });
         }
-        else if (role == "admin") {
-            return res.status(403).json({message:"cannot create admin"})
+        else if (role === "admin" && req.user?.role !== "admin") {
+            return res.status(403).json({ message: "Chỉ Quản trị viên (Admin) mới có quyền tạo tài khoản Admin mới!" });
         }
 
-        // Tự động chuẩn hóa vai trò theo chức vụ nếu có chọn chức vụ
+        // Tự động chuẩn hóa vai trò theo chức vụ nếu có chọn chức vụ (ngoại trừ vai trò admin)
         let finalRole = role;
-        if (position) {
+        if (position && role !== "admin") {
           const posDoc = await Position.findById(position);
           if (posDoc) {
             finalRole = determineRoleByPosition(posDoc, role);
@@ -90,7 +90,7 @@ const createUser = async (req,res)=>{
         }
 
         const user = await User.create({ email,password,name,mobile,position,department,description,role: finalRole});
-        const { accessToken} = generateToken(user._id);
+        const { accessToken} = generateToken(user._id, user.role);
         res.status(200).json({
             accessToken: accessToken,
             message: "user created successfully",
@@ -231,7 +231,11 @@ const getAllUser = async (req, res) => {
   try {
     const { positionCode, departmentCode } = req.query;
 
-    const filter = { role: { $ne: "admin" } };
+    const filter = {};
+    // Chỉ loại bỏ tài khoản Admin khi người gọi không phải là Admin (Manager không thấy tài khoản Admin)
+    if (req.user?.role !== "admin") {
+      filter.role = { $ne: "admin" };
+    }
 
     // --- Lọc theo positionCode ---
     if (positionCode) {
@@ -302,6 +306,14 @@ const upadteInfo = async (req, res) => {
         return res.status(403).json({
           success: false,
           message: "Bạn không có quyền chỉnh sửa thông tin của người dùng khác.",
+        });
+      }
+
+      // Manager không được phép chỉnh sửa tài khoản Admin
+      if (user.role === "admin" && req.user?.role !== "admin" && !isSelf) {
+        return res.status(403).json({
+          success: false,
+          message: "Chỉ Quản trị viên (Admin) mới có quyền chỉnh sửa tài khoản Admin.",
         });
       }
   
@@ -455,6 +467,10 @@ const restoreUser = async (req, res) => {
   
       if (!user) {
         return res.status(404).json({ message: "User not found." });
+      }
+
+      if (role === "admin" && req.user?.role !== "admin") {
+        return res.status(403).json({ message: "Chỉ Quản trị viên (Admin) mới có quyền kích hoạt với vai trò Admin!" });
       }
   
       if (!role || !VALID_ROLES.includes(role)) {
@@ -691,6 +707,11 @@ const importUsers = async (req, res) => {
 
       if (!VALID_ROLES.includes(role)) {
         errors.push({ row: rowIndex, email, message: `Vai trò '${role}' không hợp lệ. Cho phép: ${VALID_ROLES.join(", ")}` });
+        continue;
+      }
+
+      if (role === "admin" && req.user?.role !== "admin") {
+        errors.push({ row: rowIndex, email, message: "Chỉ Quản trị viên (Admin) mới có quyền tạo tài khoản với vai trò Admin" });
         continue;
       }
 
