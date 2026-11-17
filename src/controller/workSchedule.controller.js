@@ -23,11 +23,19 @@ const getBghAndManagerUserIds = async () => {
     const bghDeptIds = bghDepts.map((d) => d._id);
 
     const bghPositions = await Position.find({
-      $or: [
-        { positionCode: { $in: ["HT", "QHT", "PHT", "NHT"] } },
-        { abbreviation: { $in: ["HT", "QHT", "PHT", "NHT"] } },
-        { code: { $in: ["HT", "QHT", "PHT", "NHT"] } },
-        { positionName: { $regex: /hiệu trưởng/i } },
+      $and: [
+        {
+          $or: [
+            { positionCode: { $in: ["HT", "QHT", "PHT"] } },
+            { abbreviation: { $in: ["HT", "QHT", "PHT"] } },
+            { code: { $in: ["HT", "QHT", "PHT"] } },
+            { positionName: { $regex: /hiệu trưởng/i } },
+          ],
+        },
+        { positionName: { $not: { $regex: /(nguyên|cựu)/i } } },
+        { positionCode: { $nin: ["NHT", "NPHT"] } },
+        { abbreviation: { $nin: ["NHT", "NPHT"] } },
+        { code: { $nin: ["NHT", "NPHT"] } },
       ],
     }).select("_id");
     const bghPosIds = bghPositions.map((p) => p._id);
@@ -382,11 +390,19 @@ exports.getBghUsers = async (req, res) => {
     const bghDeptIds = bghDepts.map((d) => d._id);
 
     const bghPositions = await Position.find({
-      $or: [
-        { positionCode: { $in: ["HT", "QHT", "PHT", "NHT"] } },
-        { abbreviation: { $in: ["HT", "QHT", "PHT", "NHT"] } },
-        { code: { $in: ["HT", "QHT", "PHT", "NHT"] } },
-        { positionName: { $regex: /hiệu trưởng/i } },
+      $and: [
+        {
+          $or: [
+            { positionCode: { $in: ["HT", "QHT", "PHT"] } },
+            { abbreviation: { $in: ["HT", "QHT", "PHT"] } },
+            { code: { $in: ["HT", "QHT", "PHT"] } },
+            { positionName: { $regex: /hiệu trưởng/i } },
+          ],
+        },
+        { positionName: { $not: { $regex: /(nguyên|cựu)/i } } },
+        { positionCode: { $nin: ["NHT", "NPHT"] } },
+        { abbreviation: { $nin: ["NHT", "NPHT"] } },
+        { code: { $nin: ["NHT", "NPHT"] } },
       ],
     }).select("_id");
     const bghPosIds = bghPositions.map((p) => p._id);
@@ -406,17 +422,22 @@ exports.getBghUsers = async (req, res) => {
 
     // Lọc lại nghiêm ngặt để đảm bảo 100% thuộc Ban Giám Hiệu
     const filteredUsers = users.filter((u) => {
-      const dCode = (u.department?.departmentCode || "").toUpperCase();
-      const dName = (u.department?.departmentName || "").toLowerCase();
       const pName = (u.position?.positionName || "").toLowerCase();
       const pCode = (u.position?.positionCode || u.position?.abbreviation || u.position?.code || "").toUpperCase();
+      if (pName.includes("nguyên") || pName.includes("cựu") || ["NHT", "NPHT"].includes(pCode)) {
+        return false;
+      }
+
+      const dCode = (u.department?.departmentCode || "").toUpperCase();
+      const dName = (u.department?.departmentName || "").toLowerCase();
 
       return (
         dCode === "BGH" ||
         dName.includes("ban giám hiệu") ||
-        ["HT", "QHT", "PHT", "NHT"].includes(pCode) ||
-        pName.includes("hiệu trưởng") ||
-        pName.includes("phó hiệu trưởng")
+        ["HT", "QHT", "PHT"].includes(pCode) ||
+        pName.includes("quyền hiệu trưởng") ||
+        pName.includes("phó hiệu trưởng") ||
+        (pName.includes("hiệu trưởng") && !pName.includes("trợ lý") && !pName.includes("thư ký"))
       );
     });
 

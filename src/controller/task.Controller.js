@@ -437,7 +437,8 @@ const getTasks = async (req, res) => {
             if (userPos) {
                 const pName = (userPos.positionName || '').toLowerCase();
                 const pCode = (userPos.abbreviation || userPos.code || '').toUpperCase();
-                if (['HT', 'QHT', 'PHT', 'NHT'].includes(pCode) || pName.includes('hiệu trưởng') || pName.includes('phó hiệu trưởng')) {
+                const isFormer = pName.includes('nguyên') || pName.includes('cựu') || ['NHT', 'NPHT'].includes(pCode);
+                if (!isFormer && (['HT', 'QHT', 'PHT'].includes(pCode) || pName.includes('quyền hiệu trưởng') || pName.includes('phó hiệu trưởng') || (pName.includes('hiệu trưởng') && !pName.includes('trợ lý') && !pName.includes('thư ký')))) {
                     isBGH = true;
                 }
             }
@@ -733,7 +734,8 @@ const updateTask = async (req, res) => {
             if (updaterPos) {
                 const pName = (updaterPos.positionName || '').toLowerCase();
                 const pCode = (updaterPos.abbreviation || updaterPos.code || '').toUpperCase();
-                if (['HT', 'QHT', 'PHT', 'NHT'].includes(pCode) || pName.includes('hiệu trưởng') || pName.includes('phó hiệu trưởng')) {
+                const isFormer = pName.includes('nguyên') || pName.includes('cựu') || ['NHT', 'NPHT'].includes(pCode);
+                if (!isFormer && (['HT', 'QHT', 'PHT'].includes(pCode) || pName.includes('quyền hiệu trưởng') || pName.includes('phó hiệu trưởng') || (pName.includes('hiệu trưởng') && !pName.includes('trợ lý') && !pName.includes('thư ký')))) {
                     isUpdaterBGH = true;
                 }
             }
@@ -1382,7 +1384,8 @@ const evaluateTask = async (req, res) => {
             if (userPos) {
                 const pName = (userPos.positionName || '').toLowerCase();
                 const pCode = (userPos.abbreviation || userPos.code || '').toUpperCase();
-                if (['HT', 'QHT', 'PHT', 'NHT'].includes(pCode) || pName.includes('hiệu trưởng') || pName.includes('phó hiệu trưởng')) {
+                const isFormer = pName.includes('nguyên') || pName.includes('cựu') || ['NHT', 'NPHT'].includes(pCode);
+                if (!isFormer && (['HT', 'QHT', 'PHT'].includes(pCode) || pName.includes('quyền hiệu trưởng') || pName.includes('phó hiệu trưởng') || (pName.includes('hiệu trưởng') && !pName.includes('trợ lý') && !pName.includes('thư ký')))) {
                     isBGH = true;
                 }
             }
@@ -1568,7 +1571,8 @@ const getKpiStats = async (req, res) => {
             if (userPos) {
                 const pName = (userPos.positionName || '').toLowerCase();
                 const pCode = (userPos.abbreviation || userPos.code || '').toUpperCase();
-                if (['HT', 'QHT', 'PHT', 'NHT'].includes(pCode) || pName.includes('hiệu trưởng') || pName.includes('phó hiệu trưởng')) {
+                const isFormer = pName.includes('nguyên') || pName.includes('cựu') || ['NHT', 'NPHT'].includes(pCode);
+                if (!isFormer && (['HT', 'QHT', 'PHT'].includes(pCode) || pName.includes('quyền hiệu trưởng') || pName.includes('phó hiệu trưởng') || (pName.includes('hiệu trưởng') && !pName.includes('trợ lý') && !pName.includes('thư ký')))) {
                     isBGH = true;
                 }
             }

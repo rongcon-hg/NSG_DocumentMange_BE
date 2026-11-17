@@ -26,8 +26,18 @@ const determineRoleByPosition = (posDoc, currentRole = "staff") => {
   if (currentRole === "admin") return "admin";
   if (!posDoc) return currentRole || "staff";
 
-  const posCode = (posDoc.positionCode || "").toUpperCase();
+  const posCode = (posDoc.positionCode || posDoc.code || posDoc.abbreviation || "").toUpperCase();
   const posName = (posDoc.positionName || "").toLowerCase();
+
+  // 0. Cựu lãnh đạo / Nguyên lãnh đạo (ví dụ: Nguyên Hiệu trưởng, Cựu Phó hiệu trưởng, Nguyên Trưởng phòng...)
+  const isFormer =
+    posName.includes("nguyên") ||
+    posName.includes("cựu") ||
+    ["NHT", "NPHT"].includes(posCode);
+
+  if (isFormer) {
+    return currentRole === "manager" ? "manager" : "chuyenvien";
+  }
 
   // 1. Kiểm tra Cấp phó trước (ưu tiên cao nhất để không bị nhầm bởi chữ 'trưởng' trong 'phó trưởng phòng/khoa')
   const isPho =
@@ -39,8 +49,13 @@ const determineRoleByPosition = (posDoc, currentRole = "staff") => {
     return "cappho";
   }
 
-  // 2. Ban Giám hiệu: nếu đang là manager thì giữ manager, còn lại staff
-  const isBgh = ["HT", "PHT", "QHT"].includes(posCode) || posName.includes("hiệu trưởng");
+  // 2. Ban Giám hiệu đương nhiệm: nếu đang là manager thì giữ manager, còn lại staff
+  const isBgh =
+    ["HT", "PHT", "QHT"].includes(posCode) ||
+    posName.includes("quyền hiệu trưởng") ||
+    posName.includes("phó hiệu trưởng") ||
+    (posName.includes("hiệu trưởng") && !posName.includes("trợ lý") && !posName.includes("thư ký"));
+
   if (isBgh) {
     return currentRole === "manager" ? "manager" : "staff";
   }
@@ -48,7 +63,8 @@ const determineRoleByPosition = (posDoc, currentRole = "staff") => {
   // 3. Cấp trưởng đơn vị (Trưởng phòng, Trưởng khoa, Giám đốc, Bí thư Đoàn)
   const isTruong =
     ["TP", "TK", "GD", "BT"].includes(posCode) ||
-    /^(trưởng\s+(phòng|khoa|ban|trung tâm)|giám đốc|bí thư\s+đoàn)/i.test(posName);
+    /^(trưởng\s+(phòng|khoa|ban|trung tâm)|giám đốc|bí thư\s+đoàn)/i.test(posName) ||
+    (posName.includes("trưởng") && !posName.includes("phó") && !posName.includes("hiệu trưởng"));
 
   if (isTruong) {
     return currentRole === "manager" ? "manager" : "staff";

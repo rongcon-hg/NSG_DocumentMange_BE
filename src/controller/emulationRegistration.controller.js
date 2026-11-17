@@ -19,17 +19,23 @@ const isUserBGH = (user) => {
   if (!user) return false;
   if (user.role === "admin") return true;
 
+  const posName = (user.position?.positionName || "").toLowerCase();
+  const posCode = (user.position?.positionCode || user.position?.code || user.position?.abbreviation || "").toUpperCase();
+
+  if (posName.includes("nguyên") || posName.includes("cựu") || ["NHT", "NPHT"].includes(posCode)) {
+    return false;
+  }
+
   const deptCode = (user.department?.departmentCode || "").toUpperCase();
   const deptName = (user.department?.departmentName || "").toLowerCase();
-  const posName = (user.position?.positionName || "").toLowerCase();
-  const posCode = (user.position?.positionCode || "").toUpperCase();
 
   return (
     deptCode === "BGH" ||
     deptName.includes("ban giám hiệu") ||
-    ["HT", "QHT", "PHT", "NHT"].includes(posCode) ||
-    posName.includes("hiệu trưởng") ||
-    posName.includes("phó hiệu trưởng")
+    ["HT", "QHT", "PHT"].includes(posCode) ||
+    posName.includes("quyền hiệu trưởng") ||
+    posName.includes("phó hiệu trưởng") ||
+    (posName.includes("hiệu trưởng") && !posName.includes("trợ lý") && !posName.includes("thư ký"))
   );
 };
 
@@ -880,7 +886,7 @@ const reviewRegistration = async (req, res) => {
           const bghUsers = await User.find({
             $or: [
               { role: "admin" },
-              { "position.positionCode": { $in: ["HT", "PHT", "NHT"] } },
+              { "position.positionCode": { $in: ["HT", "PHT"] } },
             ],
           })
             .populate("position")

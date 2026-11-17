@@ -34,23 +34,29 @@ const getTargetLeadershipRecipients = async () => {
       // 1. Manager & Admin
       if (role === "manager" || role === "admin") return true;
 
+      const isFormer = posName.includes("nguyên") || posName.includes("cựu") || ["NHT", "NPHT"].includes(posCode);
+
       // 2. Ban Giám hiệu
       if (
-        deptCode === "BGH" ||
-        deptName.includes("ban giám hiệu") ||
-        ["HT", "QHT", "PHT", "NHT"].includes(posCode) ||
-        posName.includes("hiệu trưởng")
+        !isFormer &&
+        (deptCode === "BGH" ||
+          deptName.includes("ban giám hiệu") ||
+          ["HT", "QHT", "PHT"].includes(posCode) ||
+          posName.includes("quyền hiệu trưởng") ||
+          posName.includes("phó hiệu trưởng") ||
+          (posName.includes("hiệu trưởng") && !posName.includes("trợ lý") && !posName.includes("thư ký")))
       ) {
         return true;
       }
 
       // 3. Cấp trưởng & Cấp phó
       if (
-        ["staff", "captruong", "cappho"].includes(role) ||
-        ["TP", "TK", "GD", "BT", "PTP", "PTK", "PGD", "PBT"].includes(posCode) ||
-        posName.includes("trưởng") ||
-        posName.includes("phó") ||
-        posName.includes("giám đốc")
+        !isFormer &&
+        (["captruong", "cappho"].includes(role) ||
+          ["TP", "TK", "GD", "BT", "PTP", "PTK", "PGD", "PBT"].includes(posCode) ||
+          posName.includes("trưởng") ||
+          posName.includes("phó") ||
+          posName.includes("giám đốc"))
       ) {
         return true;
       }
