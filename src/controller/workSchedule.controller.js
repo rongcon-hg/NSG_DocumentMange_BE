@@ -275,14 +275,14 @@ exports.getWorkSchedules = async (req, res) => {
     }
 
     // 5. Xác định thứ tự sắp xếp:
-    // - Với tab 'upcoming': sắp xếp startDate tăng dần, startTime tăng dần (ngày hiện tại sẽ lên trên cùng)
-    // - Với tab 'past': sắp xếp startDate giảm dần, startTime giảm dần
-    // - Với tab 'my_registered' hoặc 'pending': sắp xếp ngày diễn ra mới nhất lên đầu (startDate giảm dần), nếu cùng ngày thì startTime giảm dần, createdAt giảm dần
+    // - Với tab 'upcoming': sắp xếp startDate tăng dần, startTime tăng dần (sớm nhất đến trễ nhất)
+    // - Với tab 'past': sắp xếp startDate giảm dần, startTime tăng dần (sớm nhất đến trễ nhất trong mỗi ngày)
+    // - Với tab 'my_registered' hoặc 'pending': sắp xếp ngày diễn ra mới nhất lên đầu (startDate giảm dần), nếu cùng ngày thì startTime tăng dần (từ sáng đến chiều)
     let sortOption = { startDate: 1, startTime: 1 };
     if (tab === "past") {
-      sortOption = { startDate: -1, startTime: -1 };
+      sortOption = { startDate: -1, startTime: 1 };
     } else if (tab === "my_registered" || tab === "pending") {
-      sortOption = { startDate: -1, startTime: -1, createdAt: -1 };
+      sortOption = { startDate: -1, startTime: 1, createdAt: -1 };
     }
 
     // Giới hạn tối đa 50 lịch công tác mới nhất để tối ưu hiệu năng và hiển thị

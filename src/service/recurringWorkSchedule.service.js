@@ -110,7 +110,9 @@ const generateSingleScheduleFromRecurring = async (
     });
 
     if (existing) {
-      console.log(`[RecurringSchedule] Lịch "${recSchedule.content.substring(0, 30)}" đã tồn tại ngày ${startStr}, bỏ qua.`);
+      console.log(`[RecurringSchedule] Lịch "${recSchedule.content.substring(0, 30)}" đã tồn tại ngày ${startStr}, cập nhật nextRunDate tiếp theo.`);
+      recSchedule.nextRunDate = calculateNextRunDate(recSchedule, runDate);
+      await recSchedule.save();
       return existing;
     }
 
@@ -188,23 +190,37 @@ const executeRecurringWorkSchedulesGeneration = async () => {
     let generatedCount = 0;
     for (const template of activeTemplates) {
       try {
-        let currentTargetDate = template.nextRunDate || new Date();
+        let currentTargetDate = template.nextRunDate;
+        if (!currentTargetDate) {
+          currentTargetDate = calculateNextRunDate(template, new Date());
+          template.nextRunDate = currentTargetDate;
+          await template.save();
+        }
         
         // Vòng lặp sinh lịch cho đến khi nextRunDate vượt quá ngưỡng nhìn trước (horizonDate)
-        // Điều này đảm bảo nếu có nhiều sự kiện trong tuần tới (hoặc tuần kế tiếp) đều được sinh trước đầy đủ
+        // Cho phép tối đa 20 vòng lặp để bắt kịp nếu có ngày trong quá khứ bị bỏ lỡ
         let loopLimit = 0;
-        while (currentTargetDate && currentTargetDate <= horizonDate && loopLimit < 5) {
+        while (currentTargetDate && currentTargetDate <= horizonDate && loopLimit < 20) {
           loopLimit++;
+          const prevTime = new Date(currentTargetDate).getTime();
           await generateSingleScheduleFromRecurring(template, currentTargetDate);
           generatedCount++;
-          currentTargetDate = template.nextRunDate;
+
+          let nextDate = template.nextRunDate;
+          // Nếu nextRunDate không tự động tiến lên (hoặc bị trùng), ép buộc tính ngày tiếp theo
+          if (!nextDate || new Date(nextDate).getTime() <= prevTime) {
+            nextDate = calculateNextRunDate(template, currentTargetDate);
+            template.nextRunDate = nextDate;
+            await template.save();
+          }
+          currentTargetDate = nextDate;
         }
       } catch (e) {
         console.error(`Lỗi sinh lịch cho mẫu ${template._id}:`, e.message);
       }
     }
 
-    console.log(`[RecurringSchedule Cron] Đã sinh thành công ${generatedCount} lịch công tác.`);
+    console.log(`[RecurringSchedule Cron] Đã hoàn tất, xử lý/sinh thành công ${generatedCount} lượt lịch công tác.`);
     return { success: true, count: generatedCount };
   } catch (error) {
     console.error("[RecurringSchedule Cron] Lỗi khi quét sinh lịch định kỳ:", error);

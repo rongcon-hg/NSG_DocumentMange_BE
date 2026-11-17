@@ -222,6 +222,17 @@ app.get("/test", (req, res) => {
       await connection();
       zaloOAService.startBotPolling();
 
+      // Tự động quét kiểm tra & sinh Công việc & Lịch công tác định kỳ khi server khởi động
+      setTimeout(async () => {
+        try {
+          console.log(">>> [Startup] Tự động quét lịch công tác & công việc định kỳ...");
+          await executeRecurringWorkSchedulesGeneration();
+          await executeRecurringTasksGeneration();
+        } catch (err) {
+          console.error("Lỗi khi quét định kỳ lúc khởi động:", err);
+        }
+      }, 5000);
+
       if (process.env.NODE_ENV !== 'production') {
         app.listen(port, () => {
           console.log(`Ứng dụng mẫu đang nghe trên cổng http://localhost:${port}`);
@@ -269,7 +280,7 @@ cron.schedule('5 0 * * *', async () => {
     await executeMeetingReminders();
     await executeAutoBackup();
     console.log('--- Hoàn tất Cron Jobs ---');
-});
+}, { timezone: 'Asia/Ho_Chi_Minh' });
 
 // Chạy hàng ngày vào lúc 06:30 sáng (Tự động sinh Công việc Định kỳ, Lịch công tác định kỳ & Nhắc việc Kế hoạch quý buổi sáng)
 cron.schedule('30 6 * * *', async () => {
@@ -280,6 +291,6 @@ cron.schedule('30 6 * * *', async () => {
     await autoUpdateEffectiveStatuses();
     await executeMeetingReminders();
     console.log('--- Hoàn tất sinh Công việc & Lịch công tác định kỳ ---');
-});
+}, { timezone: 'Asia/Ho_Chi_Minh' });
 
 module.exports = app;
