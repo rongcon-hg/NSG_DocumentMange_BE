@@ -36,4 +36,11 @@ router.put("/bookings/:id/trip-status", vehicleController.updateTripStatus); // 
 router.put("/bookings/:id/cancel", vehicleController.cancelBooking); // Hủy đơn
 router.delete("/bookings/:id", vehicleController.deleteBooking); // Xóa đơn (Admin)
 
+// ==========================================
+// 4. Định vị, Khoảng cách & Tối ưu lộ trình (Routing)
+// ==========================================
+router.post("/routing/calculate", vehicleController.calculateRoute);
+router.post("/routing/optimize", vehicleController.optimizeRoute);
+router.get("/routing/geocode", vehicleController.geocodeAddress);
+
 module.exports = router;

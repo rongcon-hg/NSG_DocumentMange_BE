@@ -78,6 +78,35 @@ const vehicleBookingSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    // Lộ trình chi tiết đa chặng & định vị (Waypoints)
+    waypoints: [
+      {
+        order: { type: Number, default: 1 },
+        name: { type: String, default: "" }, // Tên điểm (Trụ sở chính, Sở GD&ĐT...)
+        address: { type: String, required: true }, // Địa chỉ cụ thể
+        lat: { type: Number, default: null }, // Vĩ độ
+        lng: { type: Number, default: null }, // Kinh độ
+        isRoundTripReturn: { type: Boolean, default: false }, // Điểm quay về của chuyến khứ hồi
+      },
+    ],
+    totalDistanceKm: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    isRoundTrip: {
+      type: Boolean,
+      default: true,
+    },
+    estimatedDurationMinutes: {
+      type: Number,
+      default: 0,
+    },
+    distanceCalculationMethod: {
+      type: String,
+      enum: ["ROUTING_API", "MANUAL", "ESTIMATED"],
+      default: "ROUTING_API",
+    },
     departureTime: {
       type: Date, // Thời gian xuất phát
       required: [true, "Thời gian xuất phát là bắt buộc"],

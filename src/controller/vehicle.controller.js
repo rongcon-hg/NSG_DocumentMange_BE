@@ -4,6 +4,7 @@ const VehicleBooking = require("../models/vehicleBooking.model");
 const User = require("../models/user.model");
 const Department = require("../models/department.model");
 const emailService = require("../service/NodeMailer.service/email");
+const routingService = require("../service/routing.service");
 
 // -------------------------------------------------------------
 // Helper: Gửi email thông báo đơn đăng ký xe cho BGH
@@ -243,9 +244,14 @@ const createBooking = async (req, res) => {
       requiredSeats,
       notes,
       targetApprover,
+      waypoints,
+      totalDistanceKm,
+      isRoundTrip,
+      estimatedDurationMinutes,
+      distanceCalculationMethod,
     } = req.body;
 
-    if (!purpose || !route || !departureTime || !estimatedReturnTime || !targetApprover) {
+    if (!purpose || (!route && (!waypoints || waypoints.length === 0)) || !departureTime || !estimatedReturnTime || !targetApprover) {
       return res.status(400).json({
         success: false,
         message: "Vui lòng điền đầy đủ các thông tin bắt buộc: Mục đích, Lộ trình, Ngày xuất phát, Ngày về và BGH duyệt",
@@ -255,6 +261,29 @@ const createBooking = async (req, res) => {
     const approver = await User.findById(targetApprover);
     if (!approver) {
       return res.status(400).json({ success: false, message: "Người duyệt (BGH) được chọn không tồn tại" });
+    }
+
+    // Tự động chuẩn hóa chuỗi lộ trình từ waypoints nếu có
+    let finalRoute = (route || "").trim();
+    let finalDepartureLocation = departureLocation || "Trường Cao đẳng Bách khoa Nam Sài Gòn";
+    let finalDestination = destination || "";
+
+    if (Array.isArray(waypoints) && waypoints.length > 0) {
+      finalDepartureLocation = waypoints[0]?.name || waypoints[0]?.address || finalDepartureLocation;
+      const nonReturnStops = waypoints.filter((w) => !w.isRoundTripReturn);
+      if (nonReturnStops.length > 1) {
+        finalDestination = nonReturnStops[nonReturnStops.length - 1]?.name || nonReturnStops[nonReturnStops.length - 1]?.address || finalDestination;
+      } else {
+        finalDestination = waypoints[waypoints.length - 1]?.name || waypoints[waypoints.length - 1]?.address || finalDestination;
+      }
+
+      if (!finalRoute) {
+        const stopNames = waypoints.map((w) => w.name || w.address);
+        finalRoute = stopNames.join(" ➔ ");
+        if (totalDistanceKm && Number(totalDistanceKm) > 0) {
+          finalRoute += ` (~${totalDistanceKm} km)`;
+        }
+      }
     }
 
     // Nếu tài khoản Manager/Admin đăng ký hộ cho Cấp trưởng
@@ -289,9 +318,14 @@ const createBooking = async (req, res) => {
       passengersCount: Number(passengersCount) || 1,
       passengerNames: passengerNames || "",
       purpose: purpose.trim(),
-      route: route.trim(),
-      departureLocation: departureLocation || "Trường Cao đẳng Bách khoa Nam Sài Gòn",
-      destination: destination || "",
+      route: finalRoute,
+      departureLocation: finalDepartureLocation,
+      destination: finalDestination,
+      waypoints: Array.isArray(waypoints) ? waypoints : [],
+      totalDistanceKm: Number(totalDistanceKm) || 0,
+      isRoundTrip: isRoundTrip !== false,
+      estimatedDurationMinutes: Number(estimatedDurationMinutes) || 0,
+      distanceCalculationMethod: distanceCalculationMethod || "ROUTING_API",
       departureTime: new Date(departureTime),
       departureHour: departureHour || "",
       estimatedReturnTime: new Date(estimatedReturnTime),
@@ -367,6 +401,11 @@ const updateBooking = async (req, res) => {
       route,
       departureLocation,
       destination,
+      waypoints,
+      totalDistanceKm,
+      isRoundTrip,
+      estimatedDurationMinutes,
+      distanceCalculationMethod,
       departureTime,
       departureHour,
       estimatedReturnTime,
@@ -376,7 +415,28 @@ const updateBooking = async (req, res) => {
       targetApprover,
     } = req.body;
 
-    if (!purpose || !route || !departureTime || !estimatedReturnTime || !targetApprover) {
+    let finalRoute = (route || "").trim();
+    let finalDepartureLocation = departureLocation ? departureLocation.trim() : "";
+    let finalDestination = destination ? destination.trim() : "";
+
+    if (waypoints && Array.isArray(waypoints) && waypoints.length > 0) {
+      if (!finalDepartureLocation && waypoints[0]) {
+        finalDepartureLocation = waypoints[0].name || waypoints[0].address || "";
+      }
+      if (!finalDestination && waypoints.length > 1) {
+        const lastWp = waypoints[waypoints.length - 1];
+        finalDestination = lastWp.name || lastWp.address || "";
+      }
+      if (!finalRoute) {
+        const stopNames = waypoints.map((w) => w.name || w.address);
+        finalRoute = stopNames.join(" ➔ ");
+        if (totalDistanceKm && Number(totalDistanceKm) > 0) {
+          finalRoute += ` (~${totalDistanceKm} km)`;
+        }
+      }
+    }
+
+    if (!purpose || !finalRoute || !departureTime || !estimatedReturnTime || !targetApprover) {
       return res.status(400).json({
         success: false,
         message: "Vui lòng điền đầy đủ các thông tin bắt buộc: Mục đích, Lộ trình, Ngày xuất phát, Ngày về và BGH duyệt",
@@ -416,9 +476,24 @@ const updateBooking = async (req, res) => {
     booking.passengersCount = Number(passengersCount) || 1;
     booking.passengerNames = passengerNames !== undefined ? passengerNames : booking.passengerNames;
     booking.purpose = purpose.trim();
-    booking.route = route.trim();
-    booking.departureLocation = departureLocation || booking.departureLocation;
-    booking.destination = destination !== undefined ? destination : booking.destination;
+    booking.route = finalRoute;
+    booking.departureLocation = finalDepartureLocation || booking.departureLocation;
+    booking.destination = finalDestination !== undefined ? finalDestination : booking.destination;
+    if (waypoints !== undefined && Array.isArray(waypoints)) {
+      booking.waypoints = waypoints;
+    }
+    if (totalDistanceKm !== undefined) {
+      booking.totalDistanceKm = Number(totalDistanceKm) || 0;
+    }
+    if (isRoundTrip !== undefined) {
+      booking.isRoundTrip = isRoundTrip !== false;
+    }
+    if (estimatedDurationMinutes !== undefined) {
+      booking.estimatedDurationMinutes = Number(estimatedDurationMinutes) || 0;
+    }
+    if (distanceCalculationMethod !== undefined) {
+      booking.distanceCalculationMethod = distanceCalculationMethod;
+    }
     booking.departureTime = new Date(departureTime);
     booking.departureHour = departureHour || booking.departureHour;
     booking.estimatedReturnTime = new Date(estimatedReturnTime);
@@ -984,6 +1059,85 @@ const getVehiclePendingCounts = async (req, res) => {
   }
 };
 
+// =============================================================
+// V. ĐỊNH VỊ, TÍNH KHOẢNG CÁCH & TỐI ƯU HÓA LỘ TRÌNH (ROUTING)
+// =============================================================
+
+// Tính toán khoảng cách & lộ trình (dùng OSRM + Haversine fallback)
+const calculateRoute = async (req, res) => {
+  try {
+    const { waypoints, isRoundTrip } = req.body;
+    if (!waypoints || !Array.isArray(waypoints) || waypoints.length < 2) {
+      return res.status(400).json({
+        success: false,
+        message: "Cần ít nhất 2 điểm (Điểm đi và Điểm đến) để tính lộ trình",
+      });
+    }
+
+    const result = await routingService.calculateRoute(waypoints, isRoundTrip !== false);
+    return res.status(200).json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    console.error("Lỗi tính toán lộ trình:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Lỗi khi tính toán lộ trình",
+    });
+  }
+};
+
+// Tối ưu hóa lộ trình ngắn nhất (TSP)
+const optimizeRoute = async (req, res) => {
+  try {
+    const { waypoints, isRoundTrip } = req.body;
+    if (!waypoints || !Array.isArray(waypoints) || waypoints.length < 3) {
+      return res.status(400).json({
+        success: false,
+        message: "Cần ít nhất 3 điểm (1 điểm xuất phát và từ 2 điểm đến trở lên) để tối ưu lộ trình",
+      });
+    }
+
+    const result = await routingService.optimizeRoute(waypoints, isRoundTrip !== false);
+    return res.status(200).json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    console.error("Lỗi tối ưu hóa lộ trình:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Lỗi khi tối ưu hóa lộ trình",
+    });
+  }
+};
+
+// Tìm kiếm tọa độ / gợi ý địa chỉ (Geocoding)
+const geocodeAddress = async (req, res) => {
+  try {
+    const { q } = req.query;
+    if (!q || !q.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Vui lòng nhập từ khóa tìm kiếm địa chỉ",
+      });
+    }
+
+    const results = await routingService.geocodeAddress(q.trim());
+    return res.status(200).json({
+      success: true,
+      data: results,
+    });
+  } catch (error) {
+    console.error("Lỗi tìm kiếm địa chỉ:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Lỗi khi tìm kiếm địa chỉ",
+    });
+  }
+};
+
 module.exports = {
   // Vehicle CRUD
   getAllVehicles,
@@ -1008,4 +1162,9 @@ module.exports = {
   cancelBooking,
   deleteBooking,
   getVehiclePendingCounts,
+
+  // Routing & Optimization
+  calculateRoute,
+  optimizeRoute,
+  geocodeAddress,
 };
