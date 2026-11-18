@@ -1,4 +1,54 @@
-const axios = require("axios");
+const https = require("https");
+
+/**
+ * Helper gọi API trả về JSON không phụ thuộc thư viện ngoài (sử dụng fetch hoặc https)
+ */
+const fetchJson = async (url, options = {}) => {
+  if (typeof fetch === "function") {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), options.timeout || 5000);
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        headers: options.headers || { "User-Agent": "NSG-Vehicle-Routing/1.0" },
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      if (!res.ok) throw new Error(`HTTP error ${res.status}`);
+      return await res.json();
+    } catch (e) {
+      clearTimeout(timeout);
+      throw e;
+    }
+  }
+
+  // Fallback bằng native https module của Node.js
+  return new Promise((resolve, reject) => {
+    const req = https.get(
+      url,
+      {
+        headers: options.headers || { "User-Agent": "NSG-Vehicle-Routing/1.0" },
+        timeout: options.timeout || 5000,
+      },
+      (res) => {
+        let rawData = "";
+        res.on("data", (chunk) => (rawData += chunk));
+        res.on("end", () => {
+          try {
+            resolve(JSON.parse(rawData));
+          } catch (e) {
+            reject(e);
+          }
+        });
+      }
+    );
+    req.on("error", reject);
+    req.on("timeout", () => {
+      req.destroy();
+      reject(new Error("Request timeout"));
+    });
+  });
+};
 
 /**
  * Tính khoảng cách đường chim bay (Haversine formula) giữa 2 tọa độ (km)
@@ -34,13 +84,13 @@ const getOsrmRoute = async (coordinates) => {
     const coordsStr = coordinates.map((c) => `${c[0]},${c[1]}`).join(";");
     const url = `https://router.project-osrm.org/route/v1/driving/${coordsStr}?overview=false&steps=false`;
 
-    const res = await axios.get(url, {
+    const data = await fetchJson(url, {
       timeout: 4000,
       headers: { "User-Agent": "NSG-Vehicle-Routing/1.0" },
     });
 
-    if (res.data && res.data.code === "Ok" && res.data.routes && res.data.routes[0]) {
-      const route = res.data.routes[0];
+    if (data && data.code === "Ok" && data.routes && data.routes[0]) {
+      const route = data.routes[0];
       const totalDistanceKm = Math.round((route.distance / 1000) * 10) / 10;
       const durationMinutes = Math.round(route.duration / 60);
 
@@ -251,13 +301,13 @@ const geocodeAddress = async (query = "") => {
   try {
     // Ưu tiên gọi Photon API (nhanh, tối ưu tìm kiếm địa danh)
     const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(cleanQuery)}&limit=5&lang=vi`;
-    const res = await axios.get(url, {
+    const data = await fetchJson(url, {
       timeout: 3000,
       headers: { "User-Agent": "NSG-Vehicle-Geocode/1.0" },
     });
 
-    if (res.data && res.data.features && res.data.features.length > 0) {
-      return res.data.features.map((f) => {
+    if (data && data.features && data.features.length > 0) {
+      return data.features.map((f) => {
         const props = f.properties || {};
         const coords = f.geometry?.coordinates || [0, 0];
         const nameParts = [props.name, props.street, props.district, props.city || props.county, props.state]
@@ -282,13 +332,13 @@ const geocodeAddress = async (query = "") => {
       cleanQuery
     )}&countrycodes=vn&limit=5`;
 
-    const res = await axios.get(nominatimUrl, {
+    const data = await fetchJson(nominatimUrl, {
       timeout: 3000,
       headers: { "User-Agent": "NSG-Vehicle-Geocode/1.0" },
     });
 
-    if (Array.isArray(res.data) && res.data.length > 0) {
-      return res.data.map((item) => ({
+    if (Array.isArray(data) && data.length > 0) {
+      return data.map((item) => ({
         name: item.name || cleanQuery,
         address: item.display_name,
         lat: parseFloat(item.lat),
