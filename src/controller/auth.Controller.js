@@ -39,17 +39,35 @@ const determineRoleByPosition = (posDoc, currentRole = "staff") => {
     return currentRole === "manager" ? "manager" : "chuyenvien";
   }
 
-  // 1. Kiểm tra Cấp phó trước (ưu tiên cao nhất để không bị nhầm bởi chữ 'trưởng' trong 'phó trưởng phòng/khoa')
-  const isPho =
-    ["PTK", "PTP", "PBT", "PGD"].includes(posCode) ||
-    posName.includes("phó") ||
-    /phó\s+(trưởng|giám đốc|bí thư|khoa|phòng)/i.test(posName);
+  // 1. Nhóm vị trí chuyên môn / nội bộ: Tổ trưởng/Tổ phó tổ chuyên môn, Tổ bộ môn, Giảng viên, Chuyên viên, Nhân viên
+  // Những chức danh này thuộc nhóm GV-VC (chuyenvien), TUYỆT ĐỐI không phải là Cấp trưởng/Cấp phó đơn vị
+  const isInternalTeamOrStaff =
+    posName.includes("tổ trưởng") ||
+    posName.includes("tổ phó") ||
+    posName.includes("tổ chuyên môn") ||
+    posName.includes("bộ môn") ||
+    posName.includes("tổ bộ môn") ||
+    posName.includes("tổ công đoàn") ||
+    posName.includes("tổ văn phòng") ||
+    posName.includes("tổ phục vụ") ||
+    ["TTCM", "TPCM", "TTBM", "TPBM", "TCM", "BM", "GV", "CV", "NV"].includes(posCode) ||
+    /^(giảng viên|chuyên viên|nhân viên|viên chức|kế toán|thủ quỹ|văn thư|thư ký|bảo vệ|tạp vụ)/i.test(posName);
 
-  if (isPho) {
-    return "cappho";
+  if (isInternalTeamOrStaff) {
+    return currentRole === "manager" ? "manager" : "chuyenvien";
   }
 
-  // 2. Ban Giám hiệu đương nhiệm: nếu đang là manager thì giữ manager, còn lại staff
+  // 2. Kiểm tra Cấp phó đơn vị (ưu tiên kiểm tra trước Cấp trưởng)
+  const isPho =
+    ["PTK", "PTP", "PBT", "PGD", "PTB"].includes(posCode) ||
+    (posName.includes("phó") && !posName.includes("phó hiệu trưởng")) ||
+    /phó\s+(trưởng|giám đốc|bí thư|khoa|phòng|ban|trung tâm)/i.test(posName);
+
+  if (isPho) {
+    return currentRole === "manager" ? "manager" : "cappho";
+  }
+
+  // 3. Ban Giám hiệu đương nhiệm: nếu đang là manager thì giữ manager, còn lại staff
   const isBgh =
     ["HT", "PHT", "QHT"].includes(posCode) ||
     posName.includes("quyền hiệu trưởng") ||
@@ -60,28 +78,24 @@ const determineRoleByPosition = (posDoc, currentRole = "staff") => {
     return currentRole === "manager" ? "manager" : "staff";
   }
 
-  // 3. Cấp trưởng đơn vị (Trưởng phòng, Trưởng khoa, Giám đốc, Bí thư Đoàn)
+  // 4. Cấp trưởng đơn vị (Trưởng phòng, Trưởng khoa, Giám đốc trung tâm, Bí thư Đoàn, Trưởng ban)
   const isTruong =
-    ["TP", "TK", "GD", "BT"].includes(posCode) ||
-    /^(trưởng\s+(phòng|khoa|ban|trung tâm)|giám đốc|bí thư\s+đoàn)/i.test(posName) ||
-    (posName.includes("trưởng") && !posName.includes("phó") && !posName.includes("hiệu trưởng"));
+    ["TP", "TK", "GD", "BT", "TB"].includes(posCode) ||
+    /^(trưởng\s+(phòng|khoa|ban|trung tâm|trạm)|giám đốc|bí thư\s+đoàn)/i.test(posName) ||
+    (posName.includes("trưởng phòng") ||
+     posName.includes("trưởng khoa") ||
+     posName.includes("trưởng ban") ||
+     posName.includes("trưởng trung tâm") ||
+     posName.includes("giám đốc") ||
+     posName.includes("bí thư đoàn"));
 
   if (isTruong) {
     return currentRole === "manager" ? "manager" : "staff";
   }
 
-  // 4. Các vị trí chuyên môn / nhân viên / giảng viên
-  const isChuyenVienOrGiangVien =
-    ["GV", "CV", "NV"].includes(posCode) ||
-    /^(giảng viên|chuyên viên|nhân viên|viên chức)/i.test(posName);
-
-  if (isChuyenVienOrGiangVien) {
-    return "chuyenvien";
-  }
-
-  // Nếu người dùng đang là manager thì giữ manager, ngược lại giữ nguyên hoặc staff
+  // Nếu người dùng đang là manager thì giữ manager, ngược lại mặc định là chuyenvien (GV-VC)
   if (currentRole === "manager") return "manager";
-  return currentRole || "staff";
+  return "chuyenvien";
 };
 
 const createUser = async (req,res)=>{
@@ -435,6 +449,30 @@ const upadteInfo = async (req, res) => {
 
   
       await user.save();
+
+      // Tự động đồng bộ quyền truy cập văn bản / công việc liên quan sau khi cập nhật đơn vị:
+      if (user.department && updatedData.department !== undefined) {
+        try {
+          const Document = require("../models/document.model");
+          const deptDocs = await Document.find({
+            "executors": { $elemMatch: { executorType: "Department", executorId: user.department } },
+            "assignedToUsers.userId": { $ne: user._id }
+          }).select("_id assignedToUsers deadlineDay");
+
+          for (const doc of deptDocs) {
+            doc.assignedToUsers.push({
+              userId: user._id,
+              status: "received",
+              isRead: false,
+              receivedDate: null,
+              onTime: doc.deadlineDay ? "pending" : "onTime"
+            });
+            await doc.save();
+          }
+        } catch (syncErr) {
+          console.warn("Lỗi tự động đồng bộ văn bản của đơn vị mới cho người dùng:", syncErr.message);
+        }
+      }
 
       const userResponse = user.toObject();
       delete userResponse.password;
