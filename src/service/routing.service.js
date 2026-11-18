@@ -146,16 +146,46 @@ const calculateRoute = async (waypoints = [], isRoundTrip = true) => {
   if (!Array.isArray(waypoints) || waypoints.length === 0) {
     return {
       totalDistanceKm: 0,
+      estimatedDurationMinutes: 0,
       durationMinutes: 0,
       segments: [],
+      legs: [],
       waypoints: [],
+      method: "MANUAL",
     };
   }
 
-  // Lọc các điểm hợp lệ có address
+  // Lọc các điểm hợp lệ có address hoặc name
   let points = waypoints.filter((w) => w && (w.address || w.name));
   if (points.length === 0) {
-    return { totalDistanceKm: 0, durationMinutes: 0, segments: [], waypoints: [] };
+    return {
+      totalDistanceKm: 0,
+      estimatedDurationMinutes: 0,
+      durationMinutes: 0,
+      segments: [],
+      legs: [],
+      waypoints: [],
+      method: "MANUAL",
+    };
+  }
+
+  // Tự động tìm kiếm tọa độ (Geocoding) nếu có điểm chưa có lat/lng
+  for (let i = 0; i < points.length; i++) {
+    if (!points[i].lat || !points[i].lng) {
+      const q = points[i].address || points[i].name;
+      if (q && q.trim()) {
+        try {
+          const geo = await geocodeAddress(q.trim());
+          if (geo && geo.length > 0 && geo[0].lat && geo[0].lng) {
+            points[i].lat = geo[0].lat;
+            points[i].lng = geo[0].lng;
+            if (!points[i].name) points[i].name = geo[0].name;
+          }
+        } catch (e) {
+          // ignore error
+        }
+      }
+    }
   }
 
   // Nếu chọn khứ hồi và điểm cuối chưa phải là điểm xuất phát, tự động thêm điểm quay về
@@ -164,7 +194,7 @@ const calculateRoute = async (waypoints = [], isRoundTrip = true) => {
     const lastPoint = points[points.length - 1];
     const isSameAsOrigin =
       lastPoint.isRoundTripReturn ||
-      (lastPoint.address && lastPoint.address.trim().toLowerCase() === origin.address.trim().toLowerCase());
+      (lastPoint.address && origin.address && lastPoint.address.trim().toLowerCase() === origin.address.trim().toLowerCase());
 
     if (!isSameAsOrigin) {
       points = [
@@ -186,19 +216,26 @@ const calculateRoute = async (waypoints = [], isRoundTrip = true) => {
 
   // Trích xuất tọa độ để gửi OSRM
   const validCoords = points.filter((p) => p.lat && p.lng);
-  if (validCoords.length >= 2 && validCoords.length === points.length) {
-    const coords = points.map((p) => [Number(p.lng), Number(p.lat)]);
+  if (validCoords.length >= 2) {
+    const coords = validCoords.map((p) => [Number(p.lng), Number(p.lat)]);
     const routeRes = await getOsrmRoute(coords);
     return {
       ...routeRes,
+      totalDistanceKm: routeRes.totalDistanceKm || 0,
+      estimatedDurationMinutes: routeRes.durationMinutes || Math.round((routeRes.totalDistanceKm || 0) * 2.5),
+      durationMinutes: routeRes.durationMinutes || 0,
+      segments: routeRes.segments || [],
+      legs: routeRes.segments || [],
       waypoints: points,
     };
   }
 
   return {
     totalDistanceKm: 0,
+    estimatedDurationMinutes: 0,
     durationMinutes: 0,
     segments: [],
+    legs: [],
     waypoints: points,
     method: "MANUAL",
   };
@@ -214,79 +251,154 @@ const calculateRoute = async (waypoints = [], isRoundTrip = true) => {
  */
 const optimizeRoute = async (waypoints = [], isRoundTrip = true) => {
   if (!Array.isArray(waypoints) || waypoints.length <= 2) {
-    return calculateRoute(waypoints, isRoundTrip);
+    const calc = await calculateRoute(waypoints, isRoundTrip);
+    const editable = (calc.waypoints || []).filter((w) => !w.isRoundTripReturn).map((w, idx) => ({ ...w, order: idx }));
+    return {
+      ...calc,
+      optimizedWaypoints: editable,
+      savedDistanceKm: 0,
+      legs: calc.segments || [],
+    };
   }
 
-  const origin = waypoints[0];
-  // Lấy danh sách các điểm trung gian (loại trừ điểm xuất phát và điểm quay về khứ hồi cũ nếu có)
-  const intermediateStops = waypoints.slice(1).filter((w) => !w.isRoundTripReturn);
+  // Lọc các điểm hợp lệ
+  let validPoints = waypoints.filter((w) => w && (w.address || w.name));
+  if (validPoints.length <= 2) {
+    const calc = await calculateRoute(validPoints, isRoundTrip);
+    const editable = (calc.waypoints || []).filter((w) => !w.isRoundTripReturn).map((w, idx) => ({ ...w, order: idx }));
+    return {
+      ...calc,
+      optimizedWaypoints: editable,
+      savedDistanceKm: 0,
+      legs: calc.segments || [],
+    };
+  }
+
+  // Tự động tìm kiếm tọa độ (Geocoding) nếu có điểm chưa có lat/lng
+  for (let i = 0; i < validPoints.length; i++) {
+    if (!validPoints[i].lat || !validPoints[i].lng) {
+      const q = validPoints[i].address || validPoints[i].name;
+      if (q && q.trim()) {
+        try {
+          const geo = await geocodeAddress(q.trim());
+          if (geo && geo.length > 0 && geo[0].lat && geo[0].lng) {
+            validPoints[i].lat = geo[0].lat;
+            validPoints[i].lng = geo[0].lng;
+            if (!validPoints[i].name) validPoints[i].name = geo[0].name;
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+    }
+  }
+
+  const origin = validPoints[0];
+  const intermediateStops = validPoints.slice(1).filter((w) => !w.isRoundTripReturn);
 
   if (intermediateStops.length <= 1) {
-    return calculateRoute(waypoints, isRoundTrip);
+    const calc = await calculateRoute(validPoints, isRoundTrip);
+    const editable = (calc.waypoints || []).filter((w) => !w.isRoundTripReturn).map((w, idx) => ({ ...w, order: idx }));
+    return {
+      ...calc,
+      optimizedWaypoints: editable,
+      savedDistanceKm: 0,
+      legs: calc.segments || [],
+    };
   }
 
-  // Nếu số điểm trung gian <= 6, thử tất cả hoán vị (Brute-force Permutations) để tìm lời giải tối ưu tuyệt đối
-  if (intermediateStops.length <= 6) {
+  // Hàm tính khoảng cách giữa 2 điểm (Haversine)
+  const getDist = (p1, p2) => {
+    if (p1 && p2 && p1.lat && p1.lng && p2.lat && p2.lng) {
+      return calculateHaversineDistance(p1.lat, p1.lng, p2.lat, p2.lng);
+    }
+    return 2.0; // fallback mặc định nếu chưa có tọa độ
+  };
+
+  // Hàm tính tổng cự ly của 1 cấu hình dừng
+  const evalRouteDistance = (stops) => {
+    let dist = getDist(origin, stops[0]);
+    for (let i = 0; i < stops.length - 1; i++) {
+      dist += getDist(stops[i], stops[i + 1]);
+    }
+    if (isRoundTrip) {
+      dist += getDist(stops[stops.length - 1], origin);
+    }
+    return dist;
+  };
+
+  let bestPerm = intermediateStops;
+
+  if (intermediateStops.length <= 7) {
+    // Hoán vị brute-force trong bộ nhớ (< 1ms, không tốn network call)
     const permute = (arr) => {
       if (arr.length <= 1) return [arr];
       const result = [];
       for (let i = 0; i < arr.length; i++) {
-        const current = arr[i];
-        const remaining = arr.slice(0, i).concat(arr.slice(i + 1));
-        const remainingPerms = permute(remaining);
-        for (const p of remainingPerms) {
-          result.push([current, ...p]);
+        const cur = arr[i];
+        const rem = arr.slice(0, i).concat(arr.slice(i + 1));
+        for (const p of permute(rem)) {
+          result.push([cur, ...p]);
         }
       }
       return result;
     };
 
-    const allPermutations = permute(intermediateStops);
-    let bestWaypoints = null;
-    let bestDistance = Infinity;
-    let bestResult = null;
+    const allPerms = permute(intermediateStops);
+    let minDistance = Infinity;
 
-    for (const perm of allPermutations) {
-      const candidateList = [origin, ...perm];
-      const candidateResult = await calculateRoute(candidateList, isRoundTrip);
-      if (candidateResult.totalDistanceKm < bestDistance) {
-        bestDistance = candidateResult.totalDistanceKm;
-        bestWaypoints = candidateResult.waypoints;
-        bestResult = candidateResult;
+    for (const p of allPerms) {
+      const d = evalRouteDistance(p);
+      if (d < minDistance) {
+        minDistance = d;
+        bestPerm = p;
       }
     }
+  } else {
+    // Thuật toán Tham lam (Nearest Neighbor) nếu nhiều hơn 7 điểm
+    let unvisited = [...intermediateStops];
+    let current = origin;
+    const ordered = [];
 
-    return bestResult || calculateRoute(waypoints, isRoundTrip);
-  }
-
-  // Nếu nhiều hơn 6 điểm, dùng giải thuật Tham lam (Nearest Neighbor)
-  let unvisited = [...intermediateStops];
-  let current = origin;
-  const orderedStops = [];
-
-  while (unvisited.length > 0) {
-    let nearestIdx = 0;
-    let shortestDist = Infinity;
-
-    for (let i = 0; i < unvisited.length; i++) {
-      const target = unvisited[i];
-      let dist = 0;
-      if (current.lat && current.lng && target.lat && target.lng) {
-        dist = calculateHaversineDistance(current.lat, current.lng, target.lat, target.lng);
+    while (unvisited.length > 0) {
+      let nearestIdx = 0;
+      let shortest = Infinity;
+      for (let i = 0; i < unvisited.length; i++) {
+        const d = getDist(current, unvisited[i]);
+        if (d < shortest) {
+          shortest = d;
+          nearestIdx = i;
+        }
       }
-      if (dist < shortestDist) {
-        shortestDist = dist;
-        nearestIdx = i;
-      }
+      const nextPoint = unvisited.splice(nearestIdx, 1)[0];
+      ordered.push(nextPoint);
+      current = nextPoint;
     }
-
-    const nextStop = unvisited.splice(nearestIdx, 1)[0];
-    orderedStops.push(nextStop);
-    current = nextStop;
+    bestPerm = ordered;
   }
 
-  const finalWaypoints = [origin, ...orderedStops];
-  return calculateRoute(finalWaypoints, isRoundTrip);
+  // Danh sách các điểm dừng đã tối ưu theo thứ tự (không bao gồm chặng khứ hồi về)
+  const winningWaypoints = [origin, ...bestPerm].map((w, idx) => ({ ...w, order: idx }));
+
+  // Chỉ gọi calculateRoute đúng 2 lần (lộ trình ban đầu và lộ trình tối ưu) để lấy OSRM đường bộ chính xác
+  const [originalResult, optimizedResult] = await Promise.all([
+    calculateRoute(validPoints, isRoundTrip),
+    calculateRoute(winningWaypoints, isRoundTrip),
+  ]);
+
+  const origKm = originalResult.totalDistanceKm || 0;
+  const optKm = optimizedResult.totalDistanceKm || 0;
+  const savedDistanceKm = Math.max(0, Math.round((origKm - optKm) * 10) / 10);
+
+  return {
+    ...optimizedResult,
+    optimizedWaypoints: winningWaypoints,
+    waypoints: optimizedResult.waypoints || winningWaypoints,
+    savedDistanceKm,
+    legs: optimizedResult.legs || optimizedResult.segments || [],
+    totalDistanceKm: optKm,
+    estimatedDurationMinutes: optimizedResult.estimatedDurationMinutes || optimizedResult.durationMinutes || 0,
+  };
 };
 
 /**
