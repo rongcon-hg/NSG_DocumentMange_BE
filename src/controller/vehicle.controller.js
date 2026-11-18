@@ -25,6 +25,40 @@ const sendVehicleBookingRegistrationEmail = async (booking, creatorUser, approve
   }
 };
 
+// Helper kiểm tra một user có thuộc BGH (Hiệu trưởng, Phó Hiệu trưởng, Q. Hiệu trưởng) hoặc Admin/Manager không
+const checkUserIsBgh = async (userId) => {
+  if (!userId) return false;
+  try {
+    const user = await User.findById(userId).populate("position department");
+    if (!user) return false;
+    const userRole = (user.role || "").toUpperCase();
+    if (userRole === "ADMIN" || userRole === "MANAGER") return true;
+
+    const posCode = (user.position?.positionCode || user.position?.abbreviation || "").toUpperCase();
+    const posName = (user.position?.positionName || user.position?.name || "").toLowerCase();
+    const deptCode = (user.department?.departmentCode || "").toUpperCase();
+    const deptName = (user.department?.departmentName || "").toLowerCase();
+
+    // Loại trừ nguyên hiệu trưởng, cựu hiệu trưởng
+    const isFormerLeader =
+      posName.includes("nguyên") ||
+      posName.includes("cựu") ||
+      ["NHT", "NPHT"].includes(posCode);
+    if (isFormerLeader) return false;
+
+    return (
+      deptCode === "BGH" ||
+      deptName.includes("giám hiệu") ||
+      ["HT", "PHT", "QHT"].includes(posCode) ||
+      posName.includes("hiệu trưởng") ||
+      posName.includes("phó hiệu trưởng")
+    );
+  } catch (err) {
+    console.error("Lỗi kiểm tra quyền BGH:", err);
+    return false;
+  }
+};
+
 // =============================================================
 // I. QUẢN LÝ DANH MỤC PHƯƠNG TIỆN (VEHICLE)
 // =============================================================
@@ -522,6 +556,9 @@ const getBookings = async (req, res) => {
     const userRole = (req.user?.role || "").toUpperCase();
     const { tab, approvalStatus, dispatchStatus, vehicleType, search, startDate, endDate, page = 1, limit = 20 } = req.query;
 
+    const isAdminOrManager = userRole === "ADMIN" || userRole === "MANAGER";
+    const isBgh = await checkUserIsBgh(userId);
+
     const query = {};
 
     // 1. Phân quyền lọc theo tab:
@@ -529,16 +566,21 @@ const getBookings = async (req, res) => {
     if (tab === "my") {
       query.$or = [{ requester: userId }, { createdBy: userId }];
     }
-    // Tab "pending_approval": Dành cho BGH duyệt (Admin/Manager xem được tất cả đơn PENDING, còn BGH xem các đơn gửi đích danh mình hoặc toàn bộ đơn chờ duyệt)
+    // Tab "pending_approval": Dành cho BGH duyệt và xem lại các đơn đã duyệt / từ chối
     else if (tab === "pending_approval") {
-      const isAdminOrManager = userRole === "ADMIN" || userRole === "MANAGER";
       if (!isAdminOrManager) {
         query.$or = [
           { targetApprover: userId },
+          { approvedBy: userId },
           { targetApprover: null },
         ];
       }
-      query.approvalStatus = "PENDING";
+      // Cho phép BGH lọc trạng thái: PENDING (mặc định), hoặc APPROVED (đã duyệt), REJECTED (từ chối), ALL (tất cả)
+      if (approvalStatus && approvalStatus !== "ALL") {
+        query.approvalStatus = approvalStatus;
+      } else if (!approvalStatus) {
+        query.approvalStatus = "PENDING";
+      }
     }
     // Tab "dispatch": Dành cho người được giao nhiệm vụ phân bổ xe hoặc QTTB/Admin/Manager
     else if (tab === "dispatch") {
@@ -546,7 +588,6 @@ const getBookings = async (req, res) => {
       // Đơn xe công nghệ thì không cần phân bổ xe (trừ khi xem ở tab all)
       query.vehicleType = { $ne: "RIDE_HAILING" };
       // Nếu không phải ADMIN hoặc MANAGER, chỉ thấy các đơn được BGH giao cho mình hoặc đơn chưa gán ai
-      const isAdminOrManager = userRole === "ADMIN" || userRole === "MANAGER";
       if (!isAdminOrManager) {
         query.$or = [
           { assignedDispatcher: userId },
@@ -564,26 +605,23 @@ const getBookings = async (req, res) => {
         query.requester = userId; // fallback
       }
     }
-    // Tab "all": Cho Admin/Manager hoặc xem tổng hợp
+    // Tab "all": Cho Admin/Manager hoặc BGH xem tất cả lịch xe của toàn trường
     else {
-      // Nếu không phải admin/manager và không phải BGH, chỉ xem đơn liên quan đến mình
-      const isAdminOrManager = userRole === "ADMIN" || userRole === "MANAGER";
-      const isBGH = ["HIỆU TRƯỞNG", "Q.HIỆU TRƯỞNG", "PHÓ HIỆU TRƯỞNG", "BGH"].some((r) =>
-        userRole.includes(r.toUpperCase())
-      );
-      if (!isAdminOrManager && !isBGH) {
+      // Nếu không phải admin/manager và KHÔNG PHẢI BGH, chỉ xem đơn liên quan đến mình
+      if (!isAdminOrManager && !isBgh) {
         // Kiểm tra xem user có phải tài xế không
         const driverRecord = await Driver.findOne({ userAccount: userId, isActive: true });
         query.$or = [
           { requester: userId },
+          { createdBy: userId },
           { assignedDispatcher: userId },
           ...(driverRecord ? [{ assignedDriver: driverRecord._id }] : []),
         ];
       }
     }
 
-    // 2. Bộ lọc trạng thái
-    if (approvalStatus && approvalStatus !== "ALL") {
+    // 2. Bộ lọc trạng thái (áp dụng khi không phải pending_approval đã xử lý ở trên)
+    if (tab !== "pending_approval" && approvalStatus && approvalStatus !== "ALL") {
       query.approvalStatus = approvalStatus;
     }
     if (dispatchStatus && dispatchStatus !== "ALL") {
@@ -793,12 +831,91 @@ const reviewBookingByBGH = async (req, res) => {
   }
 };
 
+// Kiểm tra xung đột lịch trình phân xe (Trùng lịch tài xế hoặc phương tiện)
+const checkDispatchConflicts = async (req, res) => {
+  try {
+    const { departureTime, estimatedReturnTime, excludeBookingId } = req.query;
+    if (!departureTime || !estimatedReturnTime) {
+      return res.status(400).json({ success: false, message: "Thiếu thông tin thời gian chuyến đi" });
+    }
+
+    const start = new Date(departureTime);
+    const end = new Date(estimatedReturnTime);
+
+    // Tìm các đơn xe đã phân công (ASSIGNED) hoặc đang đi (IN_PROGRESS) và đã được duyệt trong khoảng thời gian này
+    const overlapQuery = {
+      approvalStatus: "APPROVED",
+      dispatchStatus: { $in: ["ASSIGNED", "IN_PROGRESS"] },
+      departureTime: { $lte: end },
+      estimatedReturnTime: { $gte: start },
+    };
+
+    if (excludeBookingId) {
+      overlapQuery._id = { $ne: excludeBookingId };
+    }
+
+    const overlappingBookings = await VehicleBooking.find(overlapQuery)
+      .populate("assignedDriver", "fullName phone licenseNumber")
+      .populate("assignedVehicle", "name licensePlate seats vehicleType")
+      .select("bookingCode purpose route departureTime departureHour estimatedReturnTime assignedDriver assignedVehicle requesterName departmentName");
+
+    const busyDrivers = [];
+    const busyVehicles = [];
+
+    for (const b of overlappingBookings) {
+      if (b.assignedDriver) {
+        busyDrivers.push({
+          driverId: b.assignedDriver._id.toString(),
+          driverName: b.assignedDriver.fullName,
+          driverPhone: b.assignedDriver.phone,
+          bookingId: b._id,
+          bookingCode: b.bookingCode,
+          purpose: b.purpose,
+          route: b.route,
+          requesterName: b.requesterName,
+          departmentName: b.departmentName,
+          departureTime: b.departureTime,
+          departureHour: b.departureHour,
+          estimatedReturnTime: b.estimatedReturnTime,
+        });
+      }
+      if (b.assignedVehicle) {
+        busyVehicles.push({
+          vehicleId: b.assignedVehicle._id.toString(),
+          vehicleName: b.assignedVehicle.name,
+          licensePlate: b.assignedVehicle.licensePlate,
+          bookingId: b._id,
+          bookingCode: b.bookingCode,
+          purpose: b.purpose,
+          route: b.route,
+          requesterName: b.requesterName,
+          departmentName: b.departmentName,
+          departureTime: b.departureTime,
+          departureHour: b.departureHour,
+          estimatedReturnTime: b.estimatedReturnTime,
+        });
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        busyDrivers,
+        busyVehicles,
+      },
+    });
+  } catch (error) {
+    console.error("Lỗi kiểm tra xung đột phân xe:", error);
+    return res.status(500).json({ success: false, message: "Lỗi kiểm tra trùng lịch" });
+  }
+};
+
 // Điều phối xe & phân bổ tài xế (Dành cho Đơn vị Quản lý xe / Admin)
 const dispatchVehicleAndDriver = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user?.id || req.user?._id;
-    const { assignedVehicle, assignedDriver, dispatchNotes, rideHailingDetails } = req.body;
+    const { assignedVehicle, assignedDriver, dispatchNotes, rideHailingDetails, forceDispatch } = req.body;
 
     const booking = await VehicleBooking.findById(id).populate("requester", "userName fullName email phone");
     if (!booking) {
@@ -817,6 +934,51 @@ const dispatchVehicleAndDriver = async (req, res) => {
           message: "Vui lòng chọn cả Phương tiện của trường và Tài xế phân bổ",
         });
       }
+
+      // 1. Kiểm tra trùng lịch tài xế
+      const driverConflict = await VehicleBooking.findOne({
+        _id: { $ne: booking._id },
+        assignedDriver,
+        approvalStatus: "APPROVED",
+        dispatchStatus: { $in: ["ASSIGNED", "IN_PROGRESS"] },
+        departureTime: { $lte: booking.estimatedReturnTime },
+        estimatedReturnTime: { $gte: booking.departureTime },
+      }).populate("assignedDriver", "fullName phone");
+
+      if (driverConflict && !forceDispatch) {
+        const depStr = new Date(driverConflict.departureTime).toLocaleDateString("vi-VN");
+        const depH = driverConflict.departureHour || "";
+        const driverName = driverConflict.assignedDriver?.fullName || "Tài xế";
+        return res.status(400).json({
+          success: false,
+          hasConflict: true,
+          conflictType: "DRIVER",
+          message: `⚠️ Cảnh báo trùng lịch: Tài xế ${driverName} đã được phân công lái xe cho chuyến đi [${driverConflict.bookingCode}] (Lộ trình: ${driverConflict.route}) từ ${depH} ngày ${depStr}! Vui lòng chọn tài xế khác.`,
+        });
+      }
+
+      // 2. Kiểm tra trùng lịch phương tiện
+      const vehicleConflict = await VehicleBooking.findOne({
+        _id: { $ne: booking._id },
+        assignedVehicle,
+        approvalStatus: "APPROVED",
+        dispatchStatus: { $in: ["ASSIGNED", "IN_PROGRESS"] },
+        departureTime: { $lte: booking.estimatedReturnTime },
+        estimatedReturnTime: { $gte: booking.departureTime },
+      }).populate("assignedVehicle", "name licensePlate");
+
+      if (vehicleConflict && !forceDispatch) {
+        const depStr = new Date(vehicleConflict.departureTime).toLocaleDateString("vi-VN");
+        const depH = vehicleConflict.departureHour || "";
+        const vehicleInfo = `${vehicleConflict.assignedVehicle?.name || "Xe"} (${vehicleConflict.assignedVehicle?.licensePlate || ""})`;
+        return res.status(400).json({
+          success: false,
+          hasConflict: true,
+          conflictType: "VEHICLE",
+          message: `⚠️ Cảnh báo trùng lịch: Phương tiện ${vehicleInfo} đã được phân công cho chuyến đi [${vehicleConflict.bookingCode}] (Lộ trình: ${vehicleConflict.route}) từ ${depH} ngày ${depStr}! Vui lòng chọn xe khác.`,
+        });
+      }
+
       booking.assignedVehicle = assignedVehicle;
       booking.assignedDriver = assignedDriver;
     } else {
@@ -986,14 +1148,21 @@ const getVehiclePendingCounts = async (req, res) => {
       ["HT", "PHT", "QHT"].includes(posCode) ||
       ["HIỆU TRƯỞNG", "Q.HIỆU TRƯỞNG", "PHÓ HIỆU TRƯỞNG"].some((r) => userRole.includes(r));
 
-    // 2. Số lượng đơn chờ BGH duyệt
+    // 2. Số lượng đơn chờ BGH duyệt & đã duyệt
     let bghPendingCount = 0;
+    let bghApprovedCount = 0;
     if (isBgh) {
       const bghQuery = { approvalStatus: "PENDING" };
       if (!isAdminOrManager) {
         bghQuery.$or = [{ targetApprover: userId }, { targetApprover: null }];
       }
       bghPendingCount = await VehicleBooking.countDocuments(bghQuery);
+
+      const bghApprovedQuery = { approvalStatus: "APPROVED" };
+      if (!isAdminOrManager) {
+        bghApprovedQuery.$or = [{ targetApprover: userId }, { approvedBy: userId }];
+      }
+      bghApprovedCount = await VehicleBooking.countDocuments(bghApprovedQuery);
     }
 
     // 3. Số lượng đơn chờ Lãnh đạo phân bổ xe (Đơn đã duyệt, là xe trường, chưa xếp xe)
@@ -1047,6 +1216,7 @@ const getVehiclePendingCounts = async (req, res) => {
       data: {
         total: totalPending,
         bghPendingCount,
+        bghApprovedCount,
         dispatchPendingCount,
         driverTripCount,
         isBgh,
@@ -1157,6 +1327,7 @@ module.exports = {
   getBookings,
   getBookingById,
   reviewBookingByBGH,
+  checkDispatchConflicts,
   dispatchVehicleAndDriver,
   updateTripStatus,
   cancelBooking,
