@@ -133,14 +133,21 @@ const signPdf = async (req, res) => {
         let signatures = req.body.signatures; // Dạng JSON string từ frontend
         const signatureType = req.body.signatureType || "DIGITAL_SIGNATURE"; // DIGITAL_SIGNATURE | ELECTRONIC_SIGNATURE
         let certificateInfo = req.body.certificateInfo;
+        const isPreSigned = req.body.isPreSigned === "true" || req.body.isPreSigned === true;
 
         if (!file) return res.status(400).json({ message: "No document provided" });
-        if (!signatures) return res.status(400).json({ message: "Missing signatures data" });
         
-        try {
-            signatures = JSON.parse(signatures);
-        } catch (e) {
-            return res.status(400).json({ message: "Invalid signatures format" });
+        if (!isPreSigned) {
+            if (!signatures) return res.status(400).json({ message: "Missing signatures data" });
+            try {
+                signatures = typeof signatures === "string" ? JSON.parse(signatures) : signatures;
+            } catch (e) {
+                return res.status(400).json({ message: "Invalid signatures format" });
+            }
+
+            if (!Array.isArray(signatures) || signatures.length === 0) {
+                return res.status(400).json({ message: "No signature coordinates provided" });
+            }
         }
 
         if (typeof certificateInfo === "string") {
@@ -149,10 +156,6 @@ const signPdf = async (req, res) => {
             } catch (e) {
                 certificateInfo = null;
             }
-        }
-
-        if (!Array.isArray(signatures) || signatures.length === 0) {
-            return res.status(400).json({ message: "No signature coordinates provided" });
         }
 
         const user = await User.findById(userId).populate("position").populate("department");
@@ -165,8 +168,8 @@ const signPdf = async (req, res) => {
             return res.status(400).json({ message: "Bạn chưa cấu hình chữ ký điện tử. Vui lòng tải ảnh chữ ký lên trước." });
         }
 
-        // KIỂM TRA MÃ PIN USB TOKEN CHO CHỮ KÝ SỐ
-        if (signatureType === "DIGITAL_SIGNATURE") {
+        // KIỂM TRA MÃ PIN USB TOKEN CHO CHỮ KÝ SỐ (nếu chưa được ký trực tiếp bằng USB Token qua VGCASignTool)
+        if (signatureType === "DIGITAL_SIGNATURE" && !isPreSigned) {
             const inputPin = req.body.pin || (certificateInfo && certificateInfo.pin);
             const userPin = user.digitalCertificate?.pin || "12345678";
             if (!inputPin) {
@@ -177,59 +180,7 @@ const signPdf = async (req, res) => {
             }
         }
 
-        let pdfBuffer = file.buffer;
-        
-        // Chuyển đổi Word sang PDF nếu cần
-        if (file.mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || 
-            file.mimetype === "application/msword") {
-            pdfBuffer = await libreConvert(file.buffer, ".pdf", undefined);
-        }
-
-        const auth = await authorize();
-        const drive = google.drive({ version: "v3", auth });
-
-        let image = null;
-        if (hasImage) {
-            try {
-                const signatureImageBuffer = await getDriveFileBuffer(drive, user.signature.fileId);
-                if (user.signature.mimeType === "image/png") {
-                    image = await pdfDoc.embedPng(signatureImageBuffer);
-                } else if (user.signature.mimeType === "image/jpeg" || user.signature.mimeType === "image/jpg") {
-                    image = await pdfDoc.embedJpg(signatureImageBuffer);
-                } else {
-                    try { image = await pdfDoc.embedPng(signatureImageBuffer); }
-                    catch(e) { image = await pdfDoc.embedJpg(signatureImageBuffer); }
-                }
-            } catch (imgErr) {
-                console.warn("Could not load signature image:", imgErr.message);
-            }
-        }
-
-        // Load PDF
-        const pdfDoc = await PDFDocument.load(pdfBuffer);
-        const pages = pdfDoc.getPages();
-        const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-        const regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
-
-        // Lại embed image vào pdfDoc sau khi pdfDoc đã load
-        if (hasImage) {
-            try {
-                const signatureImageBuffer = await getDriveFileBuffer(drive, user.signature.fileId);
-                if (user.signature.mimeType === "image/png") {
-                    image = await pdfDoc.embedPng(signatureImageBuffer);
-                } else if (user.signature.mimeType === "image/jpeg" || user.signature.mimeType === "image/jpg") {
-                    image = await pdfDoc.embedJpg(signatureImageBuffer);
-                } else {
-                    try { image = await pdfDoc.embedPng(signatureImageBuffer); }
-                    catch(e) { image = await pdfDoc.embedJpg(signatureImageBuffer); }
-                }
-            } catch (imgErr) {
-                console.warn("Could not embed image:", imgErr.message);
-            }
-        }
-
-        const now = new Date();
-        const signTimeStr = now.toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" });
+        let signedPdfBytes;
 
         // Thông tin chứng thư số chuẩn xác
         const certData = user.digitalCertificate || certificateInfo || {};
@@ -238,126 +189,166 @@ const signPdf = async (req, res) => {
         const caRaw = certificateInfo?.issuer || certData.issuer || "Viettel-CA SHA2";
         const caName = removeVietnameseTones(caRaw).toUpperCase();
         const serialNo = certificateInfo?.serialNumber || certData.serialNumber || "5404FFFEB7033FB324B728D3C2E92FE6";
-        
-        // Lặp qua từng vị trí chữ ký
-        for (const sig of signatures) {
-            const targetPage = pages[parseInt(sig.pageNum) - 1]; // pageNum 1-indexed
-            if (!targetPage) continue;
 
-            const posX = parseFloat(sig.x);
-            const posY = parseFloat(sig.y);
-            // Giữ đúng kích thước người dùng đã kéo thả thu phóng (tối thiểu 30px x 15px cho chữ ký nháy)
-            const posW = Math.max(parseFloat(sig.width) || 60, 30);
-            const posH = Math.max(parseFloat(sig.height) || 30, 15);
+        if (isPreSigned) {
+            // Tệp PDF đã được ký số trực tiếp từ phần mềm VGCASignTool trên máy tính
+            // Giữ nguyên file buffer đã có chữ ký số điện tử hợp lệ, không sửa đổi bằng pdf-lib
+            signedPdfBytes = file.buffer;
+        } else {
+            let pdfBuffer = file.buffer;
+            
+            // Chuyển đổi Word sang PDF nếu cần
+            if (file.mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || 
+                file.mimetype === "application/msword") {
+                pdfBuffer = await libreConvert(file.buffer, ".pdf", undefined);
+            }
 
-            if (signatureType === "DIGITAL_SIGNATURE") {
-                if (image) {
-                    // Nếu có ảnh chữ ký: Chỉ hiển thị hình ảnh chữ ký trực tiếp (chữ ký số gắn liền với ảnh chữ ký cá nhân)
-                    targetPage.drawImage(image, {
-                        x: posX,
-                        y: posY,
-                        width: posW,
-                        height: posH,
-                    });
+            // Load PDF
+            const pdfDoc = await PDFDocument.load(pdfBuffer);
+            const pages = pdfDoc.getPages();
+            const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+            const regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+
+            let image = null;
+            if (hasImage) {
+                try {
+                    const signatureImageBuffer = await getDriveFileBuffer(drive, user.signature.fileId);
+                    if (user.signature.mimeType === "image/png") {
+                        image = await pdfDoc.embedPng(signatureImageBuffer);
+                    } else if (user.signature.mimeType === "image/jpeg" || user.signature.mimeType === "image/jpg") {
+                        image = await pdfDoc.embedJpg(signatureImageBuffer);
+                    } else {
+                        try { image = await pdfDoc.embedPng(signatureImageBuffer); }
+                        catch(e) { image = await pdfDoc.embedJpg(signatureImageBuffer); }
+                    }
+                } catch (imgErr) {
+                    console.warn("Could not load signature image:", imgErr.message);
+                }
+            }
+
+            const now = new Date();
+            const signTimeStr = now.toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" });
+
+            // Lặp qua từng vị trí chữ ký
+            for (const sig of signatures) {
+                const targetPage = pages[parseInt(sig.pageNum) - 1]; // pageNum 1-indexed
+                if (!targetPage) continue;
+
+                const posX = parseFloat(sig.x);
+                const posY = parseFloat(sig.y);
+                // Giữ đúng kích thước người dùng đã kéo thả thu phóng (tối thiểu 30px x 15px cho chữ ký nháy)
+                const posW = Math.max(parseFloat(sig.width) || 60, 30);
+                const posH = Math.max(parseFloat(sig.height) || 30, 15);
+
+                if (signatureType === "DIGITAL_SIGNATURE") {
+                    if (image) {
+                        // Nếu có ảnh chữ ký: Chỉ hiển thị hình ảnh chữ ký trực tiếp (chữ ký số gắn liền với ảnh chữ ký cá nhân)
+                        targetPage.drawImage(image, {
+                            x: posX,
+                            y: posY,
+                            width: posW,
+                            height: posH,
+                        });
+                    } else {
+                        // Nếu KHÔNG có ảnh chữ ký: Hiển thị khung thông tin chứng thư số chuẩn xác thực điện tử
+                        targetPage.drawRectangle({
+                            x: posX,
+                            y: posY,
+                            width: posW,
+                            height: posH,
+                            borderColor: rgb(0.12, 0.44, 0.85),
+                            borderWidth: 1.5,
+                            color: rgb(0.97, 0.98, 1.0)
+                        });
+
+                        const textStartX = posX + 10;
+
+                        // Dòng 1: KÝ BỞI: [TÊN NGƯỜI KÝ]
+                        targetPage.drawText("KY BOI: " + signerName, {
+                            x: textStartX,
+                            y: posY + posH - 15,
+                            size: 8.5,
+                            font: boldFont,
+                            color: rgb(0.08, 0.35, 0.75)
+                        });
+
+                        // Dòng 2: CHUNG THU SO
+                        targetPage.drawText("CHUNG THU SO: " + caName, {
+                            x: textStartX,
+                            y: posY + posH - 28,
+                            size: 7,
+                            font: regularFont,
+                            color: rgb(0.2, 0.25, 0.3)
+                        });
+
+                        // Dòng 3: SO SERIAL
+                        targetPage.drawText("SERIAL: " + serialNo, {
+                            x: textStartX,
+                            y: posY + posH - 40,
+                            size: 6.5,
+                            font: regularFont,
+                            color: rgb(0.3, 0.35, 0.4)
+                        });
+
+                        // Dòng 4: THOI GIAN KY
+                        targetPage.drawText("THOI GIAN: " + signTimeStr, {
+                            x: textStartX,
+                            y: posY + posH - 52,
+                            size: 6.5,
+                            font: regularFont,
+                            color: rgb(0.3, 0.35, 0.4)
+                        });
+
+                        // Dòng 5: XAC THUC SO HOP LE
+                        targetPage.drawText("[ CHUNG THUC SO HOP LE ]", {
+                            x: textStartX,
+                            y: posY + 8,
+                            size: 6.5,
+                            font: boldFont,
+                            color: rgb(0.1, 0.6, 0.25)
+                        });
+                    }
+
                 } else {
-                    // Nếu KHÔNG có ảnh chữ ký: Hiển thị khung thông tin chứng thư số chuẩn xác thực điện tử
-                    targetPage.drawRectangle({
-                        x: posX,
-                        y: posY,
-                        width: posW,
-                        height: posH,
-                        borderColor: rgb(0.12, 0.44, 0.85),
-                        borderWidth: 1.5,
-                        color: rgb(0.97, 0.98, 1.0)
-                    });
-
-                    const textStartX = posX + 10;
-
-                    // Dòng 1: KÝ BỞI: [TÊN NGƯỜI KÝ]
-                    targetPage.drawText("KY BOI: " + signerName, {
-                        x: textStartX,
-                        y: posY + posH - 15,
-                        size: 8.5,
-                        font: boldFont,
-                        color: rgb(0.08, 0.35, 0.75)
-                    });
-
-                    // Dòng 2: CHUNG THU SO
-                    targetPage.drawText("CHUNG THU SO: " + caName, {
-                        x: textStartX,
-                        y: posY + posH - 28,
-                        size: 7,
-                        font: regularFont,
-                        color: rgb(0.2, 0.25, 0.3)
-                    });
-
-                    // Dòng 3: SO SERIAL
-                    targetPage.drawText("SERIAL: " + serialNo, {
-                        x: textStartX,
-                        y: posY + posH - 40,
-                        size: 6.5,
-                        font: regularFont,
-                        color: rgb(0.3, 0.35, 0.4)
-                    });
-
-                    // Dòng 4: THOI GIAN KY
-                    targetPage.drawText("THOI GIAN: " + signTimeStr, {
-                        x: textStartX,
-                        y: posY + posH - 52,
-                        size: 6.5,
-                        font: regularFont,
-                        color: rgb(0.3, 0.35, 0.4)
-                    });
-
-                    // Dòng 5: XAC THUC SO HOP LE
-                    targetPage.drawText("[ CHUNG THUC SO HOP LE ]", {
-                        x: textStartX,
-                        y: posY + 8,
-                        size: 6.5,
-                        font: boldFont,
-                        color: rgb(0.1, 0.6, 0.25)
-                    });
-                }
-
-            } else {
-                // CHỮ KÝ ĐIỆN TỬ THÔNG THƯỜNG (CHỈ CHÈN ẢNH)
-                if (image) {
-                    targetPage.drawImage(image, {
-                        x: posX,
-                        y: posY,
-                        width: posW,
-                        height: posH,
-                    });
+                    // CHỮ KÝ ĐIỆN TỬ THÔNG THƯỜNG (CHỈ CHÈN ẢNH)
+                    if (image) {
+                        targetPage.drawImage(image, {
+                            x: posX,
+                            y: posY,
+                            width: posW,
+                            height: posH,
+                        });
+                    }
                 }
             }
-        }
 
-        // Nếu là ký số DIGITAL_SIGNATURE (USB Token), tạo placeholder chuẩn PKCS#7 / PAdES
-        if (signatureType === "DIGITAL_SIGNATURE") {
-            try {
-                addSignaturePlaceholder(pdfDoc, {
-                    name: signerName || "TRUONG CAO DANG BACH KHOA NAM SAI GON",
-                    reason: "Chung thuc ky so van ban dien tu (Viettel-CA / USB Token)",
-                    location: "TP. Ho Chi Minh, Viet Nam"
-                });
-            } catch (pErr) {
-                console.warn("Lỗi addSignaturePlaceholder:", pErr.message);
+            // Nếu là ký số DIGITAL_SIGNATURE (USB Token), tạo placeholder chuẩn PKCS#7 / PAdES
+            if (signatureType === "DIGITAL_SIGNATURE") {
+                try {
+                    addSignaturePlaceholder(pdfDoc, {
+                        name: signerName || "TRUONG CAO DANG BACH KHOA NAM SAI GON",
+                        reason: "Chung thuc ky so van ban dien tu (Viettel-CA / USB Token)",
+                        location: "TP. Ho Chi Minh, Viet Nam"
+                    });
+                } catch (pErr) {
+                    console.warn("Lỗi addSignaturePlaceholder:", pErr.message);
+                }
             }
-        }
 
-        let signedPdfBytes = await pdfDoc.save({ useObjectStreams: false });
+            signedPdfBytes = await pdfDoc.save({ useObjectStreams: false });
 
-        // Nếu là ký số DIGITAL_SIGNATURE, tính ByteRange và nhúng khối PKCS#7 chuẩn
-        if (signatureType === "DIGITAL_SIGNATURE") {
-            try {
-                signedPdfBytes = embedPkcs7Signature(Buffer.from(signedPdfBytes), {
-                    subject: signerRaw,
-                    issuer: caRaw,
-                    serialNumber: serialNo,
-                    validTo: certData.validTo || "19/09/2028"
-                });
-            } catch (embedErr) {
-                console.warn("Lỗi embedPkcs7Signature:", embedErr.message);
+            // Nếu là ký số DIGITAL_SIGNATURE, tính ByteRange và nhúng khối PKCS#7 chuẩn
+            if (signatureType === "DIGITAL_SIGNATURE") {
+                try {
+                    signedPdfBytes = embedPkcs7Signature(Buffer.from(signedPdfBytes), {
+                        subject: signerRaw,
+                        issuer: caRaw,
+                        serialNumber: serialNo,
+                        validTo: certData.validTo || "19/09/2028"
+                    });
+                } catch (embedErr) {
+                    console.warn("Lỗi embedPkcs7Signature:", embedErr.message);
+                }
             }
         }
 
