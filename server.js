@@ -68,6 +68,25 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 
+// Đường dẫn tải trực tiếp gói dịch vụ ký số USB Token
+app.get(["/downloads/NSG_SignBridge.zip", "/downloads/NSG_SignBridge", "/NSG_SignBridge.zip"], (req, res) => {
+    const fs = require("fs");
+    const candidatePaths = [
+        "/var/www/nsg-be/NSG_SignBridge.zip",
+        path.join(__dirname, "NSG_SignBridge.zip"),
+        path.join(__dirname, "../NSG_SignBridge.zip"),
+        path.join(__dirname, "../NSG_DocumentMange_FE/public/downloads/NSG_SignBridge.zip")
+    ];
+    for (const p of candidatePaths) {
+        if (fs.existsSync(p)) {
+            res.setHeader("Content-Disposition", 'attachment; filename="NSG_SignBridge.zip"');
+            res.setHeader("Content-Type", "application/zip");
+            return res.sendFile(path.resolve(p));
+        }
+    }
+    return res.status(404).send("File not found");
+});
+
 const authRoutes = require("./src/routes/authRoutes");
 const departmentRoutes = require("./src/routes/departmentRoutes");
 const positionRoutes = require("./src/routes/positionRoutes");

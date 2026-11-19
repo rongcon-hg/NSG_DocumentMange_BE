@@ -10,6 +10,26 @@ router.get("/me", verifyToken, signatureController.getMySignature);
 // Tải lên chữ ký cá nhân
 router.post("/upload", verifyToken, upload.single("signatureImage"), signatureController.uploadSignature);
 
+// Tải bộ phần mềm cầu nối ký số máy trạm NSG Sign Bridge
+router.get("/download-bridge", (req, res) => {
+    const fs = require("fs");
+    const path = require("path");
+    const candidatePaths = [
+        "/var/www/nsg-be/NSG_SignBridge.zip",
+        path.join(__dirname, "../../NSG_SignBridge.zip"),
+        path.join(__dirname, "../../../NSG_SignBridge.zip"),
+        path.join(__dirname, "../../../NSG_DocumentMange_FE/public/downloads/NSG_SignBridge.zip")
+    ];
+    for (const p of candidatePaths) {
+        if (fs.existsSync(p)) {
+            res.setHeader("Content-Disposition", 'attachment; filename="NSG_SignBridge.zip"');
+            res.setHeader("Content-Type", "application/zip");
+            return res.sendFile(path.resolve(p));
+        }
+    }
+    return res.status(404).json({ message: "Không tìm thấy tệp cài đặt NSG_SignBridge.zip" });
+});
+
 // Lấy danh sách văn bản đã ký
 router.get("/archive", verifyToken, signatureController.getMyArchive);
 
