@@ -27,7 +27,9 @@ const getMySignature = async (req, res) => {
         }
         res.status(200).json({ 
             signature: user.signature,
-            digitalCertificate: cert
+            digitalCertificate: cert,
+            name: user.name,
+            userName: user.name
         });
     } catch (error) {
         console.error("Error fetching signature:", error);

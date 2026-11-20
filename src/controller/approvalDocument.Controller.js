@@ -15,6 +15,27 @@ const getDriveFileBuffer = async (drive, fileId) => {
     return Buffer.from(response.data);
 };
 
+// Helper: Bỏ dấu tiếng Việt phục vụ vẽ văn bản PDF với StandardFonts (Helvetica)
+const removeVietnameseTones = (str) => {
+    if (!str) return "";
+    str = String(str);
+    str = str.replace(/à|á|ạ|ả|ã|â|ầ|ấ|ậ|ẩ|ẫ|ă|ằ|ắ|ặ|ẳ|ẵ/g, "a");
+    str = str.replace(/è|é|ẹ|ẻ|ẽ|ê|ề|ế|ệ|ể|ễ/g, "e");
+    str = str.replace(/ì|í|ị|ỉ|ĩ/g, "i");
+    str = str.replace(/ò|ó|ọ|ỏ|õ|ô|ồ|ố|ộ|ổ|ỗ|ơ|ờ|ớ|ợ|ở|ỡ/g, "o");
+    str = str.replace(/ù|ú|ụ|ủ|ũ|ư|ừ|ứ|ự|ử|ữ/g, "u");
+    str = str.replace(/ỳ|ý|ỵ|ỷ|ỹ/g, "y");
+    str = str.replace(/đ/g, "d");
+    str = str.replace(/À|Á|Ạ|Ả|Ã|Â|Ầ|Ấ|Ậ|Ẩ|Ẫ|Ă|Ằ|Ắ|Ặ|Ẳ|Ẵ/g, "A");
+    str = str.replace(/È|É|Ẹ|Ẻ|Ẽ|Ê|Ề|Ế|Ệ|Ể|Ễ/g, "E");
+    str = str.replace(/Ì|Í|Ị|Ỉ|Ĩ/g, "I");
+    str = str.replace(/Ò|Ó|Ọ|Ỏ|Õ|Ô|Ồ|Ố|Ộ|Ổ|Ỗ|Ơ|Ờ|Ớ|Ợ|Ở|Ỡ/g, "O");
+    str = str.replace(/Ù|Ú|Ụ|Ủ|Ũ|Ư|Ừ|Ứ|Ự|Ử|Ữ/g, "U");
+    str = str.replace(/Ỳ|Ý|Ỵ|Ỷ|Ỹ/g, "Y");
+    str = str.replace(/Đ/g, "D");
+    return str;
+};
+
 // 1. Tạo hồ sơ trình ký mới
 const createApprovalDocument = async (req, res) => {
     try {
@@ -302,8 +323,12 @@ const signAndApproveStep = async (req, res) => {
         const auth = await authorize();
         const drive = google.drive({ version: "v3", auth });
 
-        // Nếu bước này yêu cầu ký (actionType === 'SIGN') và có vị trí chữ ký
-        if (currentStep.actionType === "SIGN" && Array.isArray(signaturePositions) && signaturePositions.length > 0) {
+        const isSignStep = currentStep.actionType === "SIGN";
+        const isReviewStep = currentStep.actionType === "REVIEW";
+        const hasPositions = Array.isArray(signaturePositions) && signaturePositions.length > 0;
+
+        // Nếu bước này yêu cầu ký (SIGN) hoặc thẩm định/ký nháy (REVIEW) và có vị trí chữ ký
+        if ((isSignStep || isReviewStep) && hasPositions) {
             // Lấy buffer file hiện tại
             const targetFileId = doc.currentFile?.fileId || doc.originalFile?.fileId;
             const currentPdfBuffer = await getDriveFileBuffer(drive, targetFileId);
@@ -339,7 +364,55 @@ const signAndApproveStep = async (req, res) => {
                 const posW = parseFloat(sig.width);
                 const posH = parseFloat(sig.height);
 
-                if (signatureMethod === "USB_TOKEN") {
+                if (isReviewStep) {
+                    // XỬ LÝ KÝ NHÁY / THẨM ĐỊNH (REVIEW)
+                    if (image) {
+                        // Nếu người ký nháy đã có ảnh chữ ký: Đóng dấu ảnh vào vị trí ký nháy
+                        targetPage.drawImage(image, {
+                            x: posX,
+                            y: posY,
+                            width: posW,
+                            height: posH
+                        });
+                    } else {
+                        // Nếu chưa tải ảnh chữ ký: Vẽ con dấu ký nháy hành chính chuẩn (không chặn người dùng)
+                        targetPage.drawRectangle({
+                            x: posX,
+                            y: posY,
+                            width: posW,
+                            height: posH,
+                            borderColor: rgb(0.12, 0.55, 0.3),
+                            borderWidth: 1,
+                            color: rgb(0.95, 0.99, 0.96)
+                        });
+
+                        const cleanName = removeVietnameseTones(user.name || "Can bo").toUpperCase();
+                        const dateStr = new Date().toLocaleDateString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" });
+
+                        const titleText = `KN: ${cleanName}`;
+                        const titleFontSize = Math.min(8, Math.max(5.5, posH * 0.28));
+                        const dateFontSize = Math.min(6.5, Math.max(4.5, posH * 0.22));
+
+                        targetPage.drawText(titleText, {
+                            x: posX + 4,
+                            y: posY + posH - titleFontSize - 3,
+                            size: titleFontSize,
+                            font: font,
+                            color: rgb(0.1, 0.45, 0.25)
+                        });
+
+                        if (posH >= 20) {
+                            targetPage.drawText(dateStr, {
+                                x: posX + 4,
+                                y: posY + 3,
+                                size: dateFontSize,
+                                font: regularFont,
+                                color: rgb(0.3, 0.3, 0.3)
+                            });
+                        }
+                    }
+                } else if (signatureMethod === "USB_TOKEN") {
+                    // Bước KÝ DUYỆT CHÍNH (SIGN) bằng USB Token
                     if (image) {
                         // Nếu có ảnh chữ ký: Chỉ hiển thị ảnh chữ ký của người ký
                         targetPage.drawImage(image, {
@@ -350,8 +423,10 @@ const signAndApproveStep = async (req, res) => {
                         });
                     } else {
                         // Nếu không có ảnh chữ ký: Vẽ khung thông tin chứng thư số
-                        const signerName = certificateInfo?.subject || user.digitalCertificate?.subject || "TRƯỜNG CAO ĐẲNG BÁCH KHOA NAM SÀI GÒN";
-                        const caName = certificateInfo?.issuer || user.digitalCertificate?.issuer || "Viettel-CA SHA2";
+                        const signerRaw = certificateInfo?.subject || user.digitalCertificate?.subject || "TRUONG CAO DANG BACH KHOA NAM SAI GON";
+                        const signerName = removeVietnameseTones(signerRaw).toUpperCase();
+                        const caRaw = certificateInfo?.issuer || user.digitalCertificate?.issuer || "Viettel-CA SHA2";
+                        const caName = removeVietnameseTones(caRaw).toUpperCase();
                         const signTimeStr = new Date().toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" });
 
                         targetPage.drawRectangle({
@@ -365,7 +440,7 @@ const signAndApproveStep = async (req, res) => {
                         });
 
                         const textOffsetX = posX + 8;
-                        targetPage.drawText("KY BOI: " + signerName.toUpperCase(), {
+                        targetPage.drawText("KY BOI: " + signerName, {
                             x: textOffsetX,
                             y: posY + posH - 16,
                             size: 8.5,
@@ -388,7 +463,7 @@ const signAndApproveStep = async (req, res) => {
                         });
                     }
                 } else {
-                    // Ký điện tử nội bộ thông thường
+                    // Bước KÝ DUYỆT CHÍNH (SIGN) bằng chữ ký nội bộ
                     if (!image) {
                         return res.status(400).json({ success: false, message: "Bạn chưa cấu hình chữ ký cá nhân" });
                     }
@@ -405,7 +480,7 @@ const signAndApproveStep = async (req, res) => {
             const folderId = await getOrCreateMonthFolder(drive);
 
             // Upload PDF mới lên Drive
-            const newSignedFileName = `signed_${signatureMethod.toLowerCase()}_step${doc.currentStepIndex}_${sanitizeFileName(doc.title)}.pdf`;
+            const newSignedFileName = `signed_${isReviewStep ? "review_kn" : signatureMethod.toLowerCase()}_step${doc.currentStepIndex}_${sanitizeFileName(doc.title)}.pdf`;
             const uploadRes = await drive.files.create({
                 requestBody: { name: newSignedFileName, parents: [folderId] },
                 media: { mimeType: "application/pdf", body: Readable.from(Buffer.from(signedBytes)) },
@@ -421,7 +496,7 @@ const signAndApproveStep = async (req, res) => {
             };
 
             currentStep.signaturePositions = signaturePositions;
-            currentStep.signatureMethod = signatureMethod;
+            currentStep.signatureMethod = isReviewStep ? (image ? "REVIEW_IMAGE" : "REVIEW_BADGE") : signatureMethod;
             if (certificateInfo) {
                 currentStep.certificateInfo = certificateInfo;
             }
