@@ -27,6 +27,7 @@ router.delete("/drivers/:id", vehicleController.deleteDriver);
 // ==========================================
 router.post("/bookings", vehicleController.createBooking);
 router.get("/bookings", vehicleController.getBookings);
+router.get("/bookings/stats", vehicleController.getVehicleStats);
 router.get("/bookings/pending-count", vehicleController.getVehiclePendingCounts);
 router.get("/bookings/dispatch-conflicts", vehicleController.checkDispatchConflicts);
 router.get("/bookings/:id", vehicleController.getBookingById);

@@ -561,12 +561,25 @@ const updateBooking = async (req, res) => {
   }
 };
 
-// Lấy danh sách đơn đăng ký xe (phân quyền theo vai trò và bộ lọc tab)
+// Lấy danh sách đơn đăng ký xe (phân quyền theo vai trò và bộ lọc thông minh)
 const getBookings = async (req, res) => {
   try {
     const userId = req.user?.id || req.user?._id;
     const userRole = (req.user?.role || "").toUpperCase();
-    const { tab, approvalStatus, dispatchStatus, vehicleType, search, startDate, endDate, page = 1, limit = 20 } = req.query;
+    const {
+      tab,
+      approvalStatus,
+      dispatchStatus,
+      vehicleType,
+      search,
+      startDate,
+      endDate,
+      assignedVehicle,
+      assignedDriver,
+      department,
+      page = 1,
+      limit = 20,
+    } = req.query;
 
     const isAdminOrManager = userRole === "ADMIN" || userRole === "MANAGER";
     const isBgh = await checkUserIsBgh(userId);
@@ -642,6 +655,15 @@ const getBookings = async (req, res) => {
     if (vehicleType && vehicleType !== "ALL") {
       query.vehicleType = vehicleType;
     }
+    if (assignedVehicle && assignedVehicle !== "ALL") {
+      query.assignedVehicle = assignedVehicle;
+    }
+    if (assignedDriver && assignedDriver !== "ALL") {
+      query.assignedDriver = assignedDriver;
+    }
+    if (department && department !== "ALL") {
+      query.department = department;
+    }
 
     // 3. Lọc theo khoảng ngày xuất phát
     if (startDate && endDate) {
@@ -649,15 +671,23 @@ const getBookings = async (req, res) => {
         $gte: new Date(startDate),
         $lte: new Date(endDate),
       };
+    } else if (startDate) {
+      query.departureTime = { $gte: new Date(startDate) };
+    } else if (endDate) {
+      query.departureTime = { $lte: new Date(endDate) };
     }
 
-    // 4. Tìm kiếm từ khóa
-    if (search) {
+    // 4. Tìm kiếm từ khóa thông minh
+    if (search && search.trim()) {
+      const searchRegex = { $regex: search.trim(), $options: "i" };
       query.$or = [
-        { bookingCode: { $regex: search, $options: "i" } },
-        { purpose: { $regex: search, $options: "i" } },
-        { route: { $regex: search, $options: "i" } },
-        { requesterName: { $regex: search, $options: "i" } },
+        { bookingCode: searchRegex },
+        { purpose: searchRegex },
+        { route: searchRegex },
+        { requesterName: searchRegex },
+        { destination: searchRegex },
+        { departureLocation: searchRegex },
+        { passengerNames: searchRegex },
       ];
     }
 
@@ -714,6 +744,165 @@ const getBookings = async (req, res) => {
   } catch (error) {
     console.error("Lỗi lấy danh sách đơn đăng ký xe:", error);
     return res.status(500).json({ success: false, message: "Lỗi tải danh sách đơn đăng ký xe" });
+  }
+};
+
+// Thống kê & Phân tích tổng thể dữ liệu điều xe
+const getVehicleStats = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.user?._id;
+    const userRole = (req.user?.role || "").toUpperCase();
+    const isAdminOrManager = userRole === "ADMIN" || userRole === "MANAGER";
+    const isBgh = await checkUserIsBgh(userId);
+    const { startDate, endDate, department, vehicleType, assignedVehicle, assignedDriver } = req.query;
+
+    const query = {};
+    if (startDate && endDate) {
+      query.departureTime = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate),
+      };
+    } else if (startDate) {
+      query.departureTime = { $gte: new Date(startDate) };
+    } else if (endDate) {
+      query.departureTime = { $lte: new Date(endDate) };
+    }
+
+    if (department && department !== "ALL") query.department = department;
+    if (vehicleType && vehicleType !== "ALL") query.vehicleType = vehicleType;
+    if (assignedVehicle && assignedVehicle !== "ALL") query.assignedVehicle = assignedVehicle;
+    if (assignedDriver && assignedDriver !== "ALL") query.assignedDriver = assignedDriver;
+
+    // Nếu không phải admin/manager/bgh, chỉ thống kê các đơn liên quan đến user
+    if (!isAdminOrManager && !isBgh) {
+      const driverRecord = await Driver.findOne({ userAccount: userId, isActive: true });
+      query.$or = [
+        { requester: userId },
+        { createdBy: userId },
+        { assignedDispatcher: userId },
+        ...(driverRecord ? [{ assignedDriver: driverRecord._id }] : []),
+      ];
+    }
+
+    const allMatching = await VehicleBooking.find(query)
+      .populate("assignedVehicle", "name licensePlate seats")
+      .populate("assignedDriver", "fullName phone")
+      .populate("department", "departmentName departmentCode")
+      .lean();
+
+    const totalBookings = allMatching.length;
+    let pendingApproval = 0;
+    let approved = 0;
+    let rejected = 0;
+    let cancelled = 0;
+
+    let unassigned = 0;
+    let assigned = 0;
+    let inProgress = 0;
+    let completed = 0;
+
+    let schoolVehicles = 0;
+    let rideHailing = 0;
+
+    let totalPassengers = 0;
+    let totalDistanceKm = 0;
+
+    const deptMap = {};
+    const vehicleMap = {};
+    const driverMap = {};
+    const monthlyMap = {};
+
+    for (const b of allMatching) {
+      // Approval Status
+      if (b.approvalStatus === "PENDING") pendingApproval++;
+      else if (b.approvalStatus === "APPROVED") approved++;
+      else if (b.approvalStatus === "REJECTED") rejected++;
+      else if (b.approvalStatus === "CANCELLED") cancelled++;
+
+      // Dispatch Status
+      if (b.dispatchStatus === "UNASSIGNED") unassigned++;
+      else if (b.dispatchStatus === "ASSIGNED") assigned++;
+      else if (b.dispatchStatus === "IN_PROGRESS") inProgress++;
+      else if (b.dispatchStatus === "COMPLETED") completed++;
+
+      // Type
+      if (b.vehicleType === "SCHOOL_VEHICLE") schoolVehicles++;
+      else if (b.vehicleType === "RIDE_HAILING") rideHailing++;
+
+      // Passengers & distance
+      const pax = Number(b.passengersCount) || 1;
+      totalPassengers += pax;
+      const dist = Number(b.totalDistanceKm) || 0;
+      totalDistanceKm += dist;
+
+      // Group by Department
+      const deptName = b.departmentName || b.department?.departmentName || "NSG";
+      if (!deptMap[deptName]) {
+        deptMap[deptName] = { name: deptName, count: 0, distanceKm: 0, passengers: 0 };
+      }
+      deptMap[deptName].count++;
+      deptMap[deptName].distanceKm += dist;
+      deptMap[deptName].passengers += pax;
+
+      // Group by Vehicle (nếu có gán xe trường)
+      if (b.assignedVehicle) {
+        const vKey = `${b.assignedVehicle.name} (${b.assignedVehicle.licensePlate || ""})`;
+        if (!vehicleMap[vKey]) {
+          vehicleMap[vKey] = { name: vKey, count: 0, distanceKm: 0 };
+        }
+        vehicleMap[vKey].count++;
+        vehicleMap[vKey].distanceKm += dist;
+      }
+
+      // Group by Driver
+      if (b.assignedDriver) {
+        const dName = b.assignedDriver.fullName || "Tài xế";
+        if (!driverMap[dName]) {
+          driverMap[dName] = { name: dName, count: 0, distanceKm: 0 };
+        }
+        driverMap[dName].count++;
+        driverMap[dName].distanceKm += dist;
+      }
+
+      // Monthly distribution
+      if (b.departureTime) {
+        const d = new Date(b.departureTime);
+        const mKey = `Tháng ${d.getMonth() + 1}/${d.getFullYear()}`;
+        if (!monthlyMap[mKey]) {
+          monthlyMap[mKey] = { month: mKey, count: 0, distanceKm: 0 };
+        }
+        monthlyMap[mKey].count++;
+        monthlyMap[mKey].distanceKm += dist;
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        overview: {
+          totalBookings,
+          pendingApproval,
+          approved,
+          rejected,
+          cancelled,
+          unassigned,
+          assigned,
+          inProgress,
+          completed,
+          schoolVehicles,
+          rideHailing,
+          totalPassengers,
+          totalDistanceKm: Math.round(totalDistanceKm * 10) / 10,
+        },
+        byDepartment: Object.values(deptMap).sort((a, b) => b.count - a.count),
+        byVehicle: Object.values(vehicleMap).sort((a, b) => b.count - a.count),
+        byDriver: Object.values(driverMap).sort((a, b) => b.count - a.count),
+        byMonth: Object.values(monthlyMap),
+      },
+    });
+  } catch (error) {
+    console.error("Lỗi lấy thống kê xe:", error);
+    return res.status(500).json({ success: false, message: "Lỗi tải thống kê điều xe" });
   }
 };
 
@@ -1366,6 +1555,7 @@ module.exports = {
   createBooking,
   updateBooking,
   getBookings,
+  getVehicleStats,
   getBookingById,
   reviewBookingByBGH,
   checkDispatchConflicts,
