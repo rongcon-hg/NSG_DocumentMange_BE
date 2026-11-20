@@ -803,6 +803,159 @@ class ZaloOAService {
   }
 
   /**
+   * 8. Thông báo Xe công tác: Khi có đơn đăng ký xe mới gửi Ban Giám Hiệu
+   */
+  async notifyVehicleBookingCreated(booking, creatorUser, approverUser) {
+    if (!approverUser) return;
+    const depDateStr = booking.departureDate ? new Date(booking.departureDate).toLocaleDateString('vi-VN') : new Date(booking.departureTime).toLocaleDateString('vi-VN');
+    const retDateStr = booking.returnDate ? new Date(booking.returnDate).toLocaleDateString('vi-VN') : new Date(booking.estimatedReturnTime).toLocaleDateString('vi-VN');
+    const depHourStr = booking.departureHour ? `${booking.departureHour}, ` : '';
+    const vehicleTypeStr = booking.vehicleType === 'SCHOOL_VEHICLE' ? 'Xe trường' : 'Xe công nghệ';
+
+    const msg = `[HỆ THỐNG VĂN PHÒNG SỐ - ĐƠN ĐĂNG KÝ XE MỚI]\n` +
+      `🚗 Mã phiếu: ${booking.bookingCode || 'Chờ cấp mã'}\n` +
+      `👤 Người đăng ký: ${creatorUser?.name || booking.requesterName} (${booking.departmentName || 'NSG'})\n` +
+      `📞 SĐT liên hệ: ${booking.contactPhone}\n` +
+      `📌 Mục đích: ${booking.purpose}\n` +
+      `📍 Lộ trình: ${booking.route}\n` +
+      `⏰ Xuất phát: ${depHourStr}ngày ${depDateStr}\n` +
+      `📅 Dự kiến về: ngày ${retDateStr}\n` +
+      `👥 Số người đi: ${booking.passengersCount || 1} người\n` +
+      `🚘 Loại xe: ${vehicleTypeStr} (Cần xe ${booking.requiredSeats || 7} chỗ)\n` +
+      `Kính trình Thầy/Cô Ban Giám Hiệu xem xét và phê duyệt theo quy định.\n` +
+      `🔗 Xem và phê duyệt: https://qlvb.namsaigon.edu.vn/vehicles`;
+
+    return await this.dispatchNotification({
+      recipients: [approverUser],
+      message: msg,
+      eventType: 'vehicle',
+    });
+  }
+
+  /**
+   * 9. Thông báo Xe công tác: Kết quả duyệt đơn xe cho Người đăng ký và Giao việc cho Người phân bổ xe
+   */
+  async notifyVehicleBookingStatus(booking, requesterUser, approverUser, isApproved, rejectionReason = '', assignedDispatcher = null) {
+    const statusLabel = isApproved ? 'ĐỒNG Ý PHÊ DUYỆT ✅' : 'TỪ CHỐI DUYỆT ❌';
+    const approverName = approverUser?.name || 'Ban Giám Hiệu';
+
+    // A. Gửi cho Người đăng ký xe
+    if (requesterUser) {
+      const msgRequester = `[HỆ THỐNG VĂN PHÒNG SỐ - KẾT QUẢ DUYỆT ĐƠN XE]\n` +
+        `🚗 Mã phiếu: ${booking.bookingCode}\n` +
+        `📋 Trạng thái: ${statusLabel}\n` +
+        `👤 Người duyệt: ${approverName} (Ban Giám Hiệu)\n` +
+        `📌 Mục đích: ${booking.purpose}\n` +
+        `📍 Lộ trình: ${booking.route}\n` +
+        (isApproved && booking.vehicleType === 'SCHOOL_VEHICLE' ? `ℹ️ BGH đã chuyển tiếp cho bộ phận quản lý xe bố trí phương tiện và tài xế.\n` : '') +
+        (isApproved && booking.vehicleType === 'RIDE_HAILING' ? `ℹ️ Phương tiện là Xe công nghệ: Đơn vị chủ động đặt xe và thực hiện theo đúng lộ trình.\n` : '') +
+        (booking.approvalNotes ? `💬 Ý kiến BGH: "${booking.approvalNotes}"\n` : '') +
+        (!isApproved && rejectionReason ? `⚠️ Lý do từ chối: "${rejectionReason}"\n` : '') +
+        `🔗 Xem chi tiết: https://qlvb.namsaigon.edu.vn/vehicles`;
+
+      await this.dispatchNotification({
+        recipients: [requesterUser],
+        message: msgRequester,
+        eventType: 'vehicle',
+      });
+    }
+
+    // B. Gửi cho Người phân bổ xe (Lãnh đạo được BGH giao nhiệm vụ xếp xe & tài xế)
+    if (isApproved && booking.vehicleType === 'SCHOOL_VEHICLE' && assignedDispatcher) {
+      const depDateStr = booking.departureDate ? new Date(booking.departureDate).toLocaleDateString('vi-VN') : new Date(booking.departureTime).toLocaleDateString('vi-VN');
+      const retDateStr = booking.returnDate ? new Date(booking.returnDate).toLocaleDateString('vi-VN') : new Date(booking.estimatedReturnTime).toLocaleDateString('vi-VN');
+      const depHourStr = booking.departureHour ? `${booking.departureHour}, ` : '';
+
+      const msgDispatcher = `[HỆ THỐNG VĂN PHÒNG SỐ - GIAO NHIỆM VỤ PHÂN BỔ XE]\n` +
+        `🚗 Mã phiếu: ${booking.bookingCode}\n` +
+        `Ban Giám Hiệu vừa phê duyệt đơn đăng ký xe và giao Thầy/Cô bố trí phương tiện, tài xế phục vụ chuyến đi:\n` +
+        `📌 Mục đích: ${booking.purpose}\n` +
+        `📍 Lộ trình: ${booking.route}\n` +
+        `⏰ Xuất phát: ${depHourStr}ngày ${depDateStr}\n` +
+        `📅 Dự kiến về: ngày ${retDateStr}\n` +
+        `👤 Người đăng ký: ${requesterUser?.name || booking.requesterName} (${booking.departmentName || 'NSG'}) - SĐT: ${booking.contactPhone}\n` +
+        `👥 Số người: ${booking.passengersCount || 1} người (Cần xe ${booking.requiredSeats || 7} chỗ)\n` +
+        (booking.approvalNotes ? `💬 Ý kiến BGH: "${booking.approvalNotes}"\n` : '') +
+        `🔗 Vào phân bổ xe & tài xế: https://qlvb.namsaigon.edu.vn/vehicles`;
+
+      await this.dispatchNotification({
+        recipients: [assignedDispatcher],
+        message: msgDispatcher,
+        eventType: 'vehicle',
+      });
+    }
+  }
+
+  /**
+   * 10. Thông báo Xe công tác: Đã phân bổ xe & tài xế (Gửi cho Người đăng ký và Tài xế)
+   */
+  async notifyVehicleDispatched(booking) {
+    const vehicleName = booking.assignedVehicle?.name || "Xe trường";
+    const licensePlate = booking.assignedVehicle?.licensePlate || "";
+    const driverName = booking.assignedDriver?.fullName || "Tài xế phân công";
+    const driverPhone = booking.assignedDriver?.phone || "";
+    const depDateStr = booking.departureDate ? new Date(booking.departureDate).toLocaleDateString('vi-VN') : new Date(booking.departureTime).toLocaleDateString('vi-VN');
+    const depHourStr = booking.departureHour ? `${booking.departureHour}, ` : '';
+
+    // A. Gửi cho Người đăng ký xe
+    if (booking.requester) {
+      const msgRequester = `[HỆ THỐNG VĂN PHÒNG SỐ - XE ĐÃ ĐƯỢC PHÂN BỔ]\n` +
+        `🚗 Mã phiếu: ${booking.bookingCode}\n` +
+        `Chuyến đi công tác của bạn đã được bố trí phương tiện và tài xế sẵn sàng:\n` +
+        `🚘 Phương tiện: ${vehicleName} - Biển số: ${licensePlate}\n` +
+        `👨‍✈️ Tài xế: ${driverName}\n` +
+        `📞 SĐT tài xế: ${driverPhone}\n` +
+        `⏰ Xuất phát: ${depHourStr}ngày ${depDateStr}\n` +
+        `📍 Lộ trình: ${booking.route}\n` +
+        (booking.dispatchNotes ? `📝 Ghi chú điều phối: "${booking.dispatchNotes}"\n` : '') +
+        `🔗 Xem chi tiết & in phiếu: https://qlvb.namsaigon.edu.vn/vehicles`;
+
+      await this.dispatchNotification({
+        recipients: [booking.requester],
+        message: msgRequester,
+        eventType: 'vehicle',
+      });
+    }
+
+    // B. Gửi cho Tài xế phụ trách
+    let driverRecipient = booking.assignedDriver?.userAccount;
+    if (!driverRecipient && booking.assignedDriver?.phone) {
+      try {
+        const User = require('../models/user.model');
+        driverRecipient = await User.findOne({ mobile: booking.assignedDriver.phone });
+      } catch (_) {}
+    }
+    // Nếu không tìm thấy User account, tạo đối tượng giả lập để dispatchNotification vẫn gửi theo SĐT/zalo
+    if (!driverRecipient && booking.assignedDriver?.phone) {
+      driverRecipient = {
+        name: driverName,
+        mobile: booking.assignedDriver.phone,
+        zaloId: booking.assignedDriver.phone,
+      };
+    }
+
+    if (driverRecipient) {
+      const msgDriver = `[HỆ THỐNG VĂN PHÒNG SỐ - LỊCH CHẠY XE CÔNG TÁC]\n` +
+        `🚗 Mã phiếu: ${booking.bookingCode}\n` +
+        `Bạn vừa được phân công lái xe phục vụ đoàn công tác:\n` +
+        `🚘 Phương tiện: ${vehicleName} (Biển số: ${licensePlate})\n` +
+        `⏰ Xuất phát: ${depHourStr}ngày ${depDateStr}\n` +
+        `📍 Lộ trình: ${booking.route}\n` +
+        `👤 Người liên hệ/Trưởng đoàn: ${booking.requester?.name || booking.requesterName} - SĐT: ${booking.contactPhone}\n` +
+        `👥 Số người: ${booking.passengersCount || 1} người\n` +
+        (booking.dispatchNotes ? `📝 Ghi chú: "${booking.dispatchNotes}"\n` : '') +
+        `💡 Lưu ý: Khi xuất phát và khi về an toàn, vui lòng truy cập hệ thống để bấm "Bắt đầu đi" và "Đã về".\n` +
+        `🔗 Xác nhận chuyến đi: https://qlvb.namsaigon.edu.vn/vehicles`;
+
+      await this.dispatchNotification({
+        recipients: [driverRecipient],
+        message: msgDriver,
+        eventType: 'vehicle',
+      });
+    }
+  }
+
+  /**
    * Gửi thông báo khi người dùng được nhắc tên (@mention) trong thảo luận
    */
   async notifyMention({ senderName, recipientUser, targetType, targetTitle, contentPreview }) {

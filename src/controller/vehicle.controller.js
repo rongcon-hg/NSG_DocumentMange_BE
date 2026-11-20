@@ -4,6 +4,7 @@ const VehicleBooking = require("../models/vehicleBooking.model");
 const User = require("../models/user.model");
 const Department = require("../models/department.model");
 const emailService = require("../service/NodeMailer.service/email");
+const zaloOAService = require("../services/zaloOA.service");
 const routingService = require("../service/routing.service");
 
 // -------------------------------------------------------------
@@ -380,6 +381,17 @@ const createBooking = async (req, res) => {
       }
     } catch (e) {
       console.warn("Lỗi gửi mail thông báo xe:", e);
+    }
+
+    // Gửi thông báo Bot Zalo cho BGH
+    try {
+      if (typeof zaloOAService.notifyVehicleBookingCreated === "function") {
+        zaloOAService.notifyVehicleBookingCreated(booking, user, approver).catch((err) => {
+          console.warn("Lỗi gửi Zalo thông báo đơn xe mới:", err?.message);
+        });
+      }
+    } catch (e) {
+      console.warn("Lỗi gọi Zalo thông báo xe:", e);
     }
 
     return res.status(201).json({
@@ -820,6 +832,24 @@ const reviewBookingByBGH = async (req, res) => {
       console.warn("Lỗi gửi mail thông báo kết quả phê duyệt:", e);
     }
 
+    // Gửi thông báo Bot Zalo kết quả phê duyệt cho Người đăng ký và Người được giao xếp xe
+    try {
+      if (typeof zaloOAService.notifyVehicleBookingStatus === "function") {
+        zaloOAService.notifyVehicleBookingStatus(
+          populatedForEmail,
+          populatedForEmail.requester,
+          approver,
+          booking.approvalStatus === "APPROVED",
+          booking.rejectionReason,
+          populatedForEmail.assignedDispatcher
+        ).catch((err) => {
+          console.warn("Lỗi gửi Zalo trạng thái duyệt xe:", err?.message);
+        });
+      }
+    } catch (e) {
+      console.warn("Lỗi gọi Zalo thông báo trạng thái xe:", e);
+    }
+
     return res.status(200).json({
       success: true,
       message: action === "APPROVE" ? "Đã phê duyệt đơn đăng ký xe thành công!" : "Đã từ chối đơn đăng ký xe.",
@@ -1013,6 +1043,17 @@ const dispatchVehicleAndDriver = async (req, res) => {
       }
     } catch (e) {
       console.warn("Lỗi gửi mail điều xe:", e);
+    }
+
+    // Gửi thông báo Bot Zalo phân bổ xe cho Người đăng ký và Tài xế
+    try {
+      if (typeof zaloOAService.notifyVehicleDispatched === "function") {
+        zaloOAService.notifyVehicleDispatched(populated).catch((err) => {
+          console.warn("Lỗi gửi Zalo điều phối xe:", err?.message);
+        });
+      }
+    } catch (e) {
+      console.warn("Lỗi gọi Zalo thông báo điều xe:", e);
     }
 
     return res.status(200).json({
