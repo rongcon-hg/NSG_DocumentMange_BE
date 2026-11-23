@@ -77,7 +77,31 @@ const getAllVehicles = async (req, res) => {
       ];
     }
     const vehicles = await Vehicle.find(query).populate("defaultDriver").sort({ createdAt: -1 });
-    return res.status(200).json({ success: true, data: vehicles });
+
+    // Kiểm tra đồng bộ các chuyến đi đang IN_PROGRESS
+    const activeTrips = await VehicleBooking.find({ dispatchStatus: "IN_PROGRESS" }).select("assignedVehicle bookingCode");
+    const activeVehicleMap = {};
+    activeTrips.forEach((t) => {
+      if (t.assignedVehicle) {
+        activeVehicleMap[t.assignedVehicle.toString()] = t.bookingCode;
+      }
+    });
+
+    const enrichedVehicles = vehicles.map((v) => {
+      const vObj = v.toObject();
+      const currentBookingCode = activeVehicleMap[v._id.toString()];
+      if (currentBookingCode) {
+        if (vObj.status !== "MAINTENANCE" && vObj.status !== "INACTIVE") {
+          vObj.status = "IN_USE";
+        }
+        vObj.activeBookingCode = currentBookingCode;
+      } else if (vObj.status === "IN_USE") {
+        vObj.status = "AVAILABLE";
+      }
+      return vObj;
+    });
+
+    return res.status(200).json({ success: true, data: enrichedVehicles });
   } catch (error) {
     console.error("Lỗi lấy danh sách xe:", error);
     return res.status(500).json({ success: false, message: "Lỗi hệ thống khi tải danh sách xe" });
@@ -182,7 +206,31 @@ const getAllDrivers = async (req, res) => {
       ];
     }
     const drivers = await Driver.find(query).populate("userAccount", "userName email").sort({ createdAt: -1 });
-    return res.status(200).json({ success: true, data: drivers });
+
+    // Kiểm tra đồng bộ các chuyến đi đang IN_PROGRESS
+    const activeTrips = await VehicleBooking.find({ dispatchStatus: "IN_PROGRESS" }).select("assignedDriver bookingCode");
+    const activeDriverMap = {};
+    activeTrips.forEach((t) => {
+      if (t.assignedDriver) {
+        activeDriverMap[t.assignedDriver.toString()] = t.bookingCode;
+      }
+    });
+
+    const enrichedDrivers = drivers.map((d) => {
+      const dObj = d.toObject();
+      const currentBookingCode = activeDriverMap[d._id.toString()];
+      if (currentBookingCode) {
+        if (dObj.status !== "OFF_DUTY" && dObj.status !== "INACTIVE") {
+          dObj.status = "ON_TRIP";
+        }
+        dObj.activeBookingCode = currentBookingCode;
+      } else if (dObj.status === "ON_TRIP") {
+        dObj.status = "AVAILABLE";
+      }
+      return dObj;
+    });
+
+    return res.status(200).json({ success: true, data: enrichedDrivers });
   } catch (error) {
     console.error("Lỗi lấy danh sách tài xế:", error);
     return res.status(500).json({ success: false, message: "Lỗi hệ thống khi tải danh sách tài xế" });
@@ -1322,12 +1370,42 @@ const updateTripStatus = async (req, res) => {
       if (status === "IN_PROGRESS") {
         booking.actualDepartureTime = actualDepartureTime ? new Date(actualDepartureTime) : new Date();
         if (currentUserId) booking.departureConfirmedBy = currentUserId;
+
+        // Cập nhật trạng thái tài xế và xe sang đang chạy / đang sử dụng
+        if (booking.assignedDriver) {
+          await Driver.findByIdAndUpdate(booking.assignedDriver, { status: "ON_TRIP" });
+        }
+        if (booking.assignedVehicle) {
+          await Vehicle.findByIdAndUpdate(booking.assignedVehicle, { status: "IN_USE" });
+        }
       }
 
       // Tự động ghi nhận thời gian và người xác nhận khi đã về (kết thúc)
       if (status === "COMPLETED") {
         booking.actualReturnTime = actualReturnTime ? new Date(actualReturnTime) : new Date();
         if (currentUserId) booking.returnConfirmedBy = currentUserId;
+
+        // Giải phóng tài xế và xe nếu không còn chuyến đi nào khác đang chạy
+        if (booking.assignedDriver) {
+          const otherActive = await VehicleBooking.findOne({
+            _id: { $ne: booking._id },
+            assignedDriver: booking.assignedDriver,
+            dispatchStatus: "IN_PROGRESS",
+          });
+          if (!otherActive) {
+            await Driver.findByIdAndUpdate(booking.assignedDriver, { status: "AVAILABLE" });
+          }
+        }
+        if (booking.assignedVehicle) {
+          const otherActive = await VehicleBooking.findOne({
+            _id: { $ne: booking._id },
+            assignedVehicle: booking.assignedVehicle,
+            dispatchStatus: "IN_PROGRESS",
+          });
+          if (!otherActive) {
+            await Vehicle.findByIdAndUpdate(booking.assignedVehicle, { status: "AVAILABLE" });
+          }
+        }
       }
     } else {
       if (actualDepartureTime) booking.actualDepartureTime = new Date(actualDepartureTime);
