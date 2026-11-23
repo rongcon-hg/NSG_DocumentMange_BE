@@ -418,11 +418,20 @@ const updateBooking = async (req, res) => {
       return res.status(404).json({ success: false, message: "Không tìm thấy đơn đăng ký xe" });
     }
 
-    // Kiểm tra trạng thái: Chỉ cho phép chỉnh sửa khi BGH chưa duyệt (PENDING)
-    if (booking.approvalStatus !== "PENDING") {
+    // Kiểm tra trạng thái:
+    // - Với người dùng thông thường: Chỉ cho phép chỉnh sửa khi BGH chưa duyệt (PENDING)
+    // - Với Quản trị viên (Admin/Manager): Cho phép chỉnh sửa thông tin lịch trình, mục đích, thời gian, tài xế/xe kể cả khi đã duyệt/đã xếp xe (trừ khi chuyến đi đã hoàn thành hoặc đã hủy)
+    if (!isAdminOrManager && booking.approvalStatus !== "PENDING") {
       return res.status(400).json({
         success: false,
         message: "Phiếu đăng ký này đã được Ban Giám Hiệu xử lý hoặc không ở trạng thái chờ duyệt, không thể chỉnh sửa!",
+      });
+    }
+
+    if (isAdminOrManager && ["COMPLETED", "CANCELLED"].includes(booking.dispatchStatus)) {
+      return res.status(400).json({
+        success: false,
+        message: "Chuyến đi đã hoàn thành hoặc đã hủy, không thể chỉnh sửa!",
       });
     }
 
@@ -548,6 +557,21 @@ const updateBooking = async (req, res) => {
     booking.notes = notes !== undefined ? notes : booking.notes;
     booking.targetApprover = targetApprover;
 
+    // Cho phép Admin/Manager điều chỉnh lại tài xế, phương tiện nếu cần thiết
+    if (isAdminOrManager) {
+      if (req.body.assignedVehicle !== undefined) {
+        booking.assignedVehicle = req.body.assignedVehicle || null;
+      }
+      if (req.body.assignedDriver !== undefined) {
+        booking.assignedDriver = req.body.assignedDriver || null;
+      }
+      if (booking.vehicleType === "SCHOOL_VEHICLE") {
+        if (booking.assignedVehicle && booking.assignedDriver && booking.dispatchStatus === "UNASSIGNED") {
+          booking.dispatchStatus = "ASSIGNED";
+        }
+      }
+    }
+
     await booking.save();
 
     return res.status(200).json({
@@ -577,6 +601,7 @@ const getBookings = async (req, res) => {
       assignedVehicle,
       assignedDriver,
       department,
+      statusGroup,
       page = 1,
       limit = 20,
     } = req.query;
@@ -691,6 +716,23 @@ const getBookings = async (req, res) => {
       ];
     }
 
+    // 5. Lọc theo nhóm trạng thái (Chưa chạy / Đã xong) và xác định thứ tự sắp xếp
+    let sortCondition = { departureTime: -1 };
+
+    if (statusGroup === "active" || statusGroup === "uncompleted") {
+      query.approvalStatus = { $ne: "REJECTED" };
+      query.dispatchStatus = { $nin: ["COMPLETED", "CANCELLED"] };
+      // Sắp xếp lịch gần nhất nằm lên trên cùng
+      sortCondition = { departureTime: 1 };
+    } else if (statusGroup === "completed" || statusGroup === "finished") {
+      query.$or = [
+        { dispatchStatus: { $in: ["COMPLETED", "CANCELLED"] } },
+        { approvalStatus: "REJECTED" },
+      ];
+      // Sắp xếp mới nhất lên đầu
+      sortCondition = { departureTime: -1 };
+    }
+
     const skip = (Number(page) - 1) * Number(limit);
     const [bookings, total] = await Promise.all([
       VehicleBooking.find(query)
@@ -725,7 +767,7 @@ const getBookings = async (req, res) => {
         .populate("assignedDriver")
         .populate("departureConfirmedBy", "name fullName userName mobile phone")
         .populate("returnConfirmedBy", "name fullName userName mobile phone")
-        .sort({ departureTime: -1 })
+        .sort(sortCondition)
         .skip(skip)
         .limit(Number(limit)),
       VehicleBooking.countDocuments(query),
@@ -957,7 +999,7 @@ const reviewBookingByBGH = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user?.id || req.user?._id;
-    const { action, rejectionReason, approvalNotes, assignedDispatcher } = req.body; // action: "APPROVE" hoặc "REJECT"
+    const { action, rejectionReason, approvalNotes, assignedDispatcher, vehicleType } = req.body; // action: "APPROVE" hoặc "REJECT"
 
     const booking = await VehicleBooking.findById(id)
       .populate("requester", "userName fullName email phone")
@@ -980,9 +1022,16 @@ const reviewBookingByBGH = async (req, res) => {
       booking.approvalNotes = approvalNotes || "";
       booking.rejectionReason = "";
 
+      // Cho phép BGH thay đổi loại phương tiện: Chuyển sang Xe công nghệ nếu trường không còn xe phù hợp (hoặc ngược lại)
+      if (vehicleType && ["SCHOOL_VEHICLE", "RIDE_HAILING"].includes(vehicleType)) {
+        booking.vehicleType = vehicleType;
+      }
+
       // Nếu là Xe công nghệ: BGH duyệt là xong, hoàn tất luôn quy trình phân bổ
       if (booking.vehicleType === "RIDE_HAILING") {
         booking.assignedDispatcher = null;
+        booking.assignedVehicle = null;
+        booking.assignedDriver = null;
         booking.dispatchStatus = "ASSIGNED"; // Đã được duyệt đi xe công nghệ, không cần bước phân bổ xe & tài xế
       } else {
         booking.assignedDispatcher = assignedDispatcher || null; // Lãnh đạo được BGH giao nhiệm vụ phân bổ xe trường
