@@ -143,16 +143,20 @@ const executeHandover = async (req, res) => {
         const assignedItem = doc.assignedToUsers.find(a => a.userId.toString() === fromUserId);
 
         if (assignedItem) {
-          // Thêm toUser nếu chưa có
-          const alreadyAssignedToReceiver = doc.assignedToUsers.some(a => a.userId.toString() === toUserId);
-          if (!alreadyAssignedToReceiver) {
+          // Thêm toUser nếu chưa có (chỉ sao chép onTime nếu người bàn giao thực sự là người chủ trì onTime !== null)
+          const targetOnTime = (assignedItem.onTime !== null && assignedItem.onTime !== undefined) ? assignedItem.onTime : null;
+          const receiverAssignment = doc.assignedToUsers.find(a => a.userId.toString() === toUserId);
+          if (!receiverAssignment) {
             doc.assignedToUsers.push({
               userId: toUserId,
               status: "received",
-              onTime: assignedItem.onTime || "pending",
+              onTime: targetOnTime,
               isRead: false,
               receivedDate: null
             });
+            docModified = true;
+          } else if (targetOnTime !== null && receiverAssignment.onTime === null) {
+            receiverAssignment.onTime = targetOnTime;
             docModified = true;
           }
 

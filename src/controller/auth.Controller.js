@@ -465,7 +465,7 @@ const upadteInfo = async (req, res) => {
               status: "received",
               isRead: false,
               receivedDate: null,
-              onTime: doc.deadlineDay ? "pending" : "onTime"
+              onTime: null
             });
             await doc.save();
           }
