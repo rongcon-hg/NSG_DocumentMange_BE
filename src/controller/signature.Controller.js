@@ -139,6 +139,9 @@ const signPdf = async (req, res) => {
 
         if (!file) return res.status(400).json({ message: "No document provided" });
         
+        const auth = await authorize();
+        const drive = google.drive({ version: "v3", auth });
+
         if (!isPreSigned) {
             if (!signatures) return res.status(400).json({ message: "Missing signatures data" });
             try {
