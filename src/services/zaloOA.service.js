@@ -1,14 +1,22 @@
 const ZaloConfig = require('../models/zaloConfig.model');
 const User = require('../models/user.model');
 
+// In-memory cache để giảm số lượng truy vấn DB và ngăn chặn request bão khi gửi thông báo hàng loạt
+let cachedConfig = null;
+let cachedConfigExpiry = 0;
+let lastOARefreshFailTime = 0;
+
 /**
  * Service tích hợp tương tác với Zalo Official Account (OA) & Zalo Notification Service (ZNS)
  */
 class ZaloOAService {
   /**
-   * Lấy cấu hình Zalo OA hiện tại
+   * Lấy cấu hình Zalo OA hiện tại (có cache 30s)
    */
-  async getConfig() {
+  async getConfig(forceRefresh = false) {
+    if (!forceRefresh && cachedConfig && Date.now() < cachedConfigExpiry) {
+      return cachedConfig;
+    }
     const connectDB = require('../config/db');
     await connectDB();
     let config = await ZaloConfig.findOne();
@@ -33,6 +41,8 @@ class ZaloOAService {
       await config.save();
     }
 
+    cachedConfig = config;
+    cachedConfigExpiry = Date.now() + 30000;
     return config;
   }
 
@@ -42,6 +52,11 @@ class ZaloOAService {
   async refreshAccessToken(config) {
     if (!config.appId || !config.secretKey || !config.refreshToken) {
       throw new Error('Chưa cấu hình đầy đủ appId, secretKey hoặc refreshToken của Zalo OA');
+    }
+
+    // Nếu vừa mới bị lỗi refresh trong vòng 15 phút, tạm ngưng gọi Zalo OAuth để tránh bão lỗi
+    if (lastOARefreshFailTime && (Date.now() - lastOARefreshFailTime < 15 * 60 * 1000)) {
+      throw new Error('Refresh token Zalo OA đang tạm dừng thử lại do lỗi trước đó (chờ 15 phút)');
     }
 
     try {
@@ -69,11 +84,15 @@ class ZaloOAService {
         }
         config.tokenExpiresAt = new Date(Date.now() + (resData.expires_in || 90000) * 1000);
         await config.save();
+        cachedConfig = config;
+        lastOARefreshFailTime = 0;
         return config.accessToken;
       } else {
+        lastOARefreshFailTime = Date.now();
         throw new Error(resData?.message || 'Không thể gia hạn token Zalo OA');
       }
     } catch (error) {
+      lastOARefreshFailTime = Date.now();
       console.error('Lỗi khi làm mới access token Zalo OA:', error.message);
       throw error;
     }
@@ -89,6 +108,9 @@ class ZaloOAService {
     // Kiểm tra thời hạn token (dự phòng hết hạn trước 5 phút)
     const isExpired = !config.tokenExpiresAt || new Date(config.tokenExpiresAt).getTime() - Date.now() < 5 * 60 * 1000;
     if (isExpired && config.refreshToken) {
+      if (lastOARefreshFailTime && (Date.now() - lastOARefreshFailTime < 15 * 60 * 1000)) {
+        return null;
+      }
       try {
         return await this.refreshAccessToken(config);
       } catch (err) {
@@ -173,16 +195,20 @@ class ZaloOAService {
             }),
           });
           const botData = await botRes.json();
+          const targetName = typeof target === 'object' ? (target.name || target.mobile) : target;
           if (botRes.ok && botData?.ok !== false) {
+            console.log(`[Zalo Bot] Gửi thành công tới "${targetName}" (chat_id: ${realZaloChatId}, msg_id: ${botData?.result?.message_id})`);
             return { success: true, channel: 'ZALO_BOT', data: botData };
           } else {
+            const failReason = botData?.description || (typeof botData === 'object' ? JSON.stringify(botData) : 'Lỗi không xác định');
+            console.warn(`[Zalo Bot] Gửi thất bại tới "${targetName}" (chat_id: ${realZaloChatId}): ${failReason}`);
             return {
               success: false,
               reason: botData?.description || `Cán bộ đã liên kết Zalo ID (${realZaloChatId}) nhưng chưa mở khung chat riêng với Bot NSG-Office. Hướng dẫn: Cán bộ bấm vào Bot NSG-Office trong nhóm Zalo (hoặc mở https://bot.zaloplatforms.com/bots/1371050577415650488) và nhắn 1 tin bất kỳ trực tiếp cho Bot để nhận tin nhắn riêng!`,
             };
           }
         } catch (botErr) {
-          console.warn('Gửi qua Zalo Bot không thành công, thử tiếp qua Zalo OA:', botErr.message);
+          console.warn('[Zalo Bot] Lỗi kết nối khi gửi qua Bot NSG-Office, thử tiếp qua Zalo OA:', botErr.message);
         }
       }
 
@@ -545,7 +571,10 @@ class ZaloOAService {
 
       // 3. Gửi tin nhắn cá nhân đến từng cán bộ (loại bỏ trùng lặp và không gửi lại vào Group Chat ID)
       if ((config.isActive || config.botToken) && Array.isArray(recipients) && recipients.length > 0) {
-        const sendTasks = [];
+        // Kiểm tra xem Zalo OA có token hợp lệ hay không trước khi gửi
+        const validOaToken = config.isActive ? await this.getValidToken() : null;
+
+        const tasksToRun = [];
         for (const user of recipients) {
           if (!user || (!user.zaloId && !user.mobile)) continue;
           if (user.zaloNotifications && user.zaloNotifications.enabled === false) continue;
@@ -556,21 +585,39 @@ class ZaloOAService {
           const isEmailInZaloId = uZaloId.includes('@');
           const realZaloChatId = (uZaloId && !isPhoneInZaloId && !isEmailInZaloId) ? uZaloId : '';
 
-          // Nếu không bật Zalo OA ZNS (chỉ dùng Bot NSG-Office) thì chỉ gửi tin cá nhân cho người đã có realZaloChatId
-          if (!config.isActive && !realZaloChatId) continue;
+          // Nếu người dùng không có realZaloChatId và hệ thống không có token Zalo OA hợp lệ -> bỏ qua để tránh spam request lỗi
+          if (!realZaloChatId && !validOaToken) {
+            continue;
+          }
 
           const uKey = realZaloChatId || String(user.mobile || '').trim();
           if (!uKey || sentChatIds.has(uKey)) continue;
 
           sentChatIds.add(uKey);
-          sendTasks.push(
-            this.sendMessageToUser(user, message, { skipSync: true }).catch((err) =>
-              console.warn('Lỗi gửi Zalo cá nhân trong dispatchNotification:', err?.message)
-            )
-          );
+          tasksToRun.push(() => this.sendMessageToUser(user, message, { skipSync: true }));
         }
-        if (sendTasks.length > 0) {
-          await Promise.allSettled(sendTasks);
+
+        if (tasksToRun.length > 0) {
+          let successCount = 0;
+          let failCount = 0;
+          for (const sendFn of tasksToRun) {
+            try {
+              const res = await sendFn();
+              if (res && res.success) {
+                successCount++;
+              } else {
+                failCount++;
+              }
+            } catch (err) {
+              failCount++;
+              console.warn('[Zalo Dispatch] Lỗi gửi tin cá nhân:', err?.message);
+            }
+            // Giãn cách 60ms giữa các tin nhắn để bảo đảm Zalo Bot API không bị quá tải / rate-limit
+            if (tasksToRun.length > 1) {
+              await new Promise((r) => setTimeout(r, 60));
+            }
+          }
+          console.log(`[Zalo Dispatch] Kết thúc gửi tin sự kiện "${eventType}": Thành công ${successCount}/${tasksToRun.length}, Thất bại/bỏ qua ${failCount}`);
         }
       }
     } catch (error) {
