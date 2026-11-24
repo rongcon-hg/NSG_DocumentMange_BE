@@ -107,11 +107,12 @@ const getConversation = async (req, res) => {
   }
 };
 
-// Thống kê số tin nhắn chưa đọc
+// Thống kê số tin nhắn chưa đọc & cuộc hội thoại gần nhất
 const getUnreadSummary = async (req, res) => {
   try {
     const currentUserId = req.user._id;
 
+    // 1. Thống kê tin nhắn chưa đọc gửi cho tôi theo từng người
     const unreadMessages = await DirectMessage.aggregate([
       {
         $match: {
@@ -123,6 +124,7 @@ const getUnreadSummary = async (req, res) => {
         $group: {
           _id: "$sender",
           count: { $sum: 1 },
+          lastUnreadAt: { $max: "$createdAt" },
         },
       },
     ]);
@@ -135,10 +137,58 @@ const getUnreadSummary = async (req, res) => {
       unreadByPartner[item._id.toString()] = item.count;
     });
 
+    // 2. Tìm thời điểm và nội dung tin nhắn gần nhất giữa tôi và từng người (gửi hoặc nhận)
+    const recentConvs = await DirectMessage.aggregate([
+      {
+        $match: {
+          $or: [
+            { sender: currentUserId },
+            { recipient: currentUserId },
+          ],
+        },
+      },
+      {
+        $project: {
+          partner: {
+            $cond: [
+              { $eq: ["$sender", currentUserId] },
+              "$recipient",
+              "$sender",
+            ],
+          },
+          content: 1,
+          createdAt: 1,
+          sender: 1,
+          isRead: 1,
+        },
+      },
+      {
+        $sort: { createdAt: -1 },
+      },
+      {
+        $group: {
+          _id: "$partner",
+          lastMessageAt: { $first: "$createdAt" },
+          lastMessageContent: { $first: "$content" },
+          lastSender: { $first: "$sender" },
+        },
+      },
+    ]);
+
+    const recentChatMap = {};
+    recentConvs.forEach((item) => {
+      recentChatMap[item._id.toString()] = {
+        lastMessageAt: item.lastMessageAt,
+        lastMessageContent: item.lastMessageContent,
+        lastSender: item.lastSender,
+      };
+    });
+
     return res.status(200).json({
       success: true,
       totalUnread,
       unreadByPartner,
+      recentChatMap,
     });
   } catch (error) {
     console.error("Lỗi getUnreadSummary:", error);
