@@ -907,12 +907,15 @@ const updateActiveUser = async (userId) => {
   const isAdmin = u.role === "admin";
   const posName = u.position?.positionName || (isAdmin ? "Quản trị viên" : "Cán bộ");
   const deptName = u.department?.departmentName || (isAdmin ? "Ban Quản trị" : "Đơn vị nội bộ");
+  const avatarPath = u.avatar?.fileId
+    ? `/authen/avatar/${u.avatar.fileId}`
+    : (u.avatar?.url || "");
 
   const userObj = {
     _id: u._id,
     name: u.name,
     email: u.email,
-    avatar: u.avatar?.url || "",
+    avatar: avatarPath,
     role: u.role,
     department: deptName,
     position: posName,
@@ -965,11 +968,14 @@ const heartbeat = async (req, res) => {
         const isAdmin = u.role === "admin";
         const posName = u.position?.positionName || (isAdmin ? "Quản trị viên" : "Cán bộ");
         const deptName = u.department?.departmentName || (isAdmin ? "Ban Quản trị" : "Đơn vị nội bộ");
+        const avatarPath = u.avatar?.fileId
+          ? `/authen/avatar/${u.avatar.fileId}`
+          : (u.avatar?.url || "");
         activeUsersMap.set(u._id.toString(), {
           _id: u._id,
           name: u.name,
           email: u.email,
-          avatar: u.avatar?.url || "",
+          avatar: avatarPath,
           role: u.role,
           department: deptName,
           position: posName,
@@ -1023,11 +1029,14 @@ const getOnlineUsers = async (req, res) => {
         const isAdmin = u.role === "admin";
         const posName = u.position?.positionName || (isAdmin ? "Quản trị viên" : "Cán bộ");
         const deptName = u.department?.departmentName || (isAdmin ? "Ban Quản trị" : "Đơn vị nội bộ");
+        const avatarPath = u.avatar?.fileId
+          ? `/authen/avatar/${u.avatar.fileId}`
+          : (u.avatar?.url || "");
         activeUsersMap.set(u._id.toString(), {
           _id: u._id,
           name: u.name,
           email: u.email,
-          avatar: u.avatar?.url || "",
+          avatar: avatarPath,
           role: u.role,
           department: deptName,
           position: posName,
