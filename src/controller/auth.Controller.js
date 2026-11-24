@@ -877,18 +877,11 @@ const touchActiveUser = (user) => {
   const existing = activeUsersMap.get(userId);
   if (existing) {
     existing.lastActive = now;
+    if (!existing.position || existing.position === "Chưa thiết lập" || existing.department === "Chưa phân bổ") {
+      updateActiveUser(userId).catch(() => {});
+    }
   } else {
-    activeUsersMap.set(userId, {
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      avatar: user.avatar?.url || "",
-      role: user.role,
-      department: user.department?.departmentName || (typeof user.department === 'string' ? user.department : "Chưa phân bổ"),
-      position: user.position?.positionName || (typeof user.position === 'string' ? user.position : "Chưa thiết lập"),
-      lastActive: now,
-      lastDbUpdate: now,
-    });
+    updateActiveUser(userId).catch(() => {});
   }
 };
 
@@ -897,8 +890,8 @@ const updateActiveUser = async (userId) => {
   const now = new Date();
   const existing = activeUsersMap.get(userId.toString());
   
-  // Throttle query nếu vừa cập nhật trong vòng 30s
-  if (existing && (now - existing.lastActive < 30 * 1000)) {
+  // Throttle query nếu vừa cập nhật trong vòng 30s và đã có đầy đủ chức danh
+  if (existing && existing.position && existing.position !== "Chưa thiết lập" && (now - existing.lastActive < 30 * 1000)) {
     existing.lastActive = now;
     return existing;
   }
@@ -911,14 +904,18 @@ const updateActiveUser = async (userId) => {
 
   if (!u) return null;
 
+  const isAdmin = u.role === "admin";
+  const posName = u.position?.positionName || (isAdmin ? "Quản trị viên" : "Cán bộ");
+  const deptName = u.department?.departmentName || (isAdmin ? "Ban Quản trị" : "Đơn vị nội bộ");
+
   const userObj = {
     _id: u._id,
     name: u.name,
     email: u.email,
     avatar: u.avatar?.url || "",
     role: u.role,
-    department: u.department?.departmentName || "Chưa phân bổ",
-    position: u.position?.positionName || "Chưa thiết lập",
+    department: deptName,
+    position: posName,
     lastActive: now,
     lastDbUpdate: existing?.lastDbUpdate || now,
   };
@@ -965,14 +962,17 @@ const heartbeat = async (req, res) => {
         .lean();
 
       dbOnline.forEach(u => {
+        const isAdmin = u.role === "admin";
+        const posName = u.position?.positionName || (isAdmin ? "Quản trị viên" : "Cán bộ");
+        const deptName = u.department?.departmentName || (isAdmin ? "Ban Quản trị" : "Đơn vị nội bộ");
         activeUsersMap.set(u._id.toString(), {
           _id: u._id,
           name: u.name,
           email: u.email,
           avatar: u.avatar?.url || "",
           role: u.role,
-          department: u.department?.departmentName || "Chưa phân bổ",
-          position: u.position?.positionName || "Chưa thiết lập",
+          department: deptName,
+          position: posName,
           lastActive: u.lastActive || new Date(),
           lastDbUpdate: u.lastActive || new Date(),
         });
@@ -1020,14 +1020,17 @@ const getOnlineUsers = async (req, res) => {
         .lean();
 
       dbOnline.forEach(u => {
+        const isAdmin = u.role === "admin";
+        const posName = u.position?.positionName || (isAdmin ? "Quản trị viên" : "Cán bộ");
+        const deptName = u.department?.departmentName || (isAdmin ? "Ban Quản trị" : "Đơn vị nội bộ");
         activeUsersMap.set(u._id.toString(), {
           _id: u._id,
           name: u.name,
           email: u.email,
           avatar: u.avatar?.url || "",
           role: u.role,
-          department: u.department?.departmentName || "Chưa phân bổ",
-          position: u.position?.positionName || "Chưa thiết lập",
+          department: deptName,
+          position: posName,
           lastActive: u.lastActive || new Date(),
           lastDbUpdate: u.lastActive || new Date(),
         });
