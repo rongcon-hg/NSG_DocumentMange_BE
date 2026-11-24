@@ -23,6 +23,10 @@ router.post('/avatar', verifyToken, upload.single('avatar'), authController.uplo
 router.get('/avatar/:fileId', authController.getAvatarImage);
 router.delete('/avatar', verifyToken, authController.deleteAvatar);
 
+router.post('/heartbeat', verifyToken, authController.heartbeat);
+router.get('/online-users', verifyToken, authController.getOnlineUsers);
+router.post('/offline', verifyToken, authController.reportOffline);
+
 router.post('/createUser', verifyManager, authController.createUser);
 router.post('/importUsers', verifyManager, authController.importUsers);
 router.post('/signin', authLimiter, authController.signin);

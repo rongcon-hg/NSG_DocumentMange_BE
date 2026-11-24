@@ -158,6 +158,7 @@ const signin = async (req, res) => {
             if (user.role === null) {
                 return res.status(403).json({ message: "Tài khoản đang bị vô hiệu hóa vui lòng liên hệ quản trị viên để được hỗ trợ, hướng dẫn, Xin cảm ơn!" });
             }
+            await User.updateOne({ _id: user._id }, { lastLogin: new Date(), lastActive: new Date() });
             const { accessToken } = generateToken(user._id, user.role);
             return res.status(200).json({
                 accessToken: accessToken,
@@ -865,6 +866,174 @@ const autoSyncAllUserRolesAndPositions = async (req, res) => {
   }
 };
 
+// Quản lý trạng thái người dùng trực tuyến (Online presence)
+const activeUsersMap = new Map();
+const ONLINE_THRESHOLD_MS = 2.5 * 60 * 1000; // 2.5 phút không heartbeat thì xem như offline
+
+const updateActiveUser = async (userId) => {
+  if (!userId) return null;
+  const now = new Date();
+  const existing = activeUsersMap.get(userId.toString());
+  
+  // Throttle query nếu vừa cập nhật trong vòng 30s
+  if (existing && (now - existing.lastActive < 30 * 1000)) {
+    existing.lastActive = now;
+    return existing;
+  }
+
+  const u = await User.findById(userId)
+    .select("name email avatar role department position lastActive")
+    .populate("position", "positionName positionCode")
+    .populate("department", "departmentName departmentCode")
+    .lean();
+
+  if (!u) return null;
+
+  const userObj = {
+    _id: u._id,
+    name: u.name,
+    email: u.email,
+    avatar: u.avatar?.url || "",
+    role: u.role,
+    department: u.department?.departmentName || "Chưa phân bổ",
+    position: u.position?.positionName || "Chưa thiết lập",
+    lastActive: now,
+    lastDbUpdate: existing?.lastDbUpdate || now,
+  };
+
+  if (!existing || !existing.lastDbUpdate || (now - existing.lastDbUpdate > 60 * 1000)) {
+    await User.updateOne({ _id: userId }, { lastActive: now });
+    userObj.lastDbUpdate = now;
+  }
+
+  activeUsersMap.set(userId.toString(), userObj);
+  return userObj;
+};
+
+const cleanInactiveUsers = () => {
+  const cutoff = new Date(Date.now() - ONLINE_THRESHOLD_MS);
+  for (const [id, userObj] of activeUsersMap.entries()) {
+    if (userObj.lastActive < cutoff) {
+      activeUsersMap.delete(id);
+    }
+  }
+};
+
+const heartbeat = async (req, res) => {
+  try {
+    const userId = req.user?._id;
+    if (userId) {
+      await updateActiveUser(userId);
+    }
+    cleanInactiveUsers();
+
+    // Fallback nếu map rỗng (ví dụ server vừa khởi động lại)
+    if (activeUsersMap.size === 0) {
+      const cutoff = new Date(Date.now() - ONLINE_THRESHOLD_MS);
+      const dbOnline = await User.find({ lastActive: { $gte: cutoff } })
+        .select("name email avatar role department position lastActive")
+        .populate("position", "positionName positionCode")
+        .populate("department", "departmentName departmentCode")
+        .lean();
+
+      dbOnline.forEach(u => {
+        activeUsersMap.set(u._id.toString(), {
+          _id: u._id,
+          name: u.name,
+          email: u.email,
+          avatar: u.avatar?.url || "",
+          role: u.role,
+          department: u.department?.departmentName || "Chưa phân bổ",
+          position: u.position?.positionName || "Chưa thiết lập",
+          lastActive: u.lastActive || new Date(),
+          lastDbUpdate: u.lastActive || new Date(),
+        });
+      });
+    }
+
+    const onlineList = Array.from(activeUsersMap.values()).map(u => ({
+      _id: u._id,
+      name: u.name,
+      email: u.email,
+      avatar: u.avatar,
+      role: u.role,
+      department: u.department,
+      position: u.position,
+      lastActive: u.lastActive,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      totalOnline: onlineList.length,
+      users: onlineList,
+    });
+  } catch (error) {
+    console.error("Lỗi heartbeat online:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const getOnlineUsers = async (req, res) => {
+  try {
+    cleanInactiveUsers();
+
+    if (activeUsersMap.size === 0) {
+      const cutoff = new Date(Date.now() - ONLINE_THRESHOLD_MS);
+      const dbOnline = await User.find({ lastActive: { $gte: cutoff } })
+        .select("name email avatar role department position lastActive")
+        .populate("position", "positionName positionCode")
+        .populate("department", "departmentName departmentCode")
+        .lean();
+
+      dbOnline.forEach(u => {
+        activeUsersMap.set(u._id.toString(), {
+          _id: u._id,
+          name: u.name,
+          email: u.email,
+          avatar: u.avatar?.url || "",
+          role: u.role,
+          department: u.department?.departmentName || "Chưa phân bổ",
+          position: u.position?.positionName || "Chưa thiết lập",
+          lastActive: u.lastActive || new Date(),
+          lastDbUpdate: u.lastActive || new Date(),
+        });
+      });
+    }
+
+    const onlineList = Array.from(activeUsersMap.values()).map(u => ({
+      _id: u._id,
+      name: u.name,
+      email: u.email,
+      avatar: u.avatar,
+      role: u.role,
+      department: u.department,
+      position: u.position,
+      lastActive: u.lastActive,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      totalOnline: onlineList.length,
+      users: onlineList,
+    });
+  } catch (error) {
+    console.error("Lỗi getOnlineUsers:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const reportOffline = async (req, res) => {
+  try {
+    const userId = req.user?._id?.toString();
+    if (userId && activeUsersMap.has(userId)) {
+      activeUsersMap.delete(userId);
+    }
+    return res.status(200).json({ success: true });
+  } catch (e) {
+    return res.status(200).json({ success: true });
+  }
+};
+
 module.exports = {
     signin,
     createUser,
@@ -883,4 +1052,7 @@ module.exports = {
     deleteAvatar,
     autoSyncAllUserRolesAndPositions,
     determineRoleByPosition,
+    heartbeat,
+    getOnlineUsers,
+    reportOffline,
 };

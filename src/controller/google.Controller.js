@@ -123,11 +123,13 @@ const googleCallback = async (req, res) => {
       // Đăng nhập thành công, tạo JWT
       const { accessToken } = generateToken(user._id, user.role);
       
-      // Update Google tokens
+      // Update Google tokens & Login time
       const updateData = {
         "google.googleId": profile.id,
         "google.accessToken": tokens.access_token,
-        "google.tokenExpiryDate": tokens.expiry_date ? new Date(tokens.expiry_date) : null
+        "google.tokenExpiryDate": tokens.expiry_date ? new Date(tokens.expiry_date) : null,
+        lastLogin: new Date(),
+        lastActive: new Date()
       };
       if (tokens.refresh_token) {
         updateData["google.refreshToken"] = tokens.refresh_token;

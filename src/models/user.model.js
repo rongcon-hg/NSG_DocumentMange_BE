@@ -122,6 +122,15 @@ const userSchema = new mongoose.Schema({
         headerBg: { type: String, default: "" },
         sidebarBg: { type: String, default: "" },
     },
+    lastActive: {
+        type: Date,
+        default: Date.now,
+        index: true,
+    },
+    lastLogin: {
+        type: Date,
+        default: Date.now,
+    },
 },
 {
   timestamps: true,
