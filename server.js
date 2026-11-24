@@ -228,6 +228,11 @@ const vehicleRoutes = require('./src/routes/vehicle.routes');
 app.use('/api/vehicles', vehicleRoutes);
 app.use('/vehicles', vehicleRoutes);
 
+// Direct Private Messages (Tin nhắn cá nhân nội bộ) routes
+const directMessageRoutes = require('./src/routes/directMessage.routes');
+app.use('/api/messages', directMessageRoutes);
+app.use('/messages', directMessageRoutes);
+
 // Cron endpoint for Vercel
 const cronRoutes = require('./src/routes/cronRoutes');
 app.use('/api/cron', cronRoutes);
