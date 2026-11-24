@@ -22,6 +22,14 @@ const middlewareController = {
           return res.status(403).json({ message: "User role is invalid or missing" });
         }
         req.user = user;
+        try {
+          const authController = require("../controller/auth.Controller");
+          if (authController && typeof authController.touchActiveUser === "function") {
+            authController.touchActiveUser(user);
+          }
+        } catch (e) {
+          // ignore
+        }
         next();
       } catch (error) {
         return res.status(403).json({ message: "Token is not valid" });

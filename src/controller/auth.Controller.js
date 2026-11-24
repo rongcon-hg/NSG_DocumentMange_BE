@@ -868,7 +868,29 @@ const autoSyncAllUserRolesAndPositions = async (req, res) => {
 
 // Quản lý trạng thái người dùng trực tuyến (Online presence)
 const activeUsersMap = new Map();
-const ONLINE_THRESHOLD_MS = 2.5 * 60 * 1000; // 2.5 phút không heartbeat thì xem như offline
+const ONLINE_THRESHOLD_MS = 5 * 60 * 1000; // 5 phút không có hoạt động thì xem như offline
+
+const touchActiveUser = (user) => {
+  if (!user || !user._id) return;
+  const userId = user._id.toString();
+  const now = new Date();
+  const existing = activeUsersMap.get(userId);
+  if (existing) {
+    existing.lastActive = now;
+  } else {
+    activeUsersMap.set(userId, {
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      avatar: user.avatar?.url || "",
+      role: user.role,
+      department: user.department?.departmentName || (typeof user.department === 'string' ? user.department : "Chưa phân bổ"),
+      position: user.position?.positionName || (typeof user.position === 'string' ? user.position : "Chưa thiết lập"),
+      lastActive: now,
+      lastDbUpdate: now,
+    });
+  }
+};
 
 const updateActiveUser = async (userId) => {
   if (!userId) return null;
@@ -930,7 +952,13 @@ const heartbeat = async (req, res) => {
     // Fallback nếu map rỗng (ví dụ server vừa khởi động lại)
     if (activeUsersMap.size === 0) {
       const cutoff = new Date(Date.now() - ONLINE_THRESHOLD_MS);
-      const dbOnline = await User.find({ lastActive: { $gte: cutoff } })
+      const loginCutoff = new Date(Date.now() - 30 * 60 * 1000); // Trong vòng 30 phút đăng nhập
+      const dbOnline = await User.find({
+        $or: [
+          { lastActive: { $gte: cutoff } },
+          { lastLogin: { $gte: loginCutoff } }
+        ]
+      })
         .select("name email avatar role department position lastActive")
         .populate("position", "positionName positionCode")
         .populate("department", "departmentName departmentCode")
@@ -979,7 +1007,13 @@ const getOnlineUsers = async (req, res) => {
 
     if (activeUsersMap.size === 0) {
       const cutoff = new Date(Date.now() - ONLINE_THRESHOLD_MS);
-      const dbOnline = await User.find({ lastActive: { $gte: cutoff } })
+      const loginCutoff = new Date(Date.now() - 30 * 60 * 1000);
+      const dbOnline = await User.find({
+        $or: [
+          { lastActive: { $gte: cutoff } },
+          { lastLogin: { $gte: loginCutoff } }
+        ]
+      })
         .select("name email avatar role department position lastActive")
         .populate("position", "positionName positionCode")
         .populate("department", "departmentName departmentCode")
@@ -1055,4 +1089,5 @@ module.exports = {
     heartbeat,
     getOnlineUsers,
     reportOffline,
+    touchActiveUser,
 };
