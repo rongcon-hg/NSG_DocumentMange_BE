@@ -87,6 +87,16 @@ const recurringWorkScheduleSchema = new mongoose.Schema(
       type: Number,
       default: 1,
     },
+    // Thời gian bắt đầu lặp (không bắt buộc - nếu có thì chỉ bắt đầu sinh lịch từ ngày này trở đi)
+    recurringStartDate: {
+      type: Date,
+      default: null,
+    },
+    // Thời gian kết thúc lặp (không bắt buộc - nếu có thì không sinh lịch sau ngày này)
+    recurringEndDate: {
+      type: Date,
+      default: null,
+    },
     // Trạng thái bật / tắt kích hoạt tự động sinh lịch
     isActive: {
       type: Boolean,

@@ -8,9 +8,21 @@ const User = require("../models/user.model");
  * @param {Date} baseDate
  */
 const calculateNextRunDate = (recSchedule, baseDate = new Date()) => {
-  const d = new Date(baseDate);
+  let d = new Date(baseDate);
   d.setHours(0, 0, 0, 0);
 
+  // Nếu có recurringStartDate và ngày này ở tương lai so với baseDate:
+  if (recSchedule.recurringStartDate) {
+    const recStart = new Date(recSchedule.recurringStartDate);
+    recStart.setHours(0, 0, 0, 0);
+    if (recStart > d) {
+      // Lấy ngày liền trước recurringStartDate để nếu chính recurringStartDate thỏa mãn chu kỳ thì nó được chọn
+      d = new Date(recStart);
+      d.setDate(d.getDate() - 1);
+    }
+  }
+
+  let nextDate = null;
   const freq = recSchedule.frequency || "WEEKLY";
 
   if (freq === "WEEKLY") {
@@ -25,24 +37,23 @@ const calculateNextRunDate = (recSchedule, baseDate = new Date()) => {
       const jsDay = checkDate.getDay();
       const modelDay = jsDay === 0 ? 7 : jsDay;
       if (days.includes(modelDay)) {
-        return checkDate;
+        nextDate = checkDate;
+        break;
       }
     }
-    d.setDate(d.getDate() + 7);
-    return d;
-  }
-
-  if (freq === "MONTHLY") {
+    if (!nextDate) {
+      d.setDate(d.getDate() + 7);
+      nextDate = d;
+    }
+  } else if (freq === "MONTHLY") {
     const targetDay = recSchedule.repeatDayOfMonth || 1;
     let candidate = new Date(d.getFullYear(), d.getMonth(), targetDay, 0, 0, 0, 0);
 
     if (candidate.getTime() <= d.getTime()) {
       candidate = new Date(d.getFullYear(), d.getMonth() + 1, targetDay, 0, 0, 0, 0);
     }
-    return candidate;
-  }
-
-  if (freq === "QUARTERLY") {
+    nextDate = candidate;
+  } else if (freq === "QUARTERLY") {
     const offset = Math.max(0, Math.min(2, (recSchedule.repeatQuarterMonth || 1) - 1)); // 0: tháng đầu, 1: tháng giữa, 2: tháng cuối
     const targetDay = recSchedule.repeatDayOfMonth || 1;
     const quarters =
@@ -54,15 +65,16 @@ const calculateNextRunDate = (recSchedule, baseDate = new Date()) => {
     for (const m of validMonths) {
       const candidate = new Date(d.getFullYear(), m, targetDay, 0, 0, 0, 0);
       if (candidate.getTime() > d.getTime()) {
-        return candidate;
+        nextDate = candidate;
+        break;
       }
     }
 
     // Nếu hết năm, nhảy sang quý đầu của năm sau
-    return new Date(d.getFullYear() + 1, validMonths[0] !== undefined ? validMonths[0] : offset, targetDay, 0, 0, 0, 0);
-  }
-
-  if (freq === "YEARLY") {
+    if (!nextDate) {
+      nextDate = new Date(d.getFullYear() + 1, validMonths[0] !== undefined ? validMonths[0] : offset, targetDay, 0, 0, 0, 0);
+    }
+  } else if (freq === "YEARLY") {
     const targetMonth = (recSchedule.repeatMonthOfYear || 1) - 1; // 0 - 11
     const targetDay = recSchedule.repeatDayOfMonth || 1;
     let candidate = new Date(d.getFullYear(), targetMonth, targetDay, 0, 0, 0, 0);
@@ -70,11 +82,22 @@ const calculateNextRunDate = (recSchedule, baseDate = new Date()) => {
     if (candidate.getTime() <= d.getTime()) {
       candidate = new Date(d.getFullYear() + 1, targetMonth, targetDay, 0, 0, 0, 0);
     }
-    return candidate;
+    nextDate = candidate;
+  } else {
+    d.setDate(d.getDate() + 7);
+    nextDate = d;
   }
 
-  d.setDate(d.getDate() + 7);
-  return d;
+  // Nếu có recurringEndDate, kiểm tra xem nextDate có vượt quá thời hạn lặp không
+  if (nextDate && recSchedule.recurringEndDate) {
+    const recEnd = new Date(recSchedule.recurringEndDate);
+    recEnd.setHours(23, 59, 59, 999);
+    if (nextDate.getTime() > recEnd.getTime()) {
+      return null; // Đã quá hạn lặp, không sinh lịch tiếp
+    }
+  }
+
+  return nextDate;
 };
 
 /**
@@ -101,6 +124,29 @@ const generateSingleScheduleFromRecurring = async (
 
     const startDate = new Date(`${startStr}T00:00:00+07:00`);
     const endDate = new Date(`${endStr}T23:59:59+07:00`);
+
+    // Kiểm tra giới hạn ngày bắt đầu & kết thúc lặp (nếu có cấu hình)
+    if (recSchedule.recurringStartDate) {
+      const recStart = new Date(recSchedule.recurringStartDate);
+      recStart.setHours(0, 0, 0, 0);
+      if (startDate < recStart) {
+        console.log(`[RecurringSchedule] Bỏ qua ngày ${startStr} do trước ngày bắt đầu lặp.`);
+        recSchedule.nextRunDate = calculateNextRunDate(recSchedule, runDate);
+        await recSchedule.save();
+        return null;
+      }
+    }
+
+    if (recSchedule.recurringEndDate) {
+      const recEnd = new Date(recSchedule.recurringEndDate);
+      recEnd.setHours(23, 59, 59, 999);
+      if (startDate > recEnd) {
+        console.log(`[RecurringSchedule] Bỏ qua ngày ${startStr} do sau ngày kết thúc lặp.`);
+        recSchedule.nextRunDate = null;
+        await recSchedule.save();
+        return null;
+      }
+    }
 
     // Kiểm tra trùng lặp để tránh tạo nhiều lần trong cùng ngày cho cùng một mẫu
     const existing = await WorkSchedule.findOne({
@@ -201,6 +247,17 @@ const executeRecurringWorkSchedulesGeneration = async () => {
         // Cho phép tối đa 20 vòng lặp để bắt kịp nếu có ngày trong quá khứ bị bỏ lỡ
         let loopLimit = 0;
         while (currentTargetDate && currentTargetDate <= horizonDate && loopLimit < 20) {
+          // Kiểm tra nếu template có ngày kết thúc lặp và currentTargetDate đã vượt qua
+          if (template.recurringEndDate) {
+            const recEnd = new Date(template.recurringEndDate);
+            recEnd.setHours(23, 59, 59, 999);
+            if (new Date(currentTargetDate).getTime() > recEnd.getTime()) {
+              template.nextRunDate = null;
+              await template.save();
+              break;
+            }
+          }
+
           loopLimit++;
           const prevTime = new Date(currentTargetDate).getTime();
           await generateSingleScheduleFromRecurring(template, currentTargetDate);

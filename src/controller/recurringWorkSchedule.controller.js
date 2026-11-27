@@ -109,6 +109,8 @@ exports.createRecurringWorkSchedule = async (req, res) => {
       repeatQuarterMonth,
       repeatQuarters,
       repeatMonthOfYear,
+      recurringStartDate,
+      recurringEndDate,
       startDate, // Ngày bắt đầu tính chu kỳ
     } = req.body;
 
@@ -138,10 +140,12 @@ exports.createRecurringWorkSchedule = async (req, res) => {
       repeatQuarterMonth: Number(repeatQuarterMonth) || 1,
       repeatQuarters: Array.isArray(repeatQuarters) ? repeatQuarters : [1, 2, 3, 4],
       repeatMonthOfYear: Number(repeatMonthOfYear) || 1,
+      recurringStartDate: recurringStartDate || startDate ? new Date(recurringStartDate || startDate) : null,
+      recurringEndDate: recurringEndDate ? new Date(recurringEndDate) : null,
       isActive: true,
     });
 
-    const baseD = startDate ? new Date(startDate) : new Date();
+    const baseD = recurringStartDate ? new Date(recurringStartDate) : startDate ? new Date(startDate) : new Date();
     newTemplate.nextRunDate = calculateNextRunDate(newTemplate, baseD);
 
     await newTemplate.save();
@@ -207,6 +211,8 @@ exports.updateRecurringWorkSchedule = async (req, res) => {
       repeatQuarterMonth,
       repeatQuarters,
       repeatMonthOfYear,
+      recurringStartDate,
+      recurringEndDate,
       isActive,
     } = req.body;
 
@@ -226,6 +232,12 @@ exports.updateRecurringWorkSchedule = async (req, res) => {
     if (repeatQuarterMonth !== undefined) template.repeatQuarterMonth = Number(repeatQuarterMonth);
     if (repeatQuarters !== undefined) template.repeatQuarters = repeatQuarters;
     if (repeatMonthOfYear !== undefined) template.repeatMonthOfYear = Number(repeatMonthOfYear);
+    if (recurringStartDate !== undefined) {
+      template.recurringStartDate = recurringStartDate ? new Date(recurringStartDate) : null;
+    }
+    if (recurringEndDate !== undefined) {
+      template.recurringEndDate = recurringEndDate ? new Date(recurringEndDate) : null;
+    }
     if (isActive !== undefined) template.isActive = Boolean(isActive);
 
     // Tính lại nextRunDate nếu chu kỳ thay đổi
