@@ -7,19 +7,30 @@ const User = require("../models/user.model");
  * @param {Object} recSchedule
  * @param {Date} baseDate
  */
-const calculateNextRunDate = (recSchedule, baseDate = new Date()) => {
+/**
+ * Tính ngày chạy tiếp theo cho Mẫu lịch công tác định kỳ
+ * @param {Object} recSchedule
+ * @param {Date} baseDate
+ * @param {Boolean} checkCurrentDay Có kiểm tra chính ngày baseDate không (mặc định false - tính từ ngày kế tiếp)
+ */
+const calculateNextRunDate = (recSchedule, baseDate = new Date(), checkCurrentDay = false) => {
   let d = new Date(baseDate);
   d.setHours(0, 0, 0, 0);
 
-  // Nếu có recurringStartDate và ngày này ở tương lai so với baseDate:
+  // Nếu có recurringStartDate:
   if (recSchedule.recurringStartDate) {
     const recStart = new Date(recSchedule.recurringStartDate);
     recStart.setHours(0, 0, 0, 0);
     if (recStart > d) {
-      // Lấy ngày liền trước recurringStartDate để nếu chính recurringStartDate thỏa mãn chu kỳ thì nó được chọn
+      // Nếu ngày bắt đầu ở tương lai, lấy ngày liền trước để ngày bắt đầu có thể được xét
       d = new Date(recStart);
       d.setDate(d.getDate() - 1);
+    } else if (checkCurrentDay && recStart.getTime() === d.getTime()) {
+      // Nếu ngày bắt đầu chính là hôm nay và được phép kiểm tra hôm nay
+      d.setDate(d.getDate() - 1);
     }
+  } else if (checkCurrentDay) {
+    d.setDate(d.getDate() - 1);
   }
 
   let nextDate = null;

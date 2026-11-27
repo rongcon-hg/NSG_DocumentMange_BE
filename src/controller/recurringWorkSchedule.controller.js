@@ -146,7 +146,7 @@ exports.createRecurringWorkSchedule = async (req, res) => {
     });
 
     const baseD = recurringStartDate ? new Date(recurringStartDate) : startDate ? new Date(startDate) : new Date();
-    newTemplate.nextRunDate = calculateNextRunDate(newTemplate, baseD);
+    newTemplate.nextRunDate = calculateNextRunDate(newTemplate, baseD, true);
 
     await newTemplate.save();
 
@@ -368,9 +368,30 @@ exports.runRecurringWorkScheduleNow = async (req, res) => {
       req.user._id
     );
 
+    if (!generatedSchedule) {
+      const dateStr = new Date(runDate).toLocaleDateString("vi-VN");
+      if (template.recurringStartDate && new Date(runDate) < new Date(template.recurringStartDate)) {
+        return res.status(400).json({
+          success: false,
+          message: `Không thể sinh lịch: Ngày ${dateStr} nằm trước thời gian bắt đầu lặp (${new Date(template.recurringStartDate).toLocaleDateString("vi-VN")}).`,
+        });
+      }
+      if (template.recurringEndDate && new Date(runDate) > new Date(template.recurringEndDate)) {
+        return res.status(400).json({
+          success: false,
+          message: `Không thể sinh lịch: Mẫu lịch này đã kết thúc chu kỳ lặp vào ngày ${new Date(template.recurringEndDate).toLocaleDateString("vi-VN")}.`,
+        });
+      }
+      return res.status(200).json({
+        success: true,
+        message: `Lịch công tác cho ngày ${dateStr} đã tồn tại trong hệ thống. Lần chạy kế tiếp đã được cập nhật.`,
+        data: null,
+      });
+    }
+
     return res.status(200).json({
       success: true,
-      message: `Đã ban hành lịch công tác thành công từ mẫu "${template.title}".`,
+      message: `Đã ban hành lịch công tác thành công từ mẫu "${template.title}" cho ngày ${new Date(runDate).toLocaleDateString("vi-VN")}.`,
       data: generatedSchedule,
     });
   } catch (error) {
