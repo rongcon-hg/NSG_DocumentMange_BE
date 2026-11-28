@@ -241,6 +241,27 @@ app.get("/test", (req, res) => {
   res.json({message: "Hello World! Backend is online successfully."});
 });
 
+// Middleware xử lý lỗi tập trung (Global Error Handler)
+app.use((err, req, res, next) => {
+  console.error('[Global Error]', err);
+  if (res.headersSent) {
+    return next(err);
+  }
+  return res.status(err.status || 500).json({
+    success: false,
+    message: err.message || 'Lỗi máy chủ nội bộ',
+  });
+});
+
+// Bắt các ngoại lệ không đồng bộ để tránh crash tiến trình Node.js
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[Process] Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[Process] Uncaught Exception thrown:', err);
+});
+
 (async () => {
     try {
       await connection();
@@ -257,9 +278,10 @@ app.get("/test", (req, res) => {
         }
       }, 5000);
 
-      if (process.env.NODE_ENV !== 'production') {
+      // Chạy app.listen khi không phải môi trường serverless Vercel
+      if (!process.env.VERCEL) {
         app.listen(port, () => {
-          console.log(`Ứng dụng mẫu đang nghe trên cổng http://localhost:${port}`);
+          console.log(`Ứng dụng đang nghe trên cổng http://localhost:${port}`);
         });
       }
     } catch (error) {

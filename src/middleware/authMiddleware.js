@@ -1,6 +1,6 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/user.model");
-const VALID_ROLES = ["staff", "admin", "manager", "cappho", "chuyenvien"];
+const VALID_ROLES = ["staff", "admin", "manager", "cappho", "chuyenvien", "captruong"];
 
 const middlewareController = {
   verifyToken: async (req, res, next) => {

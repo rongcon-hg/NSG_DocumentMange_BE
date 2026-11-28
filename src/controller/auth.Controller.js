@@ -12,7 +12,7 @@ const { Readable } = require("stream");
 const { authorize, getOrCreateMonthFolder, sanitizeFileName } = require("./uploadfile.Controller");
 dotenv.config();
 const characters = process.env.CHARACTERS;
-const VALID_ROLES = ["staff", "manager", "cappho", "chuyenvien", "admin"];
+const VALID_ROLES = ["staff", "manager", "cappho", "chuyenvien", "admin", "captruong"];
 
 /**
  * Tự động xác định vai trò (role) chính xác dựa trên Chức vụ (Position)
