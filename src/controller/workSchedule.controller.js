@@ -212,8 +212,12 @@ exports.getWorkSchedules = async (req, res) => {
           filter.status = { $in: ["PENDING", "APPROVED", "REJECTED"] };
         }
       } else {
-        // Đối với BGH: Chỉ hiển thị danh sách đăng ký mà người đăng ký đã chọn Gửi duyệt cho chính BGH đó (targetApprover === currentUser._id)
-        filter.targetApprover = currentUser._id;
+        // Đối với BGH: Hiển thị danh sách đăng ký gửi đích danh cho BGH đó hoặc chưa chỉ định người duyệt cụ thể
+        filter.$or = [
+          { targetApprover: currentUser._id },
+          { targetApprover: null },
+          { targetApprover: { $exists: false } },
+        ];
 
         if (status && status !== "ALL") {
           filter.status = status;
@@ -294,11 +298,12 @@ exports.getWorkSchedules = async (req, res) => {
       .populate("targetApprover", "name email avatar")
       .sort(sortOption);
 
-    // Áp dụng giới hạn tối đa 50 lịch khi không truyền khoảng ngày cụ thể (hoặc mặc định)
+    // Tối ưu giới hạn lịch công tác trả về: mặc định 200 lịch, khi lọc khoảng ngày tối đa 500 lịch
+    // Đảm bảo không bị cắt xén sự kiện công tác trong tháng hoặc kỳ làm việc
     if (!startDate && !endDate) {
-      query.limit(50);
+      query.limit(200);
     } else {
-      query.limit(100);
+      query.limit(500);
     }
 
     const schedules = await query.lean();
@@ -358,7 +363,11 @@ exports.getPendingCount = async (req, res) => {
     } else if (roleInfo.isBGH) {
       count = await WorkSchedule.countDocuments({
         status: "PENDING",
-        targetApprover: currentUser._id,
+        $or: [
+          { targetApprover: currentUser._id },
+          { targetApprover: null },
+          { targetApprover: { $exists: false } },
+        ],
       });
     }
 
@@ -698,6 +707,11 @@ exports.updateWorkSchedule = async (req, res) => {
 
     if (startDate) schedule.startDate = new Date(`${startDate}T00:00:00+07:00`);
     if (endDate) schedule.endDate = new Date(`${endDate}T23:59:59+07:00`);
+
+    // Đảm bảo tính nhất quán: nếu ngày kết thúc nhỏ hơn ngày bắt đầu thì đồng bộ ngày kết thúc bằng ngày bắt đầu
+    if (schedule.endDate && schedule.startDate && schedule.endDate < schedule.startDate) {
+      schedule.endDate = new Date(schedule.startDate.getTime() + 24 * 60 * 60 * 1000 - 1);
+    }
     if (startTime !== undefined) schedule.startTime = startTime.trim();
     if (endTime !== undefined) schedule.endTime = endTime.trim();
     if (content !== undefined) schedule.content = content.trim();

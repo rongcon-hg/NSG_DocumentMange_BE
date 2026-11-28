@@ -31,6 +31,18 @@ const checkIsAuthorized = async (user) => {
   return false;
 };
 
+const parseVnDateStart = (d) => {
+  if (!d) return null;
+  const str = typeof d === "string" ? d.substring(0, 10) : new Date(d).toISOString().substring(0, 10);
+  return new Date(`${str}T00:00:00+07:00`);
+};
+
+const parseVnDateEnd = (d) => {
+  if (!d) return null;
+  const str = typeof d === "string" ? d.substring(0, 10) : new Date(d).toISOString().substring(0, 10);
+  return new Date(`${str}T23:59:59.999+07:00`);
+};
+
 /**
  * [GET] /api/work-schedules/recurring
  * Lấy danh sách các mẫu lịch định kỳ
@@ -140,12 +152,16 @@ exports.createRecurringWorkSchedule = async (req, res) => {
       repeatQuarterMonth: Number(repeatQuarterMonth) || 1,
       repeatQuarters: Array.isArray(repeatQuarters) ? repeatQuarters : [1, 2, 3, 4],
       repeatMonthOfYear: Number(repeatMonthOfYear) || 1,
-      recurringStartDate: recurringStartDate || startDate ? new Date(recurringStartDate || startDate) : null,
-      recurringEndDate: recurringEndDate ? new Date(recurringEndDate) : null,
+      recurringStartDate: parseVnDateStart(recurringStartDate || startDate),
+      recurringEndDate: parseVnDateEnd(recurringEndDate),
       isActive: true,
     });
 
-    const baseD = recurringStartDate ? new Date(recurringStartDate) : startDate ? new Date(startDate) : new Date();
+    const baseD = recurringStartDate
+      ? parseVnDateStart(recurringStartDate)
+      : startDate
+      ? parseVnDateStart(startDate)
+      : new Date();
     newTemplate.nextRunDate = calculateNextRunDate(newTemplate, baseD, true);
 
     await newTemplate.save();
@@ -233,10 +249,10 @@ exports.updateRecurringWorkSchedule = async (req, res) => {
     if (repeatQuarters !== undefined) template.repeatQuarters = repeatQuarters;
     if (repeatMonthOfYear !== undefined) template.repeatMonthOfYear = Number(repeatMonthOfYear);
     if (recurringStartDate !== undefined) {
-      template.recurringStartDate = recurringStartDate ? new Date(recurringStartDate) : null;
+      template.recurringStartDate = parseVnDateStart(recurringStartDate);
     }
     if (recurringEndDate !== undefined) {
-      template.recurringEndDate = recurringEndDate ? new Date(recurringEndDate) : null;
+      template.recurringEndDate = parseVnDateEnd(recurringEndDate);
     }
     if (isActive !== undefined) template.isActive = Boolean(isActive);
 

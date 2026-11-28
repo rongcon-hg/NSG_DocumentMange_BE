@@ -3,10 +3,18 @@ const WorkSchedule = require("../models/workSchedule.model");
 const User = require("../models/user.model");
 
 /**
- * Tính ngày chạy tiếp theo cho Mẫu lịch công tác định kỳ
- * @param {Object} recSchedule
- * @param {Date} baseDate
+ * Định dạng ngày theo định dạng "YYYY-MM-DD" chuẩn múi giờ Việt Nam (Asia/Ho_Chi_Minh)
  */
+const toVnDateString = (date) => {
+  if (!date) return "";
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(date));
+};
+
 /**
  * Tính ngày chạy tiếp theo cho Mẫu lịch công tác định kỳ
  * @param {Object} recSchedule
@@ -19,13 +27,14 @@ const calculateNextRunDate = (recSchedule, baseDate = new Date(), checkCurrentDa
 
   // Nếu có recurringStartDate:
   if (recSchedule.recurringStartDate) {
-    const recStart = new Date(recSchedule.recurringStartDate);
-    recStart.setHours(0, 0, 0, 0);
-    if (recStart > d) {
-      // Nếu ngày bắt đầu ở tương lai, lấy ngày liền trước để ngày bắt đầu có thể được xét
+    const recStartStr = toVnDateString(recSchedule.recurringStartDate);
+    const dStr = toVnDateString(d);
+    if (recStartStr > dStr) {
+      // Nếu ngày bắt đầu ở tương lai, lấy ngày liền trước theo múi giờ VN để ngày bắt đầu có thể được xét
+      const recStart = new Date(`${recStartStr}T00:00:00+07:00`);
       d = new Date(recStart);
       d.setDate(d.getDate() - 1);
-    } else if (checkCurrentDay && recStart.getTime() === d.getTime()) {
+    } else if (checkCurrentDay && recStartStr === dStr) {
       // Nếu ngày bắt đầu chính là hôm nay và được phép kiểm tra hôm nay
       d.setDate(d.getDate() - 1);
     }
@@ -101,9 +110,9 @@ const calculateNextRunDate = (recSchedule, baseDate = new Date(), checkCurrentDa
 
   // Nếu có recurringEndDate, kiểm tra xem nextDate có vượt quá thời hạn lặp không
   if (nextDate && recSchedule.recurringEndDate) {
-    const recEnd = new Date(recSchedule.recurringEndDate);
-    recEnd.setHours(23, 59, 59, 999);
-    if (nextDate.getTime() > recEnd.getTime()) {
+    const nextStr = toVnDateString(nextDate);
+    const recEndStr = toVnDateString(recSchedule.recurringEndDate);
+    if (nextStr > recEndStr) {
       return null; // Đã quá hạn lặp, không sinh lịch tiếp
     }
   }
@@ -126,22 +135,21 @@ const generateSingleScheduleFromRecurring = async (
     const creatorId = triggerUserId || recSchedule.createdBy;
     const duration = Math.max(1, recSchedule.durationDays || 1);
 
-    const startD = new Date(runDate);
-    const startStr = `${startD.getFullYear()}-${String(startD.getMonth() + 1).padStart(2, "0")}-${String(startD.getDate()).padStart(2, "0")}`;
+    const startStr = toVnDateString(runDate);
+    const startD = new Date(`${startStr}T00:00:00+07:00`);
 
-    const endD = new Date(runDate);
+    const endD = new Date(startD);
     endD.setDate(endD.getDate() + (duration - 1));
-    const endStr = `${endD.getFullYear()}-${String(endD.getMonth() + 1).padStart(2, "0")}-${String(endD.getDate()).padStart(2, "0")}`;
+    const endStr = toVnDateString(endD);
 
     const startDate = new Date(`${startStr}T00:00:00+07:00`);
     const endDate = new Date(`${endStr}T23:59:59+07:00`);
 
     // Kiểm tra giới hạn ngày bắt đầu & kết thúc lặp (nếu có cấu hình)
     if (recSchedule.recurringStartDate) {
-      const recStart = new Date(recSchedule.recurringStartDate);
-      recStart.setHours(0, 0, 0, 0);
-      if (startDate < recStart) {
-        console.log(`[RecurringSchedule] Bỏ qua ngày ${startStr} do trước ngày bắt đầu lặp.`);
+      const recStartStr = toVnDateString(recSchedule.recurringStartDate);
+      if (startStr < recStartStr) {
+        console.log(`[RecurringSchedule] Bỏ qua ngày ${startStr} do trước ngày bắt đầu lặp (${recStartStr}).`);
         recSchedule.nextRunDate = calculateNextRunDate(recSchedule, runDate);
         await recSchedule.save();
         return null;
@@ -149,10 +157,9 @@ const generateSingleScheduleFromRecurring = async (
     }
 
     if (recSchedule.recurringEndDate) {
-      const recEnd = new Date(recSchedule.recurringEndDate);
-      recEnd.setHours(23, 59, 59, 999);
-      if (startDate > recEnd) {
-        console.log(`[RecurringSchedule] Bỏ qua ngày ${startStr} do sau ngày kết thúc lặp.`);
+      const recEndStr = toVnDateString(recSchedule.recurringEndDate);
+      if (startStr > recEndStr) {
+        console.log(`[RecurringSchedule] Bỏ qua ngày ${startStr} do sau ngày kết thúc lặp (${recEndStr}).`);
         recSchedule.nextRunDate = null;
         await recSchedule.save();
         return null;
@@ -233,8 +240,15 @@ const executeRecurringWorkSchedulesGeneration = async () => {
     const activeTemplates = await RecurringWorkSchedule.find({
       isActive: true,
       $or: [
-        { nextRunDate: { $lte: horizonDate } },
-        { nextRunDate: null },
+        { nextRunDate: { $lte: horizonDate, $ne: null } },
+        {
+          nextRunDate: null,
+          $or: [
+            { recurringEndDate: null },
+            { recurringEndDate: { $exists: false } },
+            { recurringEndDate: { $gte: now } },
+          ],
+        },
       ],
     });
 
@@ -260,9 +274,9 @@ const executeRecurringWorkSchedulesGeneration = async () => {
         while (currentTargetDate && currentTargetDate <= horizonDate && loopLimit < 20) {
           // Kiểm tra nếu template có ngày kết thúc lặp và currentTargetDate đã vượt qua
           if (template.recurringEndDate) {
-            const recEnd = new Date(template.recurringEndDate);
-            recEnd.setHours(23, 59, 59, 999);
-            if (new Date(currentTargetDate).getTime() > recEnd.getTime()) {
+            const targetStr = toVnDateString(currentTargetDate);
+            const recEndStr = toVnDateString(template.recurringEndDate);
+            if (targetStr > recEndStr) {
               template.nextRunDate = null;
               await template.save();
               break;
